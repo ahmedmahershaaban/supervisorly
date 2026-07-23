@@ -379,3 +379,12 @@ safety guards are now enforced at **build and render** time.
 **Ran:** full suite → **116 passed** (exit 0), incl. new tests for redaction, firm-requires-official-
 confidence, scheme-guarded source links, and parsed-date sort; stale `WATCH_CONF`/lexicographic-sort
 assertions updated.
+
+## round S — refine: opt-out on the resume/re-export path (finding 1) (commit pending)
+
+**Fixed (ethics, high — finding 1):** `pipeline.reexport` now takes `optout_path` and applies
+`load_optout` + `filter_targets` before building the export, so a person who opts out **after** their
+claims were stored is dropped from the re-exported dashboard/JSON — opt-out was previously enforced
+only on `run_offline`'s fetch path (D-023/D-053). **Ran:** `tests/test_optout.py::
+test_reexport_resume_path_also_honours_optout` (Ada opts out after round 1 → absent from re-export,
+name nowhere in the JSON, `opted_out == 1`) + full suite → **117 passed** (exit 0).

@@ -248,15 +248,21 @@ def run_offline(plan: dict, targets: list[dict], transport: Transport, snap_root
     return result
 
 
-def reexport(db_path, targets: list[dict]) -> dict:
+def reexport(db_path, targets: list[dict], *, optout_path=None) -> dict:
     """Rebuild the export + dashboard from persisted claims — **without any fetching** (D-029).
 
     This is the resume path: after the human rung fills gaps (``ingest.ingest_md``), the run
     re-exports from the database and snapshots already on disk. It constructs no transport and
     no fetcher, so nothing can be re-fetched; a field still ``blocked`` keeps the run
     ``finalized_with_open_gaps``, otherwise it becomes ``finalized`` (D-049).
+
+    Opt-out is enforced here too (D-023): a person suppressed *after* their claims were stored
+    must not survive into the re-exported output, so the suppression list is applied before the
+    export is built — not only on the initial fetch path.
     """
     conn = open_db(db_path)
+    optout = optout_mod.load_optout(optout_path)
+    targets, opted_out = optout_mod.filter_targets(targets, optout)
     gaps = sum(
         1 for t in targets
         if any(c.get("state") == "blocked"
@@ -269,8 +275,11 @@ def reexport(db_path, targets: list[dict]) -> dict:
     run_id = latest["run_id"] if latest else "reexport"
     if latest:
         runs.set_run_status(conn, run_id, status)
-    return _build_result(conn, run_id, status, targets,
-                         stats={"extractions": 0, "cache_hits": 0, "reexport": True}, gaps=gaps)
+    return _build_result(
+        conn, run_id, status, targets,
+        stats={"extractions": 0, "cache_hits": 0, "opted_out": opted_out, "reexport": True},
+        gaps=gaps,
+    )
 
 
 def _build_result(conn, run_id, status, targets, *, stats, gaps) -> dict:

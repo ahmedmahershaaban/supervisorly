@@ -38,3 +38,25 @@ def test_without_optout_ada_is_present(tmp_path):
     tp, targets, plan = demo.demo_fixture()
     result = pipeline.run_offline(plan, targets, tp, tmp_path / "snaps")
     assert "ada" in {p["id"] for p in result["export"]["professors"]}
+
+
+def test_reexport_resume_path_also_honours_optout(tmp_path):
+    """Audit finding 1: someone whose claims were already stored, then opts out, must not
+    survive into a re-exported dashboard/JSON — opt-out is enforced on the resume path too."""
+    tp, targets, plan = demo.demo_fixture()
+    db = tmp_path / "run.sqlite"
+    # first scan stores Ada's claims (no opt-out yet)
+    r1 = pipeline.run_offline(plan, targets, tp, tmp_path / "snaps", db_path=db)
+    assert "ada" in {p["id"] for p in r1["export"]["professors"]}
+
+    # Ada later opts out; the resume/re-export must drop her
+    f = tmp_path / "optout.txt"
+    f.write_text("https://ca-uni.example/people/ada\n", encoding="utf-8")
+    r2 = pipeline.reexport(db, targets, optout_path=f)
+    ids = {p["id"] for p in r2["export"]["professors"]}
+    assert "ada" not in ids
+    assert "ben" in ids
+    assert r2["stats"]["opted_out"] == 1
+    # and her name must not linger anywhere in the serialised output
+    import json
+    assert "Ada Placeholder" not in json.dumps(r2["export"])
