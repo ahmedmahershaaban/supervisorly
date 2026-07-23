@@ -458,12 +458,70 @@ hr.soft{border:none;border-top:1px dashed var(--line-2);margin:26px 0}
             <br>· an <b>OpenAlex</b> key (open research data)</li>
           <li>Only reads <b>public</b> pages &amp; open databases; obeys each site's <code>robots.txt</code>.</li>
           <li>The tool <b>fails loudly</b> with the exact fix if a key is missing — it never runs half-broken.</li>
+          <li><a href="#live">↓ Full live-setup steps below</a></li>
         </ul>
       </div>
     </div>
-    <div class="box"><div class="lbl">Good to know</div>
-      <p style="margin:0">The live discovery pieces are still being wired up in this version — the offline
-        demo is the fully-working path today. Both share the exact same engine, so what you learn from the demo applies directly.</p></div>
+  </section>
+
+  <section id="live">
+    <h2>Set up a live scan (real professors)</h2>
+
+    <div class="box"><div class="lbl">Honest status — read this first</div>
+      <p style="margin:0 0 .5em">Today the <b>fully-working path is the offline demo</b>. The live scanner —
+        the part that goes out and reads real professor pages and research databases — is the
+        <b>next piece being built</b>. So you can complete the setup below and it's exactly what the live
+        run will use, but the current version's live command will tell you the discovery step isn't
+        wired up yet rather than fetching real people. Nothing here is wasted — the credentials, the
+        honesty rules, and the dashboard are all real and shared with the demo.</p>
+      <p style="margin:0">In short: <b>do the demo now to learn the tool; keep this page for when live lands.</b></p></div>
+
+    <div class="step-card">
+      <div class="head"><span class="badge-n">A</span><h3>Get two free keys (about a minute each)</h3></div>
+      <p>These let the tool use the polite, faster lanes of two open services. Both are <b>free</b> — no payment, no credit card.</p>
+      <div class="fair">
+        <div class="f"><span class="tick">1</span><span><b>ROR client id</b> — a registry of universities &amp; institutes. Register at <a href="https://ror.readme.io" target="_blank" rel="noopener">ror.readme.io</a>.</span></div>
+        <div class="f"><span class="tick">2</span><span><b>OpenAlex key</b> (or “polite-pool” email) — open research data. Get one at <a href="https://openalex.org" target="_blank" rel="noopener">openalex.org</a>. Without it you're capped at roughly <b>2 scans a day</b> instead of ~20.</span></div>
+      </div>
+    </div>
+
+    <div class="step-card">
+      <div class="head"><span class="badge-n">B</span><h3>Tell the tool your keys</h3></div>
+      <p>You set two <b>environment variables</b> — named boxes your terminal remembers. Paste the block for
+        your system (put your real keys between the quotes).</p>
+      <div class="win"><div class="bar"><i></i><i></i><i></i><span class="name">PowerShell — Windows</span></div>
+        <div class="term"><span class="c"># this terminal session only:</span><br>
+        <span class="p">$</span> $env:<b>SUPERVISORLY_ROR_CLIENT_ID</b> = "your-ror-id"<br>
+        <span class="p">$</span> $env:<b>SUPERVISORLY_OPENALEX_KEY</b>  = "your-openalex-key"<br><br>
+        <span class="c"># to make them permanent, use setx (then reopen the terminal):</span><br>
+        <span class="p">$</span> setx SUPERVISORLY_ROR_CLIENT_ID "your-ror-id"<br>
+        <span class="p">$</span> setx SUPERVISORLY_OPENALEX_KEY "your-openalex-key"</div></div>
+      <div class="win"><div class="bar"><i></i><i></i><i></i><span class="name">Terminal — Mac / Linux</span></div>
+        <div class="term"><span class="p">$</span> export <b>SUPERVISORLY_ROR_CLIENT_ID</b>="your-ror-id"<br>
+        <span class="p">$</span> export <b>SUPERVISORLY_OPENALEX_KEY</b>="your-openalex-key"<br>
+        <span class="c"># add those two lines to ~/.zshrc or ~/.bashrc to keep them</span></div></div>
+      <div class="box tip"><div class="lbl">If you forget a key</div>
+        <p style="margin:0">Good news — you can't run it half-broken by accident. The tool <b>stops and tells you
+          exactly which key is missing and where to get it</b>, rather than quietly running on a slow, limited lane.</p></div>
+    </div>
+
+    <div class="step-card">
+      <div class="head"><span class="badge-n">C</span><h3>Run a live scan</h3></div>
+      <p>Same command as the demo, just <b>without</b> <code>--demo</code>. (In this version it will report
+        that live discovery is still being wired up — that's expected.)</p>
+      <div class="win"><div class="bar"><i></i><i></i><i></i><span class="name">terminal</span></div>
+        <div class="term"><span class="c"># a real scan writes to its own file</span><br>
+        <span class="p">$</span> python -m supervisorly scan --out output/live-dashboard.html<br><br>
+        <span class="c"># exclude specific people (optional) — one identifier per line in optout.txt</span><br>
+        <span class="p">$</span> python -m supervisorly scan --out output/live-dashboard.html --optout optout.txt</div></div>
+      <p style="margin-top:12px">When it's live, it reads only <b>public</b> pages and open databases, obeys every
+        site's <code>robots.txt</code>, and passes any login-walled page to you (the human rung, below).</p>
+    </div>
+
+    <div class="box"><div class="lbl">Running it automatically, later</div>
+      <p style="margin:0">Supervisorly is built for <b>repeat runs</b>. A monthly re-scan reuses everything that
+        hasn't changed (a “warm cache”), so it's fast and cheap and only looks at what's new. Once live scanning
+        lands, you can schedule that with <b>Windows Task Scheduler</b> or a <b>cron job</b> to keep your shortlist fresh on its own.</p></div>
   </section>
 
   <section id="rung">
