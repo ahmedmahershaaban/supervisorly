@@ -201,6 +201,49 @@ _EXTRACTORS = {
 }
 
 
+def _record_evidence(conn, pid, field, found, *, src_id, snapshot_hash, html):
+    """Record one field's deterministic result with correct precedence.
+
+    A fresh **value** supersedes prior heads (freshest evidence wins). An **absence**
+    (``searched_absent``) never clobbers a live value we already hold — e.g. a human-rung
+    answer — so a re-scan that finds nothing does not erase real data (D-046/D-049); otherwise
+    it is recorded and supersedes prior *non-value* heads so absences don't pile up.
+    """
+    if found:
+        value, quote, confidence = found
+        rec = claims.record_claim(
+            conn, entity_kind="person", entity_id=pid, field=field,
+            value=value, quote=quote, source_id=src_id, snapshot_hash=snapshot_hash,
+            snapshot_html=html, observed_at=utcnow(), extractor_agent="deterministic",
+            confidence=confidence,
+        )
+        if rec.ok:
+            claims.supersede_prior(conn, "person", pid, field, rec.claim_id)
+        return rec
+    if claims.live_value(conn, "person", pid, field):
+        return None                       # keep the real value; don't downgrade to absent
+    rec = claims.record_claim(
+        conn, entity_kind="person", entity_id=pid, field=field,
+        state="searched_absent", source_id=src_id, extractor_agent="deterministic",
+    )
+    if rec.ok:
+        claims.supersede_prior(conn, "person", pid, field, rec.claim_id)
+    return rec
+
+
+def _record_blocked(conn, pid, field):
+    """Record a blocked field — but never downgrade an already-reached field, and dedupe blocked."""
+    if claims.live_reached(conn, "person", pid, field):
+        return None                       # already reached (value/absent); a failed re-fetch can't erase it
+    rec = claims.record_claim(
+        conn, entity_kind="person", entity_id=pid, field=field,
+        state="blocked", extractor_agent="deterministic",
+    )
+    if rec.ok:
+        claims.supersede_prior(conn, "person", pid, field, rec.claim_id)
+    return rec
+
+
 def run_offline(plan: dict, targets: list[dict], transport: Transport, snap_root,
                 *, db_path=None, optout_path=None, resume=False) -> dict:
     """Run a deterministic scan over ``targets`` (each {id, name, url}) using cassettes.
@@ -223,7 +266,6 @@ def run_offline(plan: dict, targets: list[dict], transport: Transport, snap_root
     runs.set_run_status(conn, run_id, "deep_diving")
 
     stats = {"extractions": 0, "cache_hits": 0, "opted_out": opted_out, "resumed_skipped": 0}
-    gaps = 0
     for t in targets:
         pid = t["id"]
         # Resume: a target already deep-dived in a prior run is not re-fetched — its claims
@@ -249,40 +291,29 @@ def run_offline(plan: dict, targets: list[dict], transport: Transport, snap_root
             )
             claim_ids: list[str] = []
             for field, extractor in _EXTRACTORS.items():
-                found = extractor(html)
-                if found:
-                    value, quote, confidence = found
-                    rec = claims.record_claim(
-                        conn, entity_kind="person", entity_id=pid, field=field,
-                        value=value, quote=quote, source_id=src_id,
-                        snapshot_hash=res.snapshot_hash, snapshot_html=html,
-                        observed_at=utcnow(), extractor_agent="deterministic",
-                        confidence=confidence,
-                    )
-                else:
-                    rec = claims.record_claim(
-                        conn, entity_kind="person", entity_id=pid, field=field,
-                        state="searched_absent", source_id=src_id,
-                        extractor_agent="deterministic",
-                    )
-                if rec.ok:
+                rec = _record_evidence(conn, pid, field, extractor(html), src_id=src_id,
+                                       snapshot_hash=res.snapshot_hash, html=html)
+                if rec and rec.ok:
                     claim_ids.append(rec.claim_id)
             xcache.record(conn, "person", pid, chash, PROMPT_VERSION, MODEL_ID,
                           CACHE_SCHEMA_VERSION, claim_ids)
             stats["extractions"] += 1
             runs.set_task_status(conn, task, "done")
         else:
-            # a failed/blocked source is an honest 'blocked' state on every field —
-            # we reached nothing, which is not the same as 'never attempted'.
+            # a failed/blocked source is an honest 'blocked' state on every field — we reached
+            # nothing (not 'never attempted'), but a failed re-fetch never erases evidence we
+            # already hold (e.g. a human-rung answer).
             for field in _EXTRACTORS:
-                claims.record_claim(
-                    conn, entity_kind="person", entity_id=pid, field=field,
-                    state="blocked", extractor_agent="deterministic",
-                )
+                _record_blocked(conn, pid, field)
             runs.set_task_status(conn, task, "blocked", last_error=res.error)
-            gaps += 1
 
-    # An unreached (blocked) target is an open gap the human rung can later fill (D-049).
+    # An open gap is a field still 'blocked' after this run — derived from claim state so the
+    # run status can never contradict the exported cells (D-046/D-049). Matches reexport().
+    gaps = sum(
+        1 for t in targets
+        if any(c.get("state") == "blocked"
+               for c in claims.claims_for(conn, "person", t["id"]))
+    )
     status = "finalized_with_open_gaps" if gaps else "finalized"
     runs.set_run_status(conn, run_id, status)
 

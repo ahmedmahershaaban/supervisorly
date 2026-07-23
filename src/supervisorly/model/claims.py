@@ -132,6 +132,32 @@ def supersede_prior(conn, entity_kind: str, entity_id: str, field: str,
     return cur.rowcount
 
 
+def live_value(conn, entity_kind: str, entity_id: str, field: str) -> bool:
+    """True if a non-superseded ``value`` claim already exists for (entity, field).
+
+    Guards against a later no-evidence pass (``searched_absent``/``blocked``) clobbering a real
+    value we already hold — e.g. a monthly re-scan must not erase a human-rung answer (D-046/049).
+    """
+    row = conn.execute(
+        "SELECT 1 FROM claim WHERE entity_kind=? AND entity_id=? AND field=? "
+        "AND state='value' AND superseded_by IS NULL LIMIT 1",
+        (entity_kind, entity_id, field),
+    ).fetchone()
+    return row is not None
+
+
+def live_reached(conn, entity_kind: str, entity_id: str, field: str) -> bool:
+    """True if a live claim shows the field was actually reached (``value`` or
+    ``searched_absent``). A later failed fetch (``blocked``) must not downgrade a reached
+    field — we already know more than "couldn't reach it" (D-046)."""
+    row = conn.execute(
+        "SELECT 1 FROM claim WHERE entity_kind=? AND entity_id=? AND field=? "
+        "AND state IN ('value','searched_absent') AND superseded_by IS NULL LIMIT 1",
+        (entity_kind, entity_id, field),
+    ).fetchone()
+    return row is not None
+
+
 def claims_for(conn, entity_kind: str, entity_id: str) -> list[dict]:
     import json
     rows = conn.execute(

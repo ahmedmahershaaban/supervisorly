@@ -100,6 +100,72 @@ def test_md_return_fills_gaps_and_reexports_without_refetching(tmp_path):
     assert ada["fields"]["recruiting_signal"]["state"] == "value"
 
 
+def _live_heads(db, pid, field):
+    conn = open_db(db)
+    rows = conn.execute(
+        "SELECT state FROM claim WHERE entity_kind='person' AND entity_id=? AND field=? "
+        "AND superseded_by IS NULL", (pid, field)).fetchall()
+    conn.close()
+    return [r["state"] for r in rows]
+
+
+def test_monthly_rescan_does_not_clobber_a_human_filled_value(tmp_path):
+    """Audit-2 finding 3: after the human rung fills a walled professor, a later monthly
+    re-scan (page still unreachable) must NOT revert the sourced value back to 'blocked'."""
+    tp, targets, plan = demo.demo_fixture()          # eve is robots-blocked
+    db = tmp_path / "run.sqlite"
+    snaps = tmp_path / "snaps"
+    pipeline.run_offline(plan, targets, tp, snaps, db_path=db)
+
+    conn = open_db(db)
+    ingest.ingest_md(conn, EVE_MD)                    # human fills eve.recruiting_signal = value
+    conn.close()
+
+    # a monthly re-scan: eve is still walled and fetch fails again
+    r = pipeline.run_offline(plan, targets, tp, snaps, db_path=db)
+    env = _eve(r["export"])["fields"]["recruiting_signal"]
+    assert env["state"] == "value"                   # not reverted to blocked
+    assert "HCI" in env["value"]
+    # exactly one live head for the field (no duplicate blocked/value coexisting)
+    assert _live_heads(db, "eve", "recruiting_signal") == ["value"]
+
+
+def test_retried_blocked_target_supersedes_its_blocked_claims(tmp_path):
+    """Audit-2 finding 2: a target blocked in run 1 then reachable and re-fetched on resume must
+    end with a single live 'value' head per field — not a stale 'blocked' head coexisting, which
+    would make a later reexport contradict itself (report an open gap on a filled target)."""
+    robots = "https://u.edu/robots.txt"
+    page = "https://u.edu/people/p1"
+    tp = CountingTransport(CassetteTransport())
+    tp.record(robots, 200, "User-agent: *\nAllow: /\n")
+    # run 1: the page is unreachable (404) → blocked
+    tp.record(page, 404, "nope")
+    db = tmp_path / "run.sqlite"
+    snaps = tmp_path / "snaps"
+    plan = {"intent_kind": "pre_phd", "resolved_topic_ids": ["T"]}
+    tgt = [{"id": "p1", "name": "P1", "url": page}]
+
+    r1 = pipeline.run_offline(plan, tgt, tp, snaps, db_path=db)
+    assert r1["export"]["run"]["status"] == "finalized_with_open_gaps"
+    assert _eve_state(r1, "p1", "recruiting_signal") == "blocked"
+
+    # the page comes back; resume re-fetches the still-incomplete target and it now succeeds
+    tp.record(page, 200,
+              "<html><body><main><p>I am recruiting PhD students for 2027.</p></main></body></html>")
+    r2 = pipeline.run_offline(plan, tgt, tp, snaps, db_path=db, resume=True)
+
+    assert _eve_state(r2, "p1", "recruiting_signal") == "value"
+    assert _live_heads(db, "p1", "recruiting_signal") == ["value"]   # blocked head retired
+    # and a subsequent reexport agrees — no phantom open gap on the now-filled target
+    r3 = pipeline.reexport(db, tgt)
+    assert r3["export"]["run"]["status"] == "finalized"
+
+
+def _eve_state(result, pid, field):
+    p = next(p for p in result["export"]["professors"] if p["id"] == pid)
+    return p["fields"][field]["state"]
+
+
 def _page(who):
     return (f"<html><body><main><p>{who} is recruiting PhD students for 2027.</p>"
             "</main></body></html>")

@@ -433,3 +433,21 @@ verified findings** — mostly *adjacent* issues the first fixes exposed. Fixing
   1 Dec 2026"* stay **firm**, while *"deadline has passed, but term begins 1 Sep"* stays **watch**.
 **Ran:** `test_deadline_parse.py` (+8 new: open-only→none, open+close→close, date-before-cue,
 `but`/`start`/`;` stay firm) + full suite → **125 passed** (exit 0).
+
+## round W — refine²: claim supersession + no-clobber precedence (findings 2, 3) (commit pending)
+
+**Fixed in `pipeline.py` + `model/claims.py`:**
+- **(finding 2, high)** the deterministic recording never superseded prior heads, so a
+  previously-blocked target re-fetched on resume ended with **two live heads** (blocked + value)
+  → a later `reexport` reported a phantom open gap on a filled target. `_record_evidence` now
+  supersedes prior heads when it writes a value.
+- **(finding 3, high)** a monthly re-scan re-recorded `blocked` for a still-walled professor and,
+  because a blocked claim has no `observed_at`, `_best_claim` picked it over an earlier human value
+  → the sourced human answer silently reverted to `blocked`. New precedence: an **absence never
+  downgrades a reached field** — `_record_blocked` skips when `claims.live_reached` (value or
+  searched_absent) is true; `_record_evidence` skips a `searched_absent` when a live value exists.
+- Run **gaps are now derived from claim state** (like `reexport`), so the run status can never
+  contradict the exported cells (D-046/D-049).
+**Ran:** `test_monthly_rescan_does_not_clobber_a_human_filled_value` (value survives; one live head)
+and `test_retried_blocked_target_supersedes_its_blocked_claims` (blocked→value on resume, single
+head, reexport agrees `finalized`) + full suite → **127 passed** (exit 0).
