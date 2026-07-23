@@ -230,3 +230,21 @@ via a new `discover` package + a run-level coverage note.
 **Ran:** pytest → **80 passed** (exit 0), incl. three-way classification, *login-wall routes to
 the human rung and scrapes nothing* (asserts no person tasks created), *not-found is distinct
 coverage with no human task*, and the zero-result coverage-gap note.
+
+## round M1 — polite backoff on 429/5xx (commit pending)
+
+Edge-case row *rate-limit 429 / 5xx → exponential backoff + jitter; never retries harder*.
+
+**Built:** `fetch/backoff.py` — `RetryPolicy` with exponential (`base*2**attempt`), **capped**
+delays plus injectable jitter; `RETRY_STATUSES = {429,500,502,503,504}`. `fetch/fetcher.py`
+now retries those (and transient transport errors) up to `max_retries`, waiting the policy
+delay each time, then **gives up** and returns a marked result — it never escalates to a login
+or a faster loop (D-039/044). `FetchResult.attempts` records how many hits it took. The offline
+pipeline injects a no-op sleep (cassettes never rate-limit). Sleep + jitter are injected, so the
+tests are deterministic.
+**Fixed (self-test caught):** the jitter test asserted on `slept` **without calling `fetch()`** —
+it was green only by accident of an empty list; added the missing call so it actually exercises
+the retry (now asserts `[1.5]`).
+**Ran:** pytest → **85 passed** (exit 0): retries-then-succeeds (`[1.0, 2.0]`), gives-up-after-max
+(exactly 3 waits, non-decreasing, ≤ cap, attempts=4), delays-capped (`[10,15,15]`), jitter bounded,
+and *404 is not retried*.

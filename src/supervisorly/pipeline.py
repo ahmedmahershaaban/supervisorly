@@ -128,7 +128,8 @@ def run_offline(plan: dict, targets: list[dict], transport: Transport, snap_root
     (used by the warm-cache path)."""
     conn = open_db(db_path) if db_path is not None else open_db()
     snaps = SnapshotStore(snap_root)
-    fetcher = Fetcher(transport, snaps)
+    # Offline cassettes never rate-limit us, so any retry needn't actually sleep.
+    fetcher = Fetcher(transport, snaps, sleep=lambda _s: None)
 
     run_id = runs.create_run(conn)
     runs.set_run_status(conn, run_id, "deep_diving")
