@@ -524,6 +524,25 @@ now captures the CLI output and asserts it is `cp1252`-encodable / ASCII).
 `python -m supervisorly scan --demo` → exit 0, writes `dashboard.html` + `.json`, prints an
 ASCII line. Clean-room **green**.
 
+## round BB — refine⁵: gate deadlines on application context (post-report verifier finding)
+
+A final closing verifier (run *after* the report was drafted) found the round-Z fix was
+**incomplete**: I anchored the `close`/`due` cues to an application subject but left `due by`,
+`closing date`, and `submit(ted) by` unanchored, so *"Rent is due by 1 December 2026"*, *"Tax
+returns must be submitted by 1 December 2026"*, and *"The store's closing date is 1 December
+2026"* still fabricated firm deadlines. (The export/dashboard/claims honesty sweep came back
+clean.)
+
+**Fixed (correctness/honesty, high):** split the guard into a **verb cue** (for locating the
+date's clause) plus a required **`_APP_CONTEXT`** word (`applications?/applicants?/apply/
+submissions?/admissions?`) anywhere in the sentence — a deadline-shaped sentence with no
+application context is now an honest miss, never a firm date (D-010/D-061). This design also
+*correctly* binds the combined *"Applications open 1 Oct … and close on 1 Dec"* to the **close**
+date (the verb owns its clause) — the round-2 intent, now achieved safely.
+**Ran:** `test_deadline_parse.py` (+ rent/tax/store/payment → none; submitted-by/submission-
+deadline/apply-by with context → firm; combined open+close → close date) + full suite →
+**136 passed** (exit 0).
+
 ## COMPLETION — goal met
 
 All phases (A–J) met their DoD; 18/18 edge-case rows have passing tests; the offline self-run is

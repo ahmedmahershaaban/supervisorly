@@ -76,13 +76,13 @@ def test_opening_only_sentence_yields_no_deadline():
     assert _deadline("Applications open on 1 October 2026.") is None
 
 
-def test_bare_close_without_application_subject_is_an_honest_miss():
-    # audit round 4: "…and close on <date>" without an application subject is ambiguous
-    # ("office hours close on…", "the library closes on…"). We would rather MISS it (honest
-    # searched_absent) than bind a possibly-wrong date and call it firm (never guess, D-010/061).
-    assert _deadline(
+def test_open_and_close_binds_the_close_date_in_application_context():
+    # with an application subject present, the verb "close" owns its clause → the close date
+    # (not the earlier opening date) is the firm deadline.
+    iso, _, conf = _deadline(
         "Applications open on 1 October 2026 and close on 1 December 2026."
-    ) is None
+    )
+    assert iso == "2026-12-01" and conf == "quoted_official"
 
 
 def test_deadline_stated_before_the_cue_is_still_found():
@@ -131,14 +131,32 @@ def test_application_specific_deadline_phrasings_still_work():
         assert iso == "2026-12-01" and conf == "quoted_official", sentence
 
 
-def test_close_on_in_a_non_application_sentence_is_not_a_deadline():
-    # audit round 4: these fabricated firm deadlines before the cue was constrained
+def test_deadline_verbs_without_application_context_are_not_deadlines():
+    # audit round 5: a deadline-shaped VERB (close/due by/closing date/submitted by) in a
+    # sentence with no application context must never become a firm application deadline —
+    # these all fabricated firm deadlines before the _APP_CONTEXT gate (D-010/D-061).
     for sentence in (
         "Office hours close on Fridays; the term started 1 September 2024.",
         "The library closes on 1 December 2026 for winter break.",
         "The gym registration closes on 1 December 2026.",
+        "Rent is due by 1 December 2026.",
+        "Payment is due by 1 December 2026.",
+        "The store's closing date is 1 December 2026.",
+        "Tax returns must be submitted by 1 December 2026.",
     ):
         assert _deadline(sentence) is None, sentence
+
+
+def test_deadline_verbs_with_application_context_extract_firmly():
+    # the legitimate counterparts of the above — an application/submission subject is present
+    for sentence in (
+        "Applications must be submitted by 1 December 2026.",
+        "The submission deadline is 1 December 2026.",
+        "Apply by 1 December 2026.",
+        "The closing date for applications is 1 December 2026.",
+    ):
+        iso, _, conf = _deadline(sentence)
+        assert iso == "2026-12-01" and conf == "quoted_official", sentence
 
 
 # ── audit round 3: a non-firm phrase in a dateless OTHER clause must not demote ─

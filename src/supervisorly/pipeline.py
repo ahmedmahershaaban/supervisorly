@@ -47,14 +47,20 @@ _RECRUIT = re.compile(
 )
 
 # ── deadline signal (D-061) ───────────────────────────────────────────────────
-# Cues are deliberately kept to **application/submission** contexts. Broader "close" cues
-# ("applications open" round 2; bare "close(s)" round 3; "close(s) on" / "registration closes"
-# round 4) all fabricated firm deadlines from unrelated sentences ("office hours close on
-# Fridays", "the library closes on 1 Dec", "gym registration closes on 1 Dec"). A miss here is
-# an honest `searched_absent` the LLM analyst can resolve later; a fabricated firm date is not
-# (D-010/D-061 — never guess). So "…and close on 1 Dec" without an application subject is missed.
-_DEADLINE_CUE = (r"deadline|applications?\s+(?:close|due|are\s+due)|submissions?\s+(?:close|due)|"
-                 r"apply\s+by|closing\s+date|submit(?:ted)?\s+by|due\s+by")
+# Two-part guard so a date is only read as a deadline in a genuine application context (and
+# never fabricated from "rent is due by…", "office hours close on…", "the store's closing date
+# is…", "tax returns must be submitted by…"):
+#   1. a deadline *verb* cue below locates the clause a date binds to (for positioning), and
+#   2. ``_APP_CONTEXT`` must ALSO appear in the sentence for the extraction to count.
+# A deadline-shaped sentence with no application context is an honest miss (searched_absent),
+# not a fabricated firm date (D-010/D-061 — never guess). Keeping the verb cue separate from
+# the subject check is what lets "Applications open 1 Oct … and close on 1 Dec" bind the close
+# date (verb "close" owns the clause) while "office hours close on Fridays" is dropped (no
+# application subject).
+_DEADLINE_CUE = (r"deadline|apply\s+by|closes?\b|closing\s+date|due\s+by|"
+                 r"(?:are|is)\s+due|(?:applications?|submissions?)\s+due|submit(?:ted)?\s+by")
+_APP_CONTEXT = re.compile(
+    r"\b(?:applications?|applicants?|apply|submissions?|admissions?)\b", re.IGNORECASE)
 # a sentence carrying a deadline cue (a date is required separately, below)
 _DEADLINE = re.compile(rf"[^.!?]*\b(?:{_DEADLINE_CUE})\b[^.!?]*[.!?]", re.IGNORECASE)
 # where the cue sits, so the date can be bound to *its* clause (not blindly the first date)
@@ -199,6 +205,10 @@ def extract_deadline(html: str):
     text = main_text(html)
     for m in _DEADLINE.finditer(text):
         sentence = m.group(0).strip()
+        # a deadline-shaped sentence only counts in an application context (rent/tax/store
+        # "due by"/"closing date" must never become a firm application deadline).
+        if not _APP_CONTEXT.search(sentence):
+            continue
         dates = _dates_in(sentence)
         if not dates:
             continue
