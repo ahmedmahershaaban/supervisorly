@@ -82,6 +82,16 @@ def get_run(conn: sqlite3.Connection, run_id: str) -> dict[str, Any] | None:
     return dict(row) if row else None
 
 
+def get_counts(conn: sqlite3.Connection, run_id: str) -> dict[str, Any]:
+    """The run's parsed ``counts_json`` (empty dict if the run is unknown or the blob is unset).
+
+    Persists run-level coverage metadata across the resume boundary — e.g. discovery
+    ``truncated`` markers must survive into a human-rung re-export so its coverage line can still
+    say PARTIAL instead of implicitly claiming completeness (D-037)."""
+    row = conn.execute("SELECT counts_json FROM run WHERE run_id=?", (run_id,)).fetchone()
+    return json.loads(row["counts_json"]) if row else {}
+
+
 # ── Task ──────────────────────────────────────────────────────────────────────
 def add_task(
     conn: sqlite3.Connection,

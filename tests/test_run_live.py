@@ -15,7 +15,7 @@ from supervisorly.fetch.transport import CassetteTransport
 EMAIL = "me@uni.edu"
 ALLOW = "User-agent: *\nAllow: /\n"
 
-ROR_CA = json.dumps({"items": [
+ROR_CA = json.dumps({"number_of_results": 2, "items": [   # real ROR always returns the total
     {"id": "https://ror.org/00abc11", "name": "Maple University",
      "country": {"country_code": "CA"}, "links": ["https://maple.example/"], "types": ["Education"]},
     {"id": "https://ror.org/00abc22", "name": "Northern Institute",
@@ -112,3 +112,35 @@ def test_live_scan_respects_optout_on_a_discovered_professor(tmp_path):
     ids = {p["id"] for p in r["export"]["professors"]}
     assert "A200" not in ids and "A202" in ids
     assert r["stats"]["opted_out"] == 1
+
+
+def _trunc_transport():
+    """A discovery whose OpenAlex author enumeration is cut short by a mid-pagination 500 → PARTIAL."""
+    def _authors(n):
+        return json.dumps({"results": [
+            {"id": f"https://openalex.org/A{i}", "display_name": f"P{i}", "works_count": 1,
+             "cited_by_count": 1, "topics": [{"id": "https://openalex.org/T10001"}],
+             "last_known_institutions": [], "homepage_url": None} for i in range(n)]})
+    tp = CassetteTransport()
+    tp.record(ror.country_url("CA"), 200, json.dumps({"number_of_results": 1, "items": [
+        {"id": "https://ror.org/00abc11", "name": "Maple University",
+         "country": {"country_code": "CA"}, "links": ["https://maple.example/"],
+         "types": ["Education"]}]}))
+    tp.record(openalex.institutions_url("https://ror.org/00abc11", EMAIL), 200, _oa_inst("I100"))
+    tp.record(openalex.authors_url("I100", EMAIL, page=1), 200, _authors(25))   # full page → page 2
+    tp.record(openalex.authors_url("I100", EMAIL, page=2), 500, "boom")          # fails mid-pagination
+    return tp
+
+
+def test_reexport_preserves_partial_coverage_after_the_human_rung(tmp_path):
+    # audit-3 finding 7: a run whose DISCOVERY was truncated must NOT silently claim completeness on
+    # the human-rung re-export path — the PARTIAL coverage disclosure survives the resume boundary.
+    db = tmp_path / "run.sqlite"
+    r1 = pipeline.run_live(PLAN, _trunc_transport(), tmp_path / "snaps", email=EMAIL,
+                           db_path=str(db), **_FAST)
+    assert "PARTIAL" in r1["export"]["run"]["coverage"]          # the live run discloses it
+    assert r1["stats"]["truncated"] == ["authors@I100"]
+    targets = [{"id": p["id"], "name": p.get("name")} for p in r1["export"]["professors"]]
+    r2 = pipeline.reexport(str(db), targets)                     # resume: re-export from the DB only
+    assert "PARTIAL" in r2["export"]["run"]["coverage"]          # still discloses it (was silently lost)
+    assert "authors@I100" in r2["export"]["run"]["coverage"]

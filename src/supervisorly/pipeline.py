@@ -558,6 +558,10 @@ def run_live(plan: dict, transport: Transport, snap_root, *, email: str,
     stats = {"extractions": 0, "cache_hits": 0, "opted_out": opted_out, "resumed_skipped": 0,
              "discovered": len(disc["targets"]), "institutions": len(disc["institutions"]),
              "truncated": disc.get("truncated", [])}
+    # Persist the discovery truncation markers on the run so a later human-rung re-export can still
+    # emit the PARTIAL coverage line instead of implicitly claiming completeness (D-037, audit-3 #7).
+    if stats["truncated"]:
+        runs.update_counts(conn, run_id, truncated=stats["truncated"])
     gaps = _process_targets(conn, run_id, targets, fetcher, snaps, stats=stats, resume=resume)
     status = "finalized_with_open_gaps" if gaps else "finalized"
     runs.set_run_status(conn, run_id, status)
@@ -589,11 +593,15 @@ def reexport(db_path, targets: list[dict], *, optout_path=None) -> dict:
         "SELECT run_id FROM run ORDER BY started_at DESC, rowid DESC LIMIT 1"
     ).fetchone()
     run_id = latest["run_id"] if latest else "reexport"
+    # Re-read the discovery truncation markers persisted on the run (D-037): the resume path must not
+    # silently claim completeness for a run whose discovery was PARTIAL (audit-3 finding 7).
+    truncated = runs.get_counts(conn, run_id).get("truncated", []) if latest else []
     if latest:
         runs.set_run_status(conn, run_id, status)
     return _build_result(
         conn, run_id, status, targets,
-        stats={"extractions": 0, "cache_hits": 0, "opted_out": opted_out, "reexport": True},
+        stats={"extractions": 0, "cache_hits": 0, "opted_out": opted_out, "reexport": True,
+               "truncated": truncated},
         gaps=gaps,
     )
 
