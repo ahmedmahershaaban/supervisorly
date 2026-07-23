@@ -91,3 +91,33 @@ def test_all_mode_is_default_and_covers_everything():
     rc, oa = _clients()
     insts = ladder.select_institutions(PLAN, rc)
     assert {i["name"] for i in insts} == {"Maple University", "Northern Institute"}
+
+
+class _FakeRor:
+    def __init__(self, insts):
+        self._i = insts
+
+    def institutions_in_country(self, cc, **kw):
+        return self._i
+
+
+def test_university_mode_uses_word_boundary_not_substring():
+    # audit (live): "york" must not select "Yorkshire Institute" (substring within a word);
+    # a whole-word token still matches.
+    rc = _FakeRor([{"name": "Yorkshire Institute", "ror_id": "https://ror.org/1"},
+                   {"name": "University of York", "ror_id": "https://ror.org/2"},
+                   {"name": "University of Toronto", "ror_id": "https://ror.org/3"}])
+    sel = ladder.select_institutions(
+        {"country": "X", "university_mode": "only", "universities": ["york"]}, rc)
+    names = {i["name"] for i in sel}
+    assert "University of York" in names and "Yorkshire Institute" not in names
+    sel2 = ladder.select_institutions(
+        {"country": "X", "university_mode": "only", "universities": ["toronto"]}, rc)
+    assert {i["name"] for i in sel2} == {"University of Toronto"}
+
+
+def test_build_targets_surfaces_truncation():
+    rc, oa = _clients()
+    oa.truncated_sources = ["authors@I100"]              # simulate a capped source
+    out = ladder.build_targets(PLAN, rc, oa)
+    assert out["truncated"] == ["authors@I100"]

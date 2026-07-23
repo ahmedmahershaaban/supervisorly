@@ -87,6 +87,39 @@ def test_openalex_works_give_activity_signal():
                       "year": 2025, "topic_ids": ["T10001"]}]
 
 
+def _authors(n, start=0):
+    return json.dumps({"results": [
+        {"id": f"https://openalex.org/A{start+i}", "display_name": f"P{start+i}",
+         "works_count": 1, "topics": [], "last_known_institutions": []} for i in range(n)]})
+
+
+def test_openalex_authors_paginate_across_pages():
+    # audit (live): a full page triggers a next-page fetch; a partial page ends it — no silent cap
+    tp = CassetteTransport()
+    tp.record(openalex.authors_url("I1", EMAIL, page=1), 200, _authors(25))    # full page
+    tp.record(openalex.authors_url("I1", EMAIL, page=2), 200, _authors(3, 25))  # partial → last
+    oa = openalex.OpenAlexClient(tp, email=EMAIL)
+    authors = oa.authors_by_institution("I1")
+    assert len(authors) == 28 and oa.truncated_sources == []
+
+
+def test_openalex_truncation_is_recorded_when_cap_hit():
+    tp = CassetteTransport()
+    tp.record(openalex.authors_url("I1", EMAIL, page=1), 200, _authors(25))     # full, cap=1
+    oa = openalex.OpenAlexClient(tp, email=EMAIL)
+    authors = oa.authors_by_institution("I1", max_pages=1)
+    assert len(authors) == 25 and oa.truncated_sources == ["authors@I1"]
+
+
+def test_ror_truncation_is_recorded_when_cap_hit():
+    tp = CassetteTransport()
+    tp.record(ror.country_url("CA", 1), 200, json.dumps({"number_of_results": 500, "items": [
+        {"id": "https://ror.org/1", "name": "U", "country": {"country_code": "CA"}, "links": []}]}))
+    rc = ror.RorClient(tp)
+    insts = rc.institutions_in_country("CA", max_pages=1)
+    assert len(insts) == 1 and rc.truncated_sources == ["institutions@CA"]
+
+
 def test_openalex_premium_key_is_included_when_present():
     # the optional paid key rides in the query when configured; email always does
     url = openalex.topics_url("x", EMAIL, key="sk-123")

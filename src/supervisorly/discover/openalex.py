@@ -40,8 +40,11 @@ def institutions_url(ror_url: str, email: str | None, key: str | None = None) ->
     return _url("institutions", p)
 
 
-def authors_url(institution_id: str, email: str | None, key: str | None = None) -> str:
+def authors_url(institution_id: str, email: str | None, key: str | None = None,
+                page: int = 1) -> str:
     p = {"filter": f"last_known_institutions.id:{institution_id}", "per-page": PER_PAGE}
+    if page > 1:                       # page 1 omits the param → matches the un-paged URL
+        p["page"] = page
     if email:
         p["mailto"] = email
     if key:
@@ -88,6 +91,9 @@ class OpenAlexClient:
         self._t = transport
         self._email = email
         self._key = key
+        # source labels whose enumeration hit the page cap (more results existed) — surfaced
+        # honestly in the run coverage so completeness is never claimed while truncating (D-037).
+        self.truncated_sources: list[str] = []
 
     def _get_json(self, url: str) -> dict | None:
         try:
@@ -118,12 +124,25 @@ class OpenAlexClient:
             return []
         return [_short_id(t.get("id")) for t in data.get("results", []) if t.get("id")]
 
-    def authors_by_institution(self, institution_id: str) -> list[dict]:
-        """Return professor-target dicts for authors last known at ``institution_id`` (OpenAlex id)."""
-        data = self._get_json(authors_url(institution_id, self._email, self._key))
-        if not data:
-            return []
-        return [_map_author(a) for a in data.get("results", [])]
+    def authors_by_institution(self, institution_id: str, *, max_pages: int = 5) -> list[dict]:
+        """Professor-target dicts for authors last known at ``institution_id`` — **paginated**.
+
+        Fetches up to ``max_pages`` pages; if the cap is hit while a full page remained, records a
+        truncation marker in ``truncated_sources`` so the coverage stays honest (never a silent cut).
+        """
+        out: list[dict] = []
+        page = 1
+        while page <= max_pages:
+            data = self._get_json(authors_url(institution_id, self._email, self._key, page=page))
+            if not data:
+                return out
+            results = data.get("results", [])
+            out.extend(_map_author(a) for a in results)
+            if len(results) < PER_PAGE:          # last page reached
+                return out
+            page += 1
+        self.truncated_sources.append(f"authors@{_short_id(institution_id) or institution_id}")
+        return out
 
     def works_by_author(self, author_id: str) -> list[dict]:
         """Return the author's works as ``{id, title, year, topic_ids}`` (activity/recency signal)."""

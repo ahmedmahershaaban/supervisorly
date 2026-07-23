@@ -48,21 +48,36 @@ class RorClient:
     def __init__(self, transport: Transport, *, email: str | None = None) -> None:
         self._t = transport
         self._email = email
+        # source labels whose enumeration hit the page cap (more existed) — surfaced in coverage.
+        self.truncated_sources: list[str] = []
 
-    def institutions_in_country(self, country_code: str, *, page: int = 1) -> list[dict]:
-        """Return the institutions ROR lists for ``country_code`` (empty on error/none).
-
-        Only degree-granting / education-type organisations are usually relevant; the caller
-        filters — here we return everything ROR gives, mapped, so nothing is silently dropped.
-        """
+    def _page(self, country_code: str, page: int) -> dict | None:
         try:
             resp = self._t.get(country_url(country_code, page))
         except TransportError:
-            return []
+            return None
         if resp.status != 200:
-            return []
+            return None
         try:
-            data = json.loads(resp.text)
+            return json.loads(resp.text)
         except ValueError:
-            return []
-        return [_map_institution(it) for it in data.get("items", [])]
+            return None
+
+    def institutions_in_country(self, country_code: str, *, max_pages: int = 5) -> list[dict]:
+        """The institutions ROR lists for ``country_code``, **paginated** to ``max_pages`` (empty on
+        error). Records a truncation marker if the cap is hit while more results remained (D-037).
+        The caller filters to education types; nothing is silently dropped here."""
+        out: list[dict] = []
+        page = 1
+        while page <= max_pages:
+            data = self._page(country_code, page)
+            if not data:
+                return out
+            items = data.get("items", [])
+            out.extend(_map_institution(it) for it in items)
+            total = data.get("number_of_results")
+            if not items or (total is not None and len(out) >= total):
+                return out
+            page += 1
+        self.truncated_sources.append(f"institutions@{country_code}")
+        return out

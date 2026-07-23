@@ -497,7 +497,8 @@ def run_live(plan: dict, transport: Transport, snap_root, *, email: str,
     run_id = runs.create_run(conn)
     runs.set_run_status(conn, run_id, "deep_diving")
     stats = {"extractions": 0, "cache_hits": 0, "opted_out": opted_out, "resumed_skipped": 0,
-             "discovered": len(disc["targets"]), "institutions": len(disc["institutions"])}
+             "discovered": len(disc["targets"]), "institutions": len(disc["institutions"]),
+             "truncated": disc.get("truncated", [])}
     gaps = _process_targets(conn, run_id, targets, fetcher, snaps, stats=stats, resume=resume)
     status = "finalized_with_open_gaps" if gaps else "finalized"
     runs.set_run_status(conn, run_id, status)
@@ -551,6 +552,11 @@ def _build_result(conn, run_id, status, targets, *, stats, gaps) -> dict:
                 else f"{enumerated} professor(s) enumerated; none were dropped for missing data.")
     if gaps:
         coverage += f" {gaps} target(s) are blocked and open for the human rung."
+    truncated = (stats or {}).get("truncated")
+    if truncated:
+        # never claim completeness while a source hit its page cap (D-037)
+        coverage += (f" Coverage is PARTIAL — {len(truncated)} source(s) had more results than "
+                     f"were enumerated ({', '.join(truncated)}).")
     export = jx.build_export(
         run_summary={"run_id": run_id, "status": status,
                      "counts": {"enumerated": enumerated}, "coverage": coverage},

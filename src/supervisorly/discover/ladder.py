@@ -12,6 +12,8 @@ live driver (Phase L2), not here.
 
 from __future__ import annotations
 
+import re
+
 
 def _norm(s: str | None) -> str:
     return (s or "").strip().lower()
@@ -42,8 +44,17 @@ def select_institutions(plan: dict, ror) -> list[dict]:
     wanted = [_norm(u) for u in (plan.get("universities") or []) if _norm(u)]
 
     def matches(inst: dict) -> bool:
+        # word-boundary match on the name (so "york" ≠ "yorkshire") + exact ROR-id segment match,
+        # not naive substring containment (audit finding). A genuinely ambiguous single token
+        # (e.g. "york" vs "New York") may still match both — the user should name it more fully.
         name, rid = _norm(inst.get("name")), _norm(inst.get("ror_id"))
-        return any(w in name or (rid and w in rid) for w in wanted)
+        rid_seg = rid.rsplit("/", 1)[-1] if rid else ""
+        for w in wanted:
+            if re.search(r"\b" + re.escape(w) + r"\b", name):
+                return True
+            if rid_seg and rid_seg == w:
+                return True
+        return False
 
     if mode == "only":
         return [i for i in insts if matches(i)]
@@ -94,9 +105,15 @@ def enumerate_professors(institutions: list[dict], oa) -> list[dict]:
 
 
 def build_targets(plan: dict, ror, oa) -> dict:
-    """Round 1 end to end: {plan (with resolved topics), institutions, targets}."""
+    """Round 1 end to end: {plan (with resolved topics), institutions, targets, truncated}.
+
+    ``truncated`` lists any source whose enumeration hit the page cap (more results existed), so
+    the run coverage can say so honestly rather than claiming completeness while truncating (D-037).
+    """
     plan = dict(plan)
     plan["resolved_topic_ids"] = resolve_topic_ids(plan, oa)
     institutions = select_institutions(plan, ror)
     targets = enumerate_professors(institutions, oa)
-    return {"plan": plan, "institutions": institutions, "targets": targets}
+    truncated = sorted(set(getattr(ror, "truncated_sources", []))
+                       | set(getattr(oa, "truncated_sources", [])))
+    return {"plan": plan, "institutions": institutions, "targets": targets, "truncated": truncated}
