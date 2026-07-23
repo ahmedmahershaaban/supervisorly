@@ -703,3 +703,23 @@ synthetic — no host to be polite to — so `run_offline`/`run_live` now inject
 deadline; warm re-scan → `extractions==0` + empty delta; changed page shows in delta. Full suite →
 **174 passed** (exit 0, ~21 s). **DoD (Phase L6):** re-scan ≈0 re-extraction + honest delta. (The
 Task-Scheduler/cron recipe is documented with the CLI in L8.)
+
+## round L7 — dashboard recreated in the Atlas design language + diagram engine (commit pending)
+
+**Built:** rewrote `export/dashboard.py` in the hifi **"Supervisorly Atlas — Living"** language while
+keeping every honesty/safety contract (and its test hook): the bioluminescent tokens (void `#05070c`,
+the tissue-type kind palette, amber accent, teal focus), Space Grotesk + Space Mono (named with a
+faithful system fallback — **no external font, no CDN, stays self-contained**), the decorative
+background + scan line, and a **cell drawer** for professor detail (value + verbatim quote + source +
+confidence, D-010). Added the **diagram engine** ("how diagrams appear"): glowing cell nodes
+(halo/membrane/nucleus, sized by kind) + **cubic-bezier filaments** (bowed by a deterministic
+`hash%2`, 4 stacked SVG elements: soft glow + base + animated light-packet dashes `omFlow` + arrowhead),
+**highlight-connected** on hover/focus, and **recompute on resize** — driving a "How it works"
+specimen (plan → discover → fetch → verify → score → dashboard, with the human-rung escalation).
+`prefers-reduced-motion` disables all animation; injection- and URL-scheme-safe.
+**Ran:** `tests/test_dashboard.py` (all prior hooks preserved: four states, firm/watch, safe links,
+script-safe, no CDN, clickable detail) + `tests/test_dashboard_atlas.py` (5: tokens/type, self-contained
+fonts, cells-and-filaments engine, how-it-works view + reduced-motion, cell drawer). Full suite →
+**184 passed** (exit 0). **DoD (Phase L7):** the results dashboard + a how-it-works diagram render in
+the Atlas language, self-contained/offline, reduced-motion-aware, four-states + deadline + cell-drawer
+detail working, filaments recompute on resize.
