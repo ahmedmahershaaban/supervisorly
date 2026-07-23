@@ -105,6 +105,27 @@ re-weightable weights + tier bands.
 **Ran:** pytest → **49 passed**, incl DoD rows: *pre_phd not gated on PhD rules*, *fragmented
 profile reconciled not dropped*, *topic-ID interdisciplinary match*, *re-weightable*.
 
-**Remaining phases:** F (dashboard: four-state HTML+JSX, deadline view), G (orchestration glue:
-end-to-end scan on cassettes + chrome-prompt-generator + roster-enumeration), H (hand-labelled
-cassette eval set + golden-path integration), I (self-run), J (refine), then clean-room verify.
+## round G1 — chrome-prompt-generator: the emitting half of the human rung (commit pending)
+
+**Built:** `extract/chrome_prompt.py` — `generate_prompt` builds the ready-to-paste Claude-for-Chrome
+prompt for a professor's open gaps (ethics/provenance preamble, target, anchor links, the specific
+missing fields), and embeds the required output shape by calling `md_grammar.emit` — the **same
+module** the ingester parses (D-051), so the two halves can't drift. Consolidated per professor (D-032).
+**Ran:** pytest → **52 passed**, incl. the seam guarantee: *the generated example parses under the
+real grammar*. The human rung is now complete on both ends (generator + ingester share one grammar).
+
+**Remaining phases:** F (dashboard: four-state HTML+JSX, deadline view), G2 (orchestration glue:
+end-to-end scan driver on cassettes tying discovery→fetch→extract→score→export; roster-enumeration),
+H (hand-labelled cassette eval set + golden-path integration), I (self-run), J (refine), then
+clean-room verify.
+
+---
+
+### Status at this checkpoint
+**10 rounds, 52 tests, all green.** Complete: Phase A (scaffold/schema/state machine), Phase B
+(MD + JSON contracts, SKILL.md, 5 agents), Phase C (fetch layer), Phase D1 (claim recorder /
+anti-hallucination), Phase E (scoring), Phase G1 (chrome-prompt-generator). The foundation and every
+design-sensitive seam (provenance, the human-rung handoff, the cache, the three review fixes) are
+built and tested. Remaining is the dashboard, the end-to-end orchestration glue + self-run, the
+eval set, the refine loop, and the clean-room verify — best continued in a fresh context window from
+this commit history.
