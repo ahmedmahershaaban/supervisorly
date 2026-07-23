@@ -105,3 +105,40 @@ def test_generic_start_word_does_not_demote_a_firm_deadline():
 def test_semicolon_apply_early_stays_firm():
     iso, _, conf = _deadline("The application deadline is 1 December 2026; apply early.")
     assert iso == "2026-12-01" and conf == "quoted_official"
+
+
+# ── audit round 3: everyday "close" near a date must NOT fabricate a deadline ──
+def test_incidental_close_does_not_fabricate_a_deadline():
+    for sentence in (
+        "The building is close to campus; renovations finished 15 June 2021.",
+        "A close collaborator since 5 May 2018.",
+        "The museum is close by and reopened 12 December 2022.",
+        "Office hours close at 5pm; the term started 1 September 2024.",
+    ):
+        assert _deadline(sentence) is None, sentence
+
+
+def test_close_in_a_real_deadline_context_still_works():
+    # the intended cases the constrained cue must still catch
+    iso, _, conf = _deadline(
+        "Applications open on 1 October 2026 and close on 1 December 2026."
+    )
+    assert iso == "2026-12-01" and conf == "quoted_official"
+    iso2, _, conf2 = _deadline("Registration closes 1 December 2026.")
+    assert iso2 == "2026-12-01" and conf2 == "quoted_official"
+
+
+# ── audit round 3: a non-firm phrase in a dateless OTHER clause must not demote ─
+def test_nonfirm_in_a_dateless_clause_does_not_demote_a_firm_deadline():
+    iso, _, conf = _deadline(
+        "The application deadline is 1 December 2026; the spring semester begins later."
+    )
+    assert iso == "2026-12-01" and conf == "quoted_official"
+
+
+def test_nonfirm_sharing_the_dates_clause_still_demotes():
+    # the round-2 behaviour must be preserved: date in the "semester begins" clause → watch
+    iso, _, conf = _deadline(
+        "The application deadline has passed, but the fall semester begins 1 September 2026."
+    )
+    assert iso == "2026-09-01" and conf == "inferred"

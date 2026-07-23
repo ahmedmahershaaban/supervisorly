@@ -466,3 +466,20 @@ head, reexport agrees `finalized`) + full suite → **127 passed** (exit 0).
 **Ran:** `test_bare_email_list_is_redacted_at_build`, `test_email_in_a_mailto_source_url_is_stripped`,
 `test_single_incidental_email_in_a_sentence_still_allowed` + full suite → **130 passed** (exit 0).
 **All 6 second-pass findings are fixed with regression tests.**
+
+## round Y — refine³: fix two regressions my round-V fix introduced (commit pending)
+
+A lean third audit pass (regression hunt + fresh correctness + completeness) returned **2 findings,
+both regressions from round V** (completeness + PII dimensions came back clean).
+
+**Fixed in `pipeline.py`:**
+- **(finding 1, high)** the standalone `\bcloses?\b` cue over-matched everyday "close" ("close to
+  campus", "close collaborator", "office hours close") + an incidental date → fabricated firm
+  deadlines. Constrained it to real deadline contexts: `close(s) on <date>`, or
+  `registration/submissions/applications close(s)`; a bare "close" is no longer a cue.
+- **(finding 2, low)** `_NONFIRM` ran over the whole sentence while the date is bound per-clause,
+  so a strong phrase in a **dateless other clause** ("deadline is 1 Dec 2026; the spring semester
+  begins later") wrongly demoted a firm deadline. New `_clause_containing` scopes `_NONFIRM` to the
+  bound date's clause; `_PROJECTED` still applies sentence-wide.
+**Ran:** `test_deadline_parse.py` (+4: incidental "close" → none; constrained close still works;
+dateless-clause stays firm; same-clause still demotes) + full suite → **134 passed** (exit 0).

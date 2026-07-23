@@ -48,11 +48,13 @@ _RECRUIT = re.compile(
 
 # ── deadline signal (D-061) ───────────────────────────────────────────────────
 # NB: "applications open" is deliberately NOT a cue — an *opening* date is the opposite of a
-# deadline; treating it as one fabricated firm deadlines from opening dates (audit round 2).
-# "close(s)" is a standalone cue (a deadline sentence already requires a date to be present,
-# so "...and close on 1 December" is caught even without an "applications" prefix).
-_DEADLINE_CUE = (r"deadline|applications?\s+(?:close|due|are\s+due)|\bcloses?\b|apply\s+by|"
-                 r"closing\s+date|submit(?:ted)?\s+by|due\s+by")
+# deadline (audit round 2). And a *bare* "close(s)" is NOT a cue either: the everyday word
+# ("close to campus", "close collaborator", "office hours close") near an incidental date
+# fabricated firm deadlines (audit round 3). "close(s)" only counts in a deadline context:
+# "close(s) on <date>", or "registration/submissions/applications close(s)".
+_DEADLINE_CUE = (r"deadline|applications?\s+(?:close|due|are\s+due)|"
+                 r"(?:registration|submissions?)\s+closes?|closes?\s+on|"
+                 r"apply\s+by|closing\s+date|submit(?:ted)?\s+by|due\s+by")
 # a sentence carrying a deadline cue (a date is required separately, below)
 _DEADLINE = re.compile(rf"[^.!?]*\b(?:{_DEADLINE_CUE})\b[^.!?]*[.!?]", re.IGNORECASE)
 # where the cue sits, so the date can be bound to *its* clause (not blindly the first date)
@@ -135,6 +137,22 @@ def _iso_from_match(kind: str, m: re.Match) -> tuple[str, bool] | None:
     return f"{y:04d}-{mo:02d}-{d:02d}", ambiguous
 
 
+def _clause_containing(sentence: str, pos: int) -> str:
+    """Return the clause (split on ``,``/``;``) that contains character ``pos``.
+
+    Used so a "belongs to another event" signal only downgrades the deadline when it shares
+    the date's clause — a strong phrase in a separate, dateless clause must not demote a firm,
+    cue-owned date (audit round 3).
+    """
+    seps = [m.start() for m in re.finditer(r"[;,]", sentence)]
+    starts = [0] + [s + 1 for s in seps]
+    ends = seps + [len(sentence)]
+    for st, en in zip(starts, ends):
+        if st <= pos < en:
+            return sentence[st:en]
+    return sentence
+
+
 def _dates_in(text: str) -> list[tuple[str, bool, int]]:
     """Every valid full (day+month+year) date in ``text`` as (iso, ambiguous, position)."""
     out = []
@@ -186,10 +204,12 @@ def extract_deadline(html: str):
             continue
         cue = _CUE_RE.search(sentence)
         cue_pos = cue.start() if cue else 0
-        iso, ambiguous, _pos = min(dates, key=lambda dp: abs(dp[2] - cue_pos))
+        iso, ambiguous, date_pos = min(dates, key=lambda dp: abs(dp[2] - cue_pos))
+        # _PROJECTED ("usually"/"each year") applies anywhere; a strong "other-event" signal
+        # only demotes when it shares the *date's* clause (not a separate, dateless one).
         projected = (ambiguous
                      or bool(_PROJECTED.search(sentence))
-                     or bool(_NONFIRM.search(sentence)))
+                     or bool(_NONFIRM.search(_clause_containing(sentence, date_pos))))
         return iso, sentence, ("inferred" if projected else "quoted_official")
     return None
 
