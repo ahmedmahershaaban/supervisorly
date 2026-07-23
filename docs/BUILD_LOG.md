@@ -284,3 +284,17 @@ completing Phase G's DoD.
 (`finalized_with_open_gaps`, the walled prof present + `blocked`, not dropped); the MD return
 records 2 claims, and `reexport` flips the run to `finalized`, shows the human value with its
 `x.com` source, keeps the export valid — while a **counting transport proves zero re-fetches**.
+
+## round N — program roll-up + genericity of an unimagined field (commit pending)
+
+Closes the last two edge-case rows (D-031 roll-up; D-038 arbitrary field/country).
+
+**Built:** `score/programs.py` — `group_by_program` rolls shortlisted professors up to their
+shared graduate program so the student **applies and pays once** per program, not per professor
+(D-031); a professor with no known program stays its own singleton group (no invented shared
+program). Pure, order-preserving, no model call.
+**Tests:** `test_programs.py` (same-program roll-up, different-programs-separate, no-program-solo,
+order preserved) and a genericity test that an **invented discipline** ("quantum basket weaving")
+in a novel markup shape still runs and extracts honestly — proving there is no embedded field
+dictionary (D-038).
+**Ran:** pytest → **94 passed** (exit 0). **All 18 edge-case-matrix rows now have a passing test.**

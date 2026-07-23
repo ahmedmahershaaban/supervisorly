@@ -74,6 +74,28 @@ def test_zero_result_run_is_valid_and_empty(tmp_path):
     assert "coverage gap" in coverage and "returned any professors" in coverage
 
 
+def test_arbitrary_field_and_country_still_runs(tmp_path):
+    """Edge (D-038 genericity): a field/country the author never imagined still runs.
+    There is no embedded field dictionary — the generic recruiting tier finds the signal
+    regardless of the discipline named."""
+    from supervisorly import pipeline
+    from supervisorly.fetch.transport import CassetteTransport
+
+    tp = CassetteTransport()
+    tp.record("https://uni.example/robots.txt", 200, "User-agent: *\nAllow: /\n")
+    # an invented discipline + an unusual markup shape the demo never uses
+    tp.record("https://uni.example/fac/x", 200,
+              "<html><body><article><h3>Dr. Q</h3><span>I am recruiting a PhD student in "
+              "quantum basket weaving.</span></article></body></html>")
+    targets = [{"id": "q", "name": "Dr. Q", "url": "https://uni.example/fac/x"}]
+    plan = {"intent_kind": "phd", "resolved_topic_ids": ["T_qbw"], "field": "quantum basket weaving"}
+    result = pipeline.run_offline(plan, targets, tp, tmp_path / "snaps")
+
+    assert jx.validate_export(result["export"]) == []
+    env = result["export"]["professors"][0]["fields"]["recruiting_signal"]
+    assert env["state"] == "value" and "quantum basket weaving" in env["value"]
+
+
 def test_cli_scan_demo_writes_dashboard(tmp_path):
     out = tmp_path / "out" / "dashboard.html"
     rc = main(["scan", "--demo", "--out", str(out)])
