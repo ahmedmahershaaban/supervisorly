@@ -620,3 +620,17 @@ topic-ids, authors→targets, works, premium-key-in-query — and the ethics LLM
 `discover/`). Full suite → **148 passed** (exit 0). **DoD (Phase L0):** clients round-trip cassettes
 into typed results, no live network in tests. (Preflight fail-loud on a missing contact email already
 lands via `preflight.require_credentials`; the live entry wiring is L2/L8.)
+
+## round L1 — discovery ladder: SearchPlan → professor targets (commit pending)
+
+**Built:** `discover/openalex.py` gains `institution_by_ror` (ROR id → OpenAlex institution id).
+`discover/ladder.py` — Round 1, generate-don't-look-up (D-038): `resolve_topic_ids` (field →
+OpenAlex topic IDs, D-058), `select_institutions` (ROR by country, honouring `university_mode`
+all/prioritise/only, D-045), `enumerate_professors` (OpenAlex authors-by-institution → targets,
+**reconciled/de-duped by identity** so a split profile is one target not two, D-057; topics unioned,
+works = max), and `build_targets` tying them together. Login-walled institutional pages are left for
+the deep-dive fetcher + human rung, never scraped here.
+**Ran:** `tests/test_discover_ladder.py` (5): enumerate+dedupe (Ada at two institutions → one target,
+topics unioned), topic-ids-from-field, `only`/`prioritise` scope, `all` default. Full suite →
+**153 passed** (exit 0). **DoD (Phase L1, Round 1):** targets enumerated with nobody duplicated/dropped;
+scope modes honoured; identities reconciled — all on cassettes, no network.

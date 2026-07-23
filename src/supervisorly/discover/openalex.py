@@ -31,6 +31,15 @@ def topics_url(query: str, email: str | None, key: str | None = None) -> str:
     return _url("topics", p)
 
 
+def institutions_url(ror_url: str, email: str | None, key: str | None = None) -> str:
+    p = {"filter": f"ror:{ror_url}", "per-page": PER_PAGE}
+    if email:
+        p["mailto"] = email
+    if key:
+        p["api_key"] = key
+    return _url("institutions", p)
+
+
 def authors_url(institution_id: str, email: str | None, key: str | None = None) -> str:
     p = {"filter": f"last_known_institutions.id:{institution_id}", "per-page": PER_PAGE}
     if email:
@@ -91,6 +100,16 @@ class OpenAlexClient:
             return json.loads(resp.text)
         except ValueError:
             return None
+
+    def institution_by_ror(self, ror_url: str | None) -> str | None:
+        """Resolve a ROR id to the OpenAlex institution id (``I…``) used to filter authors, or None."""
+        if not ror_url:
+            return None
+        data = self._get_json(institutions_url(ror_url, self._email, self._key))
+        if not data:
+            return None
+        results = data.get("results") or []
+        return _short_id(results[0].get("id")) if results else None
 
     def topic_ids(self, query: str) -> list[str]:
         """Resolve a free-text field to OpenAlex topic IDs (for D-058 overlap), else []."""
