@@ -1,5 +1,5 @@
 # ---------------------------------------------------------------------------
-# ProfScout .gitignore
+# Supervisorly .gitignore
 #
 # Guiding rule: SOURCE and CONFIG are committed; anything a run PRODUCES is not.
 # Scan output contains personal data about real academics (names, emails,
