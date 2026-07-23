@@ -44,14 +44,47 @@ Run the tests:
 python -m pytest
 ```
 
+## Run a scan
+
+There are two ways to run, sharing one deterministic pipeline behind a transport seam.
+
+**Offline demo (no network, no credentials)** — a fully synthetic fixture (invented names,
+`example` domains) covering three directory shapes across three countries, a non-English page,
+and a robots-blocked one. Use it to see the output end to end:
+
+```bash
+python -m supervisorly scan --demo --out output/dashboard.html
+# writes output/dashboard.html (open it in any browser) + output/dashboard.json
+```
+
+The dashboard is a single self-contained file: a filterable table, a **Deadlines** view that
+shows projected dates as *watch dates* (never firm), and a click-through detail panel where
+every fact carries its verbatim quote and source link. A professor is never dropped for missing
+data — the four states (`value` / `searched_absent` / `never_attempted` / `blocked`) render
+distinctly.
+
+**Live scan (real sources)** — needs the credentials below. It fetches only public pages and
+open APIs, obeys `robots.txt`, and routes login-walled pages to you via a generated
+Claude-for-Chrome prompt (paste the result back and the run resumes without re-fetching).
+
 ## Credentials (needed for live runs)
 
-Two free credentials are required for a real scan and the setup fails loud without them:
+Two free credentials are required for a real scan; the tool **fails loud** (with the exact fix)
+rather than running silently on the throttled anonymous tiers:
 
-- a **ROR client ID** (institution registry) — required as of 2026-07;
-- a **free OpenAlex API key** — without it the daily credit ceiling is ~2 scans instead of ~20.
+| Environment variable          | What it is                    | Get it |
+|-------------------------------|-------------------------------|--------|
+| `SUPERVISORLY_ROR_CLIENT_ID`  | ROR institution-registry client id | <https://ror.readme.io/> |
+| `SUPERVISORLY_OPENALEX_KEY`   | OpenAlex key / polite-pool email — without it the daily credit ceiling is ~2 scans instead of ~20 | <https://openalex.org/> |
 
-The offline test suite and the `--offline --demo` mode run without either.
+The offline test suite and `scan --demo` run without either.
+
+## Opt-out
+
+To exclude specific people, list their identifiers (homepage URL, ORCID, OpenAlex/ROR id, or
+internal id — one per line) in an `optout.txt` and pass it to a scan; a match is dropped **before
+any fetch** — never requested, scored, shown, or stored. The `optout.txt` shipped in the repo is
+an empty template and must never contain real personal data.
 
 ## Ethics
 

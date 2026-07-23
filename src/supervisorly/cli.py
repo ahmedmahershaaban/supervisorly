@@ -47,7 +47,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
     snap_root = out.parent / ".cache" / "snaps"
 
     tp, targets, plan = demo_fixture()
-    result = run_offline(plan, targets, tp, snap_root)
+    result = run_offline(plan, targets, tp, snap_root, optout_path=args.optout)
     out.write_text(result["html"], encoding="utf-8")
     out.with_suffix(".json").write_text(
         json.dumps(result["export"], ensure_ascii=False, indent=2), encoding="utf-8"
@@ -71,6 +71,8 @@ def build_parser() -> argparse.ArgumentParser:
     ps = sub.add_parser("scan", help="run a scan and write a dashboard")
     ps.add_argument("--demo", action="store_true", help="run the offline synthetic demo")
     ps.add_argument("--out", default="output/dashboard.html", help="dashboard output path")
+    ps.add_argument("--optout", default=None,
+                    help="path to an optout.txt suppression list (D-023)")
     ps.set_defaults(func=cmd_scan)
 
     return p

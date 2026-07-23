@@ -321,3 +321,13 @@ The §6 DoD requires these as *tested* gates, not prose. Closed the remaining on
   **methodology corpus path is never referenced** in code (D-035); **no bulk-outreach** helpers exist.
 **Ran:** pytest → **105 passed** (exit 0). Ethics gates (optout, robots, no-bare-emails,
 no-bulk-path, corpus-never-read, LLM-free) are now all test-guarded.
+
+## round P — README run-modes/credentials + CLI `--optout` (commit pending)
+
+Docs DoD: honest install incl. required credentials, the two run modes, and `scan --demo`.
+
+**Built:** `README.md` — a **Run a scan** section (offline `scan --demo` vs live), the credential
+**env-var names** in a table (`SUPERVISORLY_ROR_CLIENT_ID`, `SUPERVISORLY_OPENALEX_KEY`) with where
+to get them, the dashboard's deadline/detail/four-state behaviour, and an **Opt-out** section.
+`cli.py` — `scan --optout <path>` wired through to `run_offline(optout_path=...)` so the documented
+flow works. **Ran:** pytest (CLI) → green; full suite still **105 passed**.
