@@ -64,59 +64,77 @@ _DEADLINE_CUE = (r"deadline|apply\s+by|closes?\b|closing\s+date|due\s+by|"
                  r"(?:are|is)\s+due|(?:applications?|submissions?)\s+due|submit(?:ted)?\s+by")
 _CUE_RE = re.compile(rf"\b(?:{_DEADLINE_CUE})\b", re.IGNORECASE)
 
-# Deciding a dated deadline clause is an APPLICATION deadline (not a tuition/registration/event
-# one that merely mentions a domain word). Like the recruiting regex this is a fixed signal-tier
-# heuristic, not a generated per-query dictionary (D-038 stands). A clause qualifies if:
-#   (A) a strong application noun is present (applications/applicants/apply/admissions/submissions),
-#   (B) a "<domain> deadline" phrase appears (application/PhD/fellowship/… deadline), or
-#   (C) a domain word is the SUBJECT of the cue verb — directly before close/due/submitted — so
-#       "PhD studentship closes 1 Dec" counts but "…for the PhD program are due by 1 Dec" (subject
-#       = tuition/fees) does not. Tying context to the cue's subject is what stops the fabrication.
+# Deciding a dated deadline clause is an APPLICATION deadline (not a tuition/registration/event one
+# that merely mentions a domain word). Fixed signal-tier heuristic, not a generated per-query
+# dictionary (D-038 stands). A clause qualifies if a "<domain> deadline" noun-phrase appears, or the
+# SUBJECT of the deadline cue is an application/domain word (not a payment noun). The subject is the
+# HEAD of the leading noun-phrase, and English noun compounds are head-FINAL — so "application FEE is
+# due" has subject-head "fee" (a payment date, not a deadline) while "PhD studentship applications
+# close" has subject-head "applications". Testing the cue's *subject* (not merely a nearby domain
+# word) is what stops fee/deposit due-dates from being fabricated as firm deadlines (D-010/D-061)
+# without over-dropping a real "Applications close" (live audit-3 replaced the fragile window scheme).
 _DOMAIN = r"phd|dphil|doctoral|postdocs?|postdoctoral|fellowships?|studentships?|scholarships?|positions?|vacanc(?:y|ies)"
 _STRONG_APP = re.compile(r"\b(?:applications?|applicants?|apply|admissions?|submissions?)\b", re.IGNORECASE)
+_APP_WORD = re.compile(rf"\b(?:{_DOMAIN}|applications?|submissions?|admissions?)\b", re.IGNORECASE)
 _DOMAIN_DEADLINE = re.compile(
     rf"\b(?:{_DOMAIN}|applications?|submissions?|admissions?|entry|programmes?|programs?|courses?|intake)"
     r"\s+deadline\b", re.IGNORECASE)
-# An application/domain programme that is CLEANLY the SUBJECT of a deadline cue ("Applications
-# close…", "PhD studentship closes…", "submissions are due…"). Subject-tied, so a domain word that
-# is only a MODIFIER ("registration for the PhD orientation closes") never qualifies.
-_APP_SUBJECT = re.compile(
-    rf"\b(?:{_DOMAIN}|applications?|submissions?|admissions?)\s+"
-    rf"(?:closes?\b|closing\b|(?:are|is)\s+due|due\s+by|submit(?:ted)?\s+by)",
-    re.IGNORECASE)
 
-# A clause about money (a fee / tuition / fine / deposit due date) is NOT an application deadline
-# even when it mentions "application(s)"/"applicants" as a modifier ("the application FEE is due by…").
-# NB: keep every noun plural-tolerant (``deposits``/``payments``/…) — a bare ``deposit`` would let
-# "Deposits for PhD applicants are due 1 Dec" bypass the payment exclusion (live probe, L9i).
+# A clause about money (a fee / tuition / fine / deposit due date) is NOT an application deadline even
+# when it mentions "application(s)" as a modifier ("the application FEE is due by…"). Plural-tolerant
+# (``deposits``/``payments``/…) so "Deposits … are due" is caught too (live probe, L9i).
 _PAYMENT_NOUNS = (r"fees?|tuitions?|payments?|deposits?|fines?|rents?|invoices?|balances?|dues|"
                   r"charges?|instal?ments?")
 _PAYMENT = re.compile(rf"\b(?:{_PAYMENT_NOUNS})\b", re.IGNORECASE)
-# The MONEY is what's actually "due" — a payment noun HEADS the phrase, governing the subject via a
-# "for/of <domain>" modifier ("the deposit FOR PhD studentships is due", "tuition FOR the postdoc
-# positions is due"). Whatever domain word sits in that modifier, the DATE attaches to the payment,
-# so the clause is never an application deadline (live audit-2: subject-tie the _PAYMENT exclusion so
-# it can't be bypassed by an adjacent domain word, and can't over-drop a real "Applications close").
-_PAYMENT_HEAD = re.compile(
-    rf"\b(?:{_PAYMENT_NOUNS})\b(?:\s+\w+){{0,3}}?\s+(?:for|of|toward|towards)\b", re.IGNORECASE)
+# The subject noun-phrase ends at the first post-modifier (a preposition / relative / infinitive):
+# "the deposit FOR studentships…", "a deposit TO secure your position…", "the fee THAT applies to…".
+# Everything after it modifies the head, so the subject head is found only in the span before it.
+_POSTMOD = re.compile(
+    r"\b(?:for|of|to|that|which|who|whom|whose|including|holding|with|from|in|on|at|by)\b",
+    re.IGNORECASE)
+
+
+def _subject_kind(clause: str, cue_start: int) -> str | None:
+    """Classify the SUBJECT of the deadline cue as ``'app'``, ``'payment'``, or ``None``.
+
+    The subject is the head of the leading noun-phrase — the text from the clause start to the first
+    post-modifier or the cue, whichever comes first. Its head is the RIGHTMOST application/domain or
+    payment word in that span (compounds are head-final: "application fee" -> payment; "PhD
+    studentship applications" -> app). ``None`` means no classifiable subject (e.g. "apply by …").
+    """
+    end = cue_start
+    pm = _POSTMOD.search(clause)
+    if pm and pm.start() < end:
+        end = pm.start()
+    head = clause[:end]
+    app = pay = -1
+    for m in _APP_WORD.finditer(head):
+        app = m.start()
+    for m in _PAYMENT.finditer(head):
+        pay = m.start()
+    if app < 0 and pay < 0:
+        return None
+    return "app" if app > pay else "payment"
 
 
 def _is_application_deadline(clause: str) -> bool:
-    """True if the clause's deadline plausibly attaches to an application (not a tuition/fee/event one).
+    """True if the clause's deadline attaches to an application, not a fee/tuition/event date.
 
-    A "<application/domain> deadline" noun-phrase always qualifies. Otherwise an application/domain
-    word must be the CLEAN subject of a cue — NOT a subject a payment noun governs via a "for/of"
-    modifier ("the deposit for PhD studentships is due" is a payment date, never an application
-    deadline). A bare application noun qualifies only when the clause is not about money at all.
+    A "<application/domain> deadline" noun-phrase always qualifies. Otherwise the SUBJECT of the
+    deadline cue (head-final) must be an application/domain word, not a payment word — so "the deposit
+    for PhD studentships is due" / "the registration fee … is due" (subject = money) do not qualify,
+    while "Applications … close" / "PhD studentship closes" do. A bare application verb ("apply
+    by …") with no payment word present also qualifies (D-010/D-061).
     """
     if _DOMAIN_DEADLINE.search(clause):
         return True
-    for m in _APP_SUBJECT.finditer(clause):
-        # skip a subject the money heads ("deposit for PhD studentships is due"): the payment noun
-        # sits in a short modifier just before the subject, so a bounded window is enough (and O(1)).
-        if _PAYMENT_HEAD.search(clause[max(0, m.start() - 64):m.start()]):
-            continue
-        return True
+    cue = _CUE_RE.search(clause)
+    if cue:
+        kind = _subject_kind(clause, cue.start())
+        if kind == "app":
+            return True
+        if kind == "payment":
+            return False
     return bool(_STRONG_APP.search(clause)) and not _PAYMENT.search(clause)
 # cue words that make a date *projected*, not a published/firm deadline (→ watch date)
 _PROJECTED = re.compile(
@@ -137,11 +155,20 @@ _NONFIRM = re.compile(
 _MONTHS = {m: i for i, m in enumerate(
     ["january", "february", "march", "april", "may", "june", "july", "august",
      "september", "october", "november", "december"], start=1)}
+# common abbreviations map to the same indices — real pages write "15 Jan 2027", "30 Sept 2026",
+# "Apply by Feb 28, 2027" (live audit-3: full-only names silently dropped very common deadlines).
+_MONTHS.update({"jan": 1, "feb": 2, "mar": 3, "apr": 4, "jun": 6, "jul": 7,
+                "aug": 8, "sep": 9, "sept": 9, "oct": 10, "nov": 11, "dec": 12})
 _ORD = r"(?:st|nd|rd|th)?"          # optional ordinal suffix: 1st, 2nd, 3rd, 4th …
 _ISO = re.compile(r"\b(20\d{2})-(\d{1,2})-(\d{1,2})\b")
-_DMY = re.compile(rf"\b(\d{{1,2}}){_ORD}\s+([A-Za-z]+)\s+(20\d{{2}})\b")   # 1[st] December 2026
-_MDY = re.compile(rf"\b([A-Za-z]+)\s+(\d{{1,2}}){_ORD},?\s+(20\d{{2}})\b") # December 1[st], 2026
+# ``\.?`` tolerates a trailing period on an abbreviated month ("1 Dec. 2026"); the month word is
+# validated against _MONTHS in _iso_from_match, so a non-month word still yields None.
+_DMY = re.compile(rf"\b(\d{{1,2}}){_ORD}\s+([A-Za-z]+)\.?\s+(20\d{{2}})\b")   # 1[st] Dec[.] 2026
+_MDY = re.compile(rf"\b([A-Za-z]+)\.?\s+(\d{{1,2}}){_ORD},?\s+(20\d{{2}})\b") # Dec[.] 1[st], 2026
 _NUM = re.compile(r"\b(\d{1,2})/(\d{1,2})/(20\d{2})\b")                    # 01/12/2026 (numeric)
+# The period after an abbreviated month ("1 Dec. 2026") otherwise reads as a sentence terminator to
+# _sentences and splits the date in half — strip it before sentence-splitting (live audit-3).
+_ABBR_MONTH_DOT = re.compile(r"\b(jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\.", re.IGNORECASE)
 
 
 def _valid_date(y: int, mo: int, d: int) -> bool:
@@ -211,11 +238,23 @@ def _sentences(text: str):
     return re.split(r"(?<=[.!?])\s+", text)
 
 
+# Split a sentence into subject-bearing clauses: on ``;`` and on a coordinating conjunction
+# (and/but/or, optionally comma-led) — UNLESS a deadline cue verb follows it, which marks a
+# coordinated verb sharing the prior subject ("applications open on X and close on Y") that must stay
+# in one clause. Appositive commas ("…, including the studentship, …") are NOT split, so the subject
+# stays attached to its cue (live audit-3: bare-comma splitting orphaned real deadlines).
+_CLAUSE_SPLIT = re.compile(
+    r"\s*;\s*|\s*,?\s+(?:and|but|or)\s+"
+    r"(?!(?:closes?|closing|due|deadline|submits?|submitted|apply|opens?)\b)",
+    re.IGNORECASE)
+
+
 def _clauses(sentence: str):
-    """Yield the clauses of a sentence (split on ``;`` and clause commas), keeping dates whole."""
+    """Yield the clauses of a sentence (split on ``;`` and clause-level conjunctions), dates whole."""
     masked = _DATE_COMMA.sub(lambda m: m.group(1) + "\x00" + m.group(2), sentence)
-    for part in re.split(r"[;,]", masked):
-        yield part.replace("\x00", ",")
+    for part in _CLAUSE_SPLIT.split(masked):
+        if part and part.strip():
+            yield part.replace("\x00", ",")
 
 
 def _dates_in(text: str) -> list[tuple[str, bool, int]]:
@@ -261,7 +300,7 @@ def extract_deadline(html: str):
     numeric/locale-ambiguous, or a strong signal ties the date to another event. Within the
     clause the date nearest the cue is chosen (so "…and close on 1 Dec" binds the close date).
     """
-    for sentence in _sentences(main_text(html)):
+    for sentence in _sentences(_ABBR_MONTH_DOT.sub(r"\1", main_text(html))):
         if not _CUE_RE.search(sentence):        # cheap prefilter before the per-clause work
             continue
         for clause in _clauses(sentence):

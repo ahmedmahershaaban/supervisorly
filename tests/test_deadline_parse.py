@@ -251,6 +251,52 @@ def test_real_application_deadline_beside_a_fee_word_in_one_clause_still_qualifi
     assert iso == "2026-12-01" and conf == "quoted_official"
 
 
+# ── live audit-3: subject-head model replaces the fragile 64-char window ────────
+def test_payment_subject_far_from_domain_word_is_not_a_deadline():
+    # findings 1 & 8 (HIGH): a fee/deposit due-date must not be fabricated as a firm deadline even
+    # when the money noun is far from the domain word, or tied to it by an infinitive rather than for/of.
+    for sentence in (
+        "The compulsory non-refundable registration fee that applies to every one of our graduate "
+        "research positions is due by 15 January 2027.",
+        "The deposit for anyone holding a conditional or unconditional offer for our funded doctoral "
+        "studentships is due by 1 December 2026.",
+        "A deposit to secure your position is due by 1 December 2026.",
+        "An enrolment deposit to hold your PhD position is due by 15 January 2027.",
+    ):
+        assert _deadline(sentence) is None, sentence
+
+
+def test_real_deadline_survives_a_fee_word_elsewhere_in_the_sentence():
+    # findings 2 & 6: a genuine "applications close" must not be over-dropped because a fee word
+    # co-occurs in the same sentence (payment-before-subject or a following payment clause).
+    for sentence in (
+        "The scholarship covers all fees for the first year and applications close on 1 December 2026.",
+        "Applications to the PhD programme close on 1 December 2026 and the application fee is non-refundable.",
+    ):
+        iso, _, conf = _deadline(sentence)
+        assert iso == "2026-12-01" and conf == "quoted_official", sentence
+
+
+def test_appositive_between_subject_and_cue_does_not_drop_the_deadline():
+    # finding 10: commas setting off an appositive must not sever the subject from its cue.
+    iso, _, conf = _deadline(
+        "Applications for our PhD program, including the studentship, close on 1 December 2026.")
+    assert iso == "2026-12-01" and conf == "quoted_official"
+
+
+def test_abbreviated_month_names_are_parsed():
+    # finding 9: abbreviated months (with or without a trailing period) are extremely common.
+    for sentence, iso in (
+        ("Applications close on 15 Jan 2027.", "2027-01-15"),
+        ("Applications close on 1 Dec 2026.", "2026-12-01"),
+        ("The application deadline is 30 Sept 2026.", "2026-09-30"),
+        ("Apply by Feb 28, 2027.", "2027-02-28"),
+        ("Applications close on 1 Dec. 2026.", "2026-12-01"),
+    ):
+        r = _deadline(sentence)
+        assert r is not None and r[0] == iso and r[2] == "quoted_official", sentence
+
+
 # ── audit round 5: no quadratic blow-up on long unpunctuated text ──────────────
 def test_long_unpunctuated_text_does_not_blow_up():
     # a large boilerplate/nav dump with no sentence punctuation must stay fast (no O(n^2))
