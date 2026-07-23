@@ -207,3 +207,26 @@ continues (D-060). `env` is injected, so both are testable without touching the 
 the offline demo path never calls `require_credentials`.
 **Ran:** pytest → **75 passed** (exit 0), incl. missing/partial/complete credentials, sparse-warns-not-blocks,
 well-covered-is-quiet, and *the offline demo needs no credentials*.
+
+## round L — directory triage: roster-enumeration, LOGIN_WALL, distinct coverage (commit pending)
+
+Three edge-case rows (login-walled directory; department not found; zero-result distinction)
+via a new `discover` package + a run-level coverage note.
+
+**Built:**
+- `discover/roster.py` — `classify_directory` sorts a directory fetch into **OPEN /
+  LOGIN_WALL / NOT_FOUND**. A robots `Disallow` *or* a login/bot wall in the page →
+  LOGIN_WALL; `route_directory` then enqueues a `roster_enumerate` **human** task
+  (`awaiting_human`) and marks the unit `LOGIN_WALL` — it **never reads or scrapes** the
+  walled content (D-039/044/052). A 404/unreachable dir → `NOT_FOUND`, a *distinct* coverage
+  gap, no human task. `detect_login_wall` is deliberately conservative so a real roster isn't
+  mislabelled.
+- `model/units.py` — `upsert_unit` / `set_unit_coverage` / `get_unit` (the `coverage_note`
+  spine, D-052).
+- `pipeline.py` + `dashboard.py` — the run now carries an honest **coverage line** so the
+  empty-state tells *"sources returned nothing"* (a coverage gap) apart from *"found people,
+  none matched"* (a filter) — the deterministic pipeline never drops a professor, so zero
+  means discovery surfaced no one (D-046).
+**Ran:** pytest → **80 passed** (exit 0), incl. three-way classification, *login-wall routes to
+the human rung and scrapes nothing* (asserts no person tasks created), *not-found is distinct
+coverage with no human task*, and the zero-result coverage-gap note.

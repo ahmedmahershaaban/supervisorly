@@ -120,8 +120,9 @@ function renderTable(){
   html += '</tbody></table>';
   document.getElementById("grid").innerHTML =
     profs.length ? html : '<div class="empty">'+
-    (DATA.professors.length? 'No professors match. Try clearing the filter.' :
-     'This search returned no professors — see the coverage note.')+'</div>';
+    (DATA.professors.length ? 'No professors match. Try clearing the filter.'
+      : 'No professors to show — '+
+        esc((DATA.run && DATA.run.coverage) || 'this search returned nothing.'))+'</div>';
 }
 function renderDeadlines(){
   var dfs = dateFields();

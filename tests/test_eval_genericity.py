@@ -62,12 +62,16 @@ def test_demo_has_zero_hallucinations(tmp_path):
 
 
 def test_zero_result_run_is_valid_and_empty(tmp_path):
-    """No targets → a valid, empty export and a dashboard that says so, not a crash."""
+    """No targets → a valid, empty export and a dashboard that says so, not a crash.
+    The coverage note distinguishes 'sources returned nothing' from 'none matched'."""
     tp, _, plan = demo.demo_fixture()
     result = pipeline.run_offline(plan, [], tp, tmp_path / "snaps")
     assert jx.validate_export(result["export"]) == []
     assert result["export"]["professors"] == []
     assert "no professors" in result["html"].lower()
+    # honest, distinct coverage: this is a coverage gap, not a filtered-out result
+    coverage = result["export"]["run"]["coverage"]
+    assert "coverage gap" in coverage and "returned any professors" in coverage
 
 
 def test_cli_scan_demo_writes_dashboard(tmp_path):

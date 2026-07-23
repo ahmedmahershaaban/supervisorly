@@ -175,9 +175,16 @@ def run_offline(plan: dict, targets: list[dict], transport: Transport, snap_root
 
     professors = [{"id": t["id"], "name": t.get("name")} for t in targets]
     claims_by_entity = {t["id"]: claims.claims_for(conn, "person", t["id"]) for t in targets}
+    enumerated = len(targets)
+    # Honest coverage line so the empty-state can tell "sources returned nothing" apart
+    # from "found people, none matched" (edge-case matrix / D-046). The deterministic
+    # pipeline never drops a professor, so zero here means discovery surfaced no one.
+    coverage = ("No sources returned any professors for this search — this is a coverage "
+                "gap, not a filtered result." if enumerated == 0
+                else f"{enumerated} professor(s) enumerated; none were dropped for missing data.")
     export = jx.build_export(
         run_summary={"run_id": run_id, "status": "finalized",
-                     "counts": {"enumerated": len(targets)}},
+                     "counts": {"enumerated": enumerated}, "coverage": coverage},
         field_descriptors=FIELD_DESCRIPTORS,
         professors=professors,
         claims_by_entity=claims_by_entity,
