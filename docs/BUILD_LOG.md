@@ -38,3 +38,25 @@ clean, and `python -m supervisorly` works regardless. The venv is the documented
 **DoD (Phase A):** met — DB migrates idempotently; Run/Task state machine round-trips through
 `awaiting_human_input` and `finalized_with_open_gaps`; resume via `incomplete_tasks`; the
 ExtractionCache 4-tuple is unique.
+
+## round B1 — Phase-3 Markdown grammar (commit `0f524d7`)
+
+**Built:** `extract/md_grammar.py` — the single source of truth for the human-return format
+(D-051): `parse`, `emit` (lossless), `to_claim_dicts` (extractor=human-assisted, D-043). A value
+must cite a `source_url` (D-010); `searched_absent` records honest nulls (D-046). Contract doc.
+**Ran:** pytest → **16 passed**. **DoD:** met — fixture round-trips losslessly; malformed input
+fails loud.
+
+## round B2 — JSON export contract (commit pending)
+
+**Built:** `export/json_export.py` — `build_export` (claims → four-state envelopes + generic
+field descriptors) and `validate_export` (D-046). Judgement/PII fields (`exportable: false`)
+never serialise (D-024); every `value` cites a source (D-010); a professor with no claims is
+still exported, all fields `never_attempted` (D-037). Contract doc.
+**Ran:** pytest → **22 passed**. **DoD (Phase B contracts):** met — MD round-trips into claims;
+the JSON validates against a worked example and rejects leaks.
+
+**Remaining phases:** C (discovery ladder + fetcher/snapshots/cache), D (extraction + LLM agents
++ quote-verification), E (scoring: intent gates, topic-ID match, works reconciliation), F (dashboard),
+G (human-rung wiring: chrome-prompt-generator + md-ingester + resume, roster-enumeration), H (eval
+set), I (self-run), J (refine), then clean-room verify. SKILL.md + agent definition files still to write.
