@@ -101,3 +101,14 @@ def test_live_scan_has_zero_hallucinations(tmp_path):
 def test_live_scan_fails_loud_without_a_contact_email(tmp_path):
     with pytest.raises(preflight.MissingCredentials):
         pipeline.run_live(PLAN, _transport(), tmp_path / "snaps", email="", **_FAST)
+
+
+def test_live_scan_respects_optout_on_a_discovered_professor(tmp_path):
+    # someone discovered by the ladder who is on the opt-out list is dropped before any fetch (D-023)
+    f = tmp_path / "optout.txt"
+    f.write_text("A200\n", encoding="utf-8")            # suppress Ada by her id
+    r = pipeline.run_live(PLAN, _transport(), tmp_path / "snaps", email=EMAIL,
+                          optout_path=str(f), **_FAST)
+    ids = {p["id"] for p in r["export"]["professors"]}
+    assert "A200" not in ids and "A202" in ids
+    assert r["stats"]["opted_out"] == 1
