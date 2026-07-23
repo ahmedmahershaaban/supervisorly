@@ -47,23 +47,30 @@ _RECRUIT = re.compile(
 )
 
 # ── deadline signal (D-061) ───────────────────────────────────────────────────
-_DEADLINE_CUE = (r"deadline|applications?\s+(?:close|open|due|are\s+due)|apply\s+by|"
+# NB: "applications open" is deliberately NOT a cue — an *opening* date is the opposite of a
+# deadline; treating it as one fabricated firm deadlines from opening dates (audit round 2).
+# "close(s)" is a standalone cue (a deadline sentence already requires a date to be present,
+# so "...and close on 1 December" is caught even without an "applications" prefix).
+_DEADLINE_CUE = (r"deadline|applications?\s+(?:close|due|are\s+due)|\bcloses?\b|apply\s+by|"
                  r"closing\s+date|submit(?:ted)?\s+by|due\s+by")
 # a sentence carrying a deadline cue (a date is required separately, below)
 _DEADLINE = re.compile(rf"[^.!?]*\b(?:{_DEADLINE_CUE})\b[^.!?]*[.!?]", re.IGNORECASE)
+# where the cue sits, so the date can be bound to *its* clause (not blindly the first date)
+_CUE_RE = re.compile(rf"\b(?:{_DEADLINE_CUE})\b", re.IGNORECASE)
 # cue words that make a date *projected*, not a published/firm deadline (→ watch date)
 _PROJECTED = re.compile(
     r"\b(typically|usually|generally|normally|around|about|each\s+year|every\s+year|"
     r"annually|rolling|expected|projected|anticipated|likely)\b",
     re.IGNORECASE,
 )
-# A date bound in a clause *other than* the deadline cue's makes it unsafe to call firm —
-# e.g. "the deadline has passed, but the semester begins 1 September 2026" (D-061). Such a
-# match is downgraded to a watch date, never shown as firm.
+# STRONG signals that the parsed date belongs to some other event than the deadline (a term
+# start, a passed round) → downgrade to a watch date, never firm (D-061). Kept deliberately
+# narrow: generic tokens ("but", ";", bare "start") wrongly demoted real firm deadlines
+# whose date sits in the cue's own clause (audit round 2).
 _NONFIRM = re.compile(
-    r"\b(has\s+passed|passed|no\s+fixed|previous|but|however|semester\s+begins|"
-    r"term\s+begins|classes\s+(?:begin|start)|intake\s+(?:starts|begins)|"
-    r"academic\s+year\s+begins|starts?|began)\b|;",
+    r"\b(has\s+passed|deadline\s+has\s+passed|no\s+fixed|next\s+intake|previous\s+round|"
+    r"semester\s+begins|term\s+begins|classes\s+(?:begin|start)|"
+    r"intake\s+(?:starts|begins)|academic\s+year\s+begins)\b",
     re.IGNORECASE,
 )
 _MONTHS = {m: i for i, m in enumerate(
@@ -91,43 +98,65 @@ FIELD_DESCRIPTORS = [
 ]
 
 
-def _normalize_date(text: str) -> tuple[str, bool] | None:
-    """Deterministically parse the first full (day+month+year) date to ISO.
+_DATE_RXS = (("iso", _ISO), ("dmy", _DMY), ("mdy", _MDY), ("num", _NUM))
 
-    Returns ``(iso, ambiguous)`` or ``None``. Requires all three parts — a bare month/season
-    is never invented into a date, and an impossible calendar date (Feb 31) is rejected.
-    ``ambiguous`` is True for a numeric ``dd/mm/yyyy`` date (locale-uncertain) so the caller
-    can present it as a watch date rather than firm (D-061).
+
+def _iso_from_match(kind: str, m: re.Match) -> tuple[str, bool] | None:
+    """Turn one date-regex match into ``(iso, ambiguous)`` or None if invalid/unparseable.
+
+    An impossible calendar date (Feb 31) is rejected; a numeric ``dd/mm`` date is flagged
+    ``ambiguous`` (locale-uncertain → watch); a truly ambiguous numeric (both parts ≤12) is
+    not guessed.
     """
-    m = _ISO.search(text)
-    if m:
+    if kind == "iso":
         y, mo, d = (int(x) for x in m.groups())
-        return (f"{y:04d}-{mo:02d}-{d:02d}", False) if _valid_date(y, mo, d) else None
-
-    m = _DMY.search(text)
-    if m and m.group(2).lower() in _MONTHS:
+        ambiguous = False
+    elif kind == "dmy":
+        if m.group(2).lower() not in _MONTHS:
+            return None
         d, mo, y = int(m.group(1)), _MONTHS[m.group(2).lower()], int(m.group(3))
-        return (f"{y:04d}-{mo:02d}-{d:02d}", False) if _valid_date(y, mo, d) else None
-
-    m = _MDY.search(text)
-    if m and m.group(1).lower() in _MONTHS:
+        ambiguous = False
+    elif kind == "mdy":
+        if m.group(1).lower() not in _MONTHS:
+            return None
         mo, d, y = _MONTHS[m.group(1).lower()], int(m.group(2)), int(m.group(3))
-        return (f"{y:04d}-{mo:02d}-{d:02d}", False) if _valid_date(y, mo, d) else None
-
-    m = _NUM.search(text)
-    if m:
+        ambiguous = False
+    else:  # numeric dd/mm/yyyy — disambiguate by the >12 rule, else don't guess
         a, b, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
-        # Disambiguate by the >12 rule; if both are ≤12 the order is genuinely unknowable, so
-        # we do NOT guess (a wrong deadline is worse than an honest absent one).
-        if a > 12 and b <= 12:      # a is the day → dd/mm
+        if a > 12 and b <= 12:
             d, mo = a, b
-        elif b > 12 and a <= 12:    # b is the day → mm/dd
+        elif b > 12 and a <= 12:
             mo, d = a, b
         else:
             return None
-        # numeric dates are inherently lower-confidence → flag ambiguous (watch, not firm)
-        return (f"{y:04d}-{mo:02d}-{d:02d}", True) if _valid_date(y, mo, d) else None
-    return None
+        ambiguous = True
+    if not _valid_date(y, mo, d):
+        return None
+    return f"{y:04d}-{mo:02d}-{d:02d}", ambiguous
+
+
+def _dates_in(text: str) -> list[tuple[str, bool, int]]:
+    """Every valid full (day+month+year) date in ``text`` as (iso, ambiguous, position)."""
+    out = []
+    for kind, rx in _DATE_RXS:
+        for m in rx.finditer(text):
+            parsed = _iso_from_match(kind, m)
+            if parsed:
+                out.append((parsed[0], parsed[1], m.start()))
+    return out
+
+
+def _normalize_date(text: str) -> tuple[str, bool] | None:
+    """First valid full date in ``text`` as ``(iso, ambiguous)``, else None.
+
+    Requires all three parts — a bare month/season is never invented, and an impossible
+    calendar date (Feb 31) is rejected.
+    """
+    dates = _dates_in(text)
+    if not dates:
+        return None
+    dates.sort(key=lambda x: x[2])
+    return dates[0][0], dates[0][1]
 
 
 def extract_recruiting_signal(html: str):
@@ -144,19 +173,24 @@ def extract_deadline(html: str):
 
     ``confidence`` is ``quoted_official`` only for a firm, published, spelled-out date whose
     cue owns it; it is ``inferred`` (a *watch* date, D-061) when the sentence is projected
-    ("usually"/"each year"), the date is numeric/locale-ambiguous, or the date sits in a
-    different clause than the cue ("deadline has passed, but term begins 1 September 2026").
+    ("usually"/"each year"), the date is numeric/locale-ambiguous, or a strong signal says the
+    date belongs to another event ("deadline has passed, but term begins 1 September 2026").
+    The date is bound to the one **nearest the cue**, so a sentence that states both an opening
+    and a closing date yields the closing (deadline) date, not the opening one.
     """
     text = main_text(html)
     for m in _DEADLINE.finditer(text):
         sentence = m.group(0).strip()
-        nd = _normalize_date(sentence)
-        if nd:
-            iso, ambiguous = nd
-            projected = (ambiguous
-                         or bool(_PROJECTED.search(sentence))
-                         or bool(_NONFIRM.search(sentence)))
-            return iso, sentence, ("inferred" if projected else "quoted_official")
+        dates = _dates_in(sentence)
+        if not dates:
+            continue
+        cue = _CUE_RE.search(sentence)
+        cue_pos = cue.start() if cue else 0
+        iso, ambiguous, _pos = min(dates, key=lambda dp: abs(dp[2] - cue_pos))
+        projected = (ambiguous
+                     or bool(_PROJECTED.search(sentence))
+                     or bool(_NONFIRM.search(sentence)))
+        return iso, sentence, ("inferred" if projected else "quoted_official")
     return None
 
 

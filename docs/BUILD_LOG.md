@@ -410,3 +410,26 @@ DB; its claims are reused from storage, and `stats["resumed_skipped"]` records h
 `test_resume_does_not_refetch_already_completed_targets` (a counting transport proves p1/p2 are not
 re-requested on resume while a newly-added p3 is; all three present in the export) + full suite →
 **119 passed** (exit 0). **The adversarial audit's 10 findings are now all fixed with regression tests.**
+
+---
+
+# Phase J — second-pass audit (goal §5 loop) and its fixes
+
+A leaner second audit over the changed surfaces (+ a completeness critic) surfaced **6 more
+verified findings** — mostly *adjacent* issues the first fixes exposed. Fixing each below.
+
+## round V — refine²: deadline cue/clause binding (findings 1, 4) (commit pending)
+
+**Fixed in `pipeline.py`:**
+- **(finding 1, high)** `"applications open"` was a deadline cue, so an *opening* date was emitted
+  as a firm deadline. Removed `open` from the cue; the date is now bound to the one **nearest the
+  cue** (refactored `_iso_from_match`/`_dates_in`), so *"applications open 1 Oct … and close 1 Dec"*
+  yields the **close** date, and an opening-only sentence yields **no** deadline. Added standalone
+  `close(s)` as a cue (a deadline sentence already requires a date, so "…and close on 1 Dec" is caught).
+- **(finding 4, medium)** `_NONFIRM` matched the whole sentence with generic tokens (`but`, `;`,
+  bare `start`), wrongly demoting firm deadlines in the cue's own clause. Tightened to **strong**
+  signals only (`has passed`, `no fixed`, `semester/term/academic-year begins`, `next intake`), so
+  *"due by 1 Dec 2026, but decisions come in March"* and *"deadline to start your application is
+  1 Dec 2026"* stay **firm**, while *"deadline has passed, but term begins 1 Sep"* stays **watch**.
+**Ran:** `test_deadline_parse.py` (+8 new: open-only→none, open+close→close, date-before-cue,
+`but`/`start`/`;` stay firm) + full suite → **125 passed** (exit 0).

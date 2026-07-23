@@ -68,3 +68,40 @@ def test_no_fixed_deadline_clause_is_watch():
 def test_a_clean_published_date_is_still_firm():
     iso, _, conf = _deadline("Applications close on 1 December 2026.")
     assert iso == "2026-12-01" and conf == "quoted_official"
+
+
+# ── audit round 2: an OPENING date must not be emitted as a deadline ───────────
+def test_opening_only_sentence_yields_no_deadline():
+    # "applications open" is not a deadline cue — an opening date is the opposite of one
+    assert _deadline("Applications open on 1 October 2026.") is None
+
+
+def test_open_and_close_sentence_binds_the_close_date():
+    # the date nearest the cue ("close") is the deadline — not the earlier opening date
+    iso, _, conf = _deadline(
+        "Applications open on 1 October 2026 and close on 1 December 2026."
+    )
+    assert iso == "2026-12-01" and conf == "quoted_official"
+
+
+def test_deadline_stated_before_the_cue_is_still_found():
+    iso, _, conf = _deadline("1 December 2026 is the application deadline.")
+    assert iso == "2026-12-01" and conf == "quoted_official"
+
+
+# ── audit round 2: a firm deadline in the cue's own clause stays firm ──────────
+def test_but_in_a_later_clause_does_not_demote_a_firm_deadline():
+    iso, _, conf = _deadline(
+        "Applications are due by 1 December 2026, but decisions come in March."
+    )
+    assert iso == "2026-12-01" and conf == "quoted_official"
+
+
+def test_generic_start_word_does_not_demote_a_firm_deadline():
+    iso, _, conf = _deadline("The deadline to start your application is 1 December 2026.")
+    assert iso == "2026-12-01" and conf == "quoted_official"
+
+
+def test_semicolon_apply_early_stays_firm():
+    iso, _, conf = _deadline("The application deadline is 1 December 2026; apply early.")
+    assert iso == "2026-12-01" and conf == "quoted_official"
