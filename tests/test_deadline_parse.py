@@ -49,19 +49,19 @@ def test_impossible_dates_are_rejected():
     assert _deadline("Applications close February 31, 2026.") is None
 
 
-# ── finding: a date in a different clause than the cue is not firm ─────────────
-def test_date_in_a_different_clause_is_watch_not_firm():
-    iso, _, conf = _deadline(
+# ── a date belonging to a DIFFERENT clause/event is not an application deadline ─
+# (clause-level extraction, audit round 5: the deadline cue+subject and the date must share one
+# clause; here the only date is a semester/academic-year start, so there is no deadline date.)
+def test_date_that_belongs_to_a_semester_start_is_not_a_deadline():
+    assert _deadline(
         "The application deadline has passed, but the fall semester begins 1 September 2026."
-    )
-    assert iso == "2026-09-01" and conf == "inferred"          # never shown as firm
+    ) is None
 
 
-def test_no_fixed_deadline_clause_is_watch():
-    iso, _, conf = _deadline(
+def test_no_fixed_deadline_with_only_an_academic_year_date_is_a_miss():
+    assert _deadline(
         "There is no fixed application deadline; the academic year begins 1 October 2026."
-    )
-    assert iso == "2026-10-01" and conf == "inferred"
+    ) is None
 
 
 # ── the firm baseline still holds ─────────────────────────────────────────────
@@ -159,6 +159,41 @@ def test_deadline_verbs_with_application_context_extract_firmly():
         assert iso == "2026-12-01" and conf == "quoted_official", sentence
 
 
+# ── audit round 5: a compound sentence binds the date to the APPLICATION clause ─
+def test_compound_sentence_binds_the_application_deadline_not_an_unrelated_date():
+    # an unrelated closing date sits beside the real application deadline; the clause with the
+    # application subject wins, not the leftmost cue (semicolon and comma variants).
+    iso, _, conf = _deadline(
+        "Office hours close on 1 December 2026; applications for the fellowship must be "
+        "submitted by 15 January 2027."
+    )
+    assert iso == "2027-01-15" and conf == "quoted_official"
+    iso2, _, conf2 = _deadline(
+        "The library closes on 1 December 2026, and the application deadline is 15 January 2027."
+    )
+    assert iso2 == "2027-01-15" and conf2 == "quoted_official"
+
+
+# ── audit round 5: domain context (phd/postdoc/position) is recognised ─────────
+def test_domain_context_deadline_phrasings_are_recognised():
+    for sentence in (
+        "The PhD deadline is 1 December 2026.",
+        "PhD studentship closes 1 December 2026.",
+        "The position closes on 1 December 2026.",
+        "The fellowship application deadline is 1 December 2026.",
+    ):
+        iso, _, conf = _deadline(sentence)
+        assert iso == "2026-12-01", sentence
+
+
+# ── audit round 5: no quadratic blow-up on long unpunctuated text ──────────────
+def test_long_unpunctuated_text_does_not_blow_up():
+    # a large boilerplate/nav dump with no sentence punctuation must stay fast (no O(n^2))
+    big = "Prof Someone " * 8000 + "applications close 1 December 2026"
+    iso, _, conf = pipeline.extract_deadline(f"<html><body><main>{big}</main></body></html>")
+    assert iso == "2026-12-01"      # still found, and returns promptly (guarded by test timeout)
+
+
 # ── audit round 3: a non-firm phrase in a dateless OTHER clause must not demote ─
 def test_nonfirm_in_a_dateless_clause_does_not_demote_a_firm_deadline():
     iso, _, conf = _deadline(
@@ -167,9 +202,7 @@ def test_nonfirm_in_a_dateless_clause_does_not_demote_a_firm_deadline():
     assert iso == "2026-12-01" and conf == "quoted_official"
 
 
-def test_nonfirm_sharing_the_dates_clause_still_demotes():
-    # the round-2 behaviour must be preserved: date in the "semester begins" clause → watch
-    iso, _, conf = _deadline(
-        "The application deadline has passed, but the fall semester begins 1 September 2026."
-    )
-    assert iso == "2026-09-01" and conf == "inferred"
+def test_projected_keyword_in_the_clause_makes_it_a_watch_date():
+    # a projection word sharing the deadline clause → the date is a watch date, not firm (D-061)
+    iso, _, conf = _deadline("Applications typically close 1 December 2026.")
+    assert iso == "2026-12-01" and conf == "inferred"

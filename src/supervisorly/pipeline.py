@@ -47,24 +47,23 @@ _RECRUIT = re.compile(
 )
 
 # ── deadline signal (D-061) ───────────────────────────────────────────────────
-# Two-part guard so a date is only read as a deadline in a genuine application context (and
-# never fabricated from "rent is due by…", "office hours close on…", "the store's closing date
-# is…", "tax returns must be submitted by…"):
-#   1. a deadline *verb* cue below locates the clause a date binds to (for positioning), and
-#   2. ``_APP_CONTEXT`` must ALSO appear in the sentence for the extraction to count.
-# A deadline-shaped sentence with no application context is an honest miss (searched_absent),
-# not a fabricated firm date (D-010/D-061 — never guess). Keeping the verb cue separate from
-# the subject check is what lets "Applications open 1 Oct … and close on 1 Dec" bind the close
-# date (verb "close" owns the clause) while "office hours close on Fridays" is dropped (no
-# application subject).
+# A date is read as a deadline only when a deadline **verb cue**, an **application-context**
+# word, AND a full date all share ONE CLAUSE. Working per-clause (not per-sentence) is what
+# stops a real "office hours close on 1 Dec; applications … 15 Jan" from binding the wrong
+# (office-hours) date, and stops "rent is due by 1 Dec" / "the library closes on 1 Dec" from
+# fabricating a firm application deadline at all. A clause that doesn't satisfy all three is an
+# honest miss (searched_absent), never a guessed firm date (D-010/D-061).
 _DEADLINE_CUE = (r"deadline|apply\s+by|closes?\b|closing\s+date|due\s+by|"
                  r"(?:are|is)\s+due|(?:applications?|submissions?)\s+due|submit(?:ted)?\s+by")
-_APP_CONTEXT = re.compile(
-    r"\b(?:applications?|applicants?|apply|submissions?|admissions?)\b", re.IGNORECASE)
-# a sentence carrying a deadline cue (a date is required separately, below)
-_DEADLINE = re.compile(rf"[^.!?]*\b(?:{_DEADLINE_CUE})\b[^.!?]*[.!?]", re.IGNORECASE)
-# where the cue sits, so the date can be bound to *its* clause (not blindly the first date)
 _CUE_RE = re.compile(rf"\b(?:{_DEADLINE_CUE})\b", re.IGNORECASE)
+# Domain context for a deadline — the deterministic signal tier, like the recruiting regex, is a
+# fixed heuristic (NOT a generated per-query search dictionary, so D-038 stands). These are the
+# subjects a supervisor-seeker's deadline actually attaches to.
+_APP_CONTEXT = re.compile(
+    r"\b(?:applications?|applicants?|apply|admissions?|submissions?|enrol\w*|"
+    r"phd|dphil|doctoral|postdoc\w*|fellowships?|studentships?|scholarships?|"
+    r"assistantships?|positions?|vacanc(?:y|ies)|programmes?|programs?)\b",
+    re.IGNORECASE)
 # cue words that make a date *projected*, not a published/firm deadline (→ watch date)
 _PROJECTED = re.compile(
     r"\b(typically|usually|generally|normally|around|about|each\s+year|every\s+year|"
@@ -143,20 +142,20 @@ def _iso_from_match(kind: str, m: re.Match) -> tuple[str, bool] | None:
     return f"{y:04d}-{mo:02d}-{d:02d}", ambiguous
 
 
-def _clause_containing(sentence: str, pos: int) -> str:
-    """Return the clause (split on ``,``/``;``) that contains character ``pos``.
+# mask a comma that sits *inside* a "…D[st], YYYY" date so clause-splitting doesn't cut the date
+_DATE_COMMA = re.compile(r"(\d(?:st|nd|rd|th)?)\s*,(\s*20\d{2})")
 
-    Used so a "belongs to another event" signal only downgrades the deadline when it shares
-    the date's clause — a strong phrase in a separate, dateless clause must not demote a firm,
-    cue-owned date (audit round 3).
-    """
-    seps = [m.start() for m in re.finditer(r"[;,]", sentence)]
-    starts = [0] + [s + 1 for s in seps]
-    ends = seps + [len(sentence)]
-    for st, en in zip(starts, ends):
-        if st <= pos < en:
-            return sentence[st:en]
-    return sentence
+
+def _sentences(text: str):
+    """Split text into sentences on terminal punctuation (bounded work per sentence)."""
+    return re.split(r"(?<=[.!?])\s+", text)
+
+
+def _clauses(sentence: str):
+    """Yield the clauses of a sentence (split on ``;`` and clause commas), keeping dates whole."""
+    masked = _DATE_COMMA.sub(lambda m: m.group(1) + "\x00" + m.group(2), sentence)
+    for part in re.split(r"[;,]", masked):
+        yield part.replace("\x00", ",")
 
 
 def _dates_in(text: str) -> list[tuple[str, bool, int]]:
@@ -193,34 +192,31 @@ def extract_recruiting_signal(html: str):
 
 
 def extract_deadline(html: str):
-    """Return (iso_date, quote, confidence) for a dated deadline sentence, or None.
+    """Return (iso_date, quote, confidence) for an application deadline, or None.
 
-    ``confidence`` is ``quoted_official`` only for a firm, published, spelled-out date whose
-    cue owns it; it is ``inferred`` (a *watch* date, D-061) when the sentence is projected
-    ("usually"/"each year"), the date is numeric/locale-ambiguous, or a strong signal says the
-    date belongs to another event ("deadline has passed, but term begins 1 September 2026").
-    The date is bound to the one **nearest the cue**, so a sentence that states both an opening
-    and a closing date yields the closing (deadline) date, not the opening one.
+    A date qualifies only when a deadline **verb cue**, an **application-context** word, and a
+    full date all share ONE clause — so the date, the deadline, and the subject genuinely belong
+    together. ``confidence`` is ``quoted_official`` for a firm spelled-out date, or ``inferred``
+    (a *watch* date, D-061) when the clause is projected ("usually"/"each year"), the date is
+    numeric/locale-ambiguous, or a strong signal ties the date to another event. Within the
+    clause the date nearest the cue is chosen (so "…and close on 1 Dec" binds the close date).
     """
-    text = main_text(html)
-    for m in _DEADLINE.finditer(text):
-        sentence = m.group(0).strip()
-        # a deadline-shaped sentence only counts in an application context (rent/tax/store
-        # "due by"/"closing date" must never become a firm application deadline).
-        if not _APP_CONTEXT.search(sentence):
+    for sentence in _sentences(main_text(html)):
+        # cheap sentence-level prefilter before the per-clause work
+        if not (_CUE_RE.search(sentence) and _APP_CONTEXT.search(sentence)):
             continue
-        dates = _dates_in(sentence)
-        if not dates:
-            continue
-        cue = _CUE_RE.search(sentence)
-        cue_pos = cue.start() if cue else 0
-        iso, ambiguous, date_pos = min(dates, key=lambda dp: abs(dp[2] - cue_pos))
-        # _PROJECTED ("usually"/"each year") applies anywhere; a strong "other-event" signal
-        # only demotes when it shares the *date's* clause (not a separate, dateless one).
-        projected = (ambiguous
-                     or bool(_PROJECTED.search(sentence))
-                     or bool(_NONFIRM.search(_clause_containing(sentence, date_pos))))
-        return iso, sentence, ("inferred" if projected else "quoted_official")
+        for clause in _clauses(sentence):
+            cue = _CUE_RE.search(clause)
+            if not cue or not _APP_CONTEXT.search(clause):
+                continue
+            dates = _dates_in(clause)
+            if not dates:
+                continue
+            iso, ambiguous, _pos = min(dates, key=lambda dp: abs(dp[2] - cue.start()))
+            projected = (ambiguous
+                         or bool(_PROJECTED.search(clause))
+                         or bool(_NONFIRM.search(clause)))
+            return iso, sentence.strip(), ("inferred" if projected else "quoted_official")
     return None
 
 

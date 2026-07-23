@@ -543,6 +543,29 @@ date (the verb owns its clause) — the round-2 intent, now achieved safely.
 deadline/apply-by with context → firm; combined open+close → close date) + full suite →
 **136 passed** (exit 0).
 
+## round CC — refine⁶: clause-level deadline extraction (root-cause rewrite)
+
+Another closing verifier found three issues in the deadline tier — a sign to fix root causes,
+not patch symptoms. Rewrote `extract_deadline` to work **per clause** instead of per sentence.
+
+**Fixed:**
+- **(compound-sentence mis-binding, high)** nearest-cue binding bound the leftmost cue's date
+  regardless of where the application subject sat, so *"Office hours close on 1 Dec; applications …
+  15 Jan"* fabricated the office-hours date as the deadline. Now a deadline requires the **verb
+  cue + application-context + date in ONE clause** (`_sentences` → `_clauses`, protecting
+  date-internal commas), so the compound case correctly binds **15 Jan**.
+- **(recall, medium)** expanded the domain context to the subjects a supervisor-seeker's deadline
+  attaches to (phd/doctoral/postdoc/fellowship/studentship/position/…), so *"The PhD deadline is
+  1 Dec 2026"* and *"The position closes on 1 Dec 2026"* are found — still a fixed signal-tier
+  heuristic, not a generated search dictionary (D-038 stands).
+- **(O(n²) blow-up, medium)** dropped the `[^.!?]*cue[^.!?]*` `finditer` that was quadratic on
+  unpunctuated text (~78s at 40 KB); the sentence/clause iteration is linear — **96 KB now parses
+  in 0.077s**.
+Sentences whose only date is a semester/academic-year start (a different event) now correctly
+**miss** (honest `searched_absent`) instead of surfacing a mis-bound watch date.
+**Ran:** `test_deadline_parse.py` (+ compound-sentence binds the application clause; phd/position
+phrasings; long-unpunctuated perf; semester-start dates → miss) + full suite → **139 passed** (exit 0).
+
 ## COMPLETION — goal met
 
 All phases (A–J) met their DoD; 18/18 edge-case rows have passing tests; the offline self-run is
