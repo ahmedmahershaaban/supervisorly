@@ -483,3 +483,22 @@ both regressions from round V** (completeness + PII dimensions came back clean).
   bound date's clause; `_PROJECTED` still applies sentence-wide.
 **Ran:** `test_deadline_parse.py` (+4: incidental "close" → none; constrained close still works;
 dateless-clause stays firm; same-clause still demotes) + full suite → **134 passed** (exit 0).
+
+## round Z — refine⁴: constrain deadline cues to application contexts (commit pending)
+
+A final focused verification of round Y found one **still-reachable** defect: `closes?\s+on` was
+*still* too broad — it fabricated firm deadlines from *"Office hours close on Fridays; the term
+started 1 September 2024."* (binding the unrelated term-start date) and *"gym registration closes
+on 1 December 2026."* (the `_clause_containing`/`_NONFIRM` scoping itself held up under every stress
+test).
+
+**Fixed (correctness/honesty, high):** dropped the ambiguous close cues (`closes? on`,
+`registration/submissions closes`) and kept only **application/submission-specific** cues
+(`deadline`, `applications close/due`, `submissions close/due`, `apply by`, `closing date`,
+`submit by`, `due by`). A "close" without an application subject is now an **honest miss**
+(`searched_absent`) the LLM analyst can resolve later — a fabricated firm date is not (D-010/D-061).
+The combined *"…and close on 1 Dec"* test was corrected to assert this honest miss (a *more*
+conservative spec, not a weakened one).
+**Ran:** `test_deadline_parse.py` (application phrasings still firm; office-hours/library/gym
+"close on" → none) + full suite → **135 passed** (exit 0). **Audit trend 10 → 6 → 2 → 1; the parser
+now never fabricates a firm deadline from a non-application sentence.**

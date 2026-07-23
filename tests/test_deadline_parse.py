@@ -76,12 +76,13 @@ def test_opening_only_sentence_yields_no_deadline():
     assert _deadline("Applications open on 1 October 2026.") is None
 
 
-def test_open_and_close_sentence_binds_the_close_date():
-    # the date nearest the cue ("close") is the deadline — not the earlier opening date
-    iso, _, conf = _deadline(
+def test_bare_close_without_application_subject_is_an_honest_miss():
+    # audit round 4: "…and close on <date>" without an application subject is ambiguous
+    # ("office hours close on…", "the library closes on…"). We would rather MISS it (honest
+    # searched_absent) than bind a possibly-wrong date and call it firm (never guess, D-010/061).
+    assert _deadline(
         "Applications open on 1 October 2026 and close on 1 December 2026."
-    )
-    assert iso == "2026-12-01" and conf == "quoted_official"
+    ) is None
 
 
 def test_deadline_stated_before_the_cue_is_still_found():
@@ -118,14 +119,26 @@ def test_incidental_close_does_not_fabricate_a_deadline():
         assert _deadline(sentence) is None, sentence
 
 
-def test_close_in_a_real_deadline_context_still_works():
-    # the intended cases the constrained cue must still catch
-    iso, _, conf = _deadline(
-        "Applications open on 1 October 2026 and close on 1 December 2026."
-    )
-    assert iso == "2026-12-01" and conf == "quoted_official"
-    iso2, _, conf2 = _deadline("Registration closes 1 December 2026.")
-    assert iso2 == "2026-12-01" and conf2 == "quoted_official"
+def test_application_specific_deadline_phrasings_still_work():
+    # the application/submission-specific cues we DO trust
+    for sentence in (
+        "Applications close on 1 December 2026.",
+        "The closing date for applications is 1 December 2026.",
+        "The application deadline is 1 December 2026.",
+        "Submissions close 1 December 2026.",
+    ):
+        iso, _, conf = _deadline(sentence)
+        assert iso == "2026-12-01" and conf == "quoted_official", sentence
+
+
+def test_close_on_in_a_non_application_sentence_is_not_a_deadline():
+    # audit round 4: these fabricated firm deadlines before the cue was constrained
+    for sentence in (
+        "Office hours close on Fridays; the term started 1 September 2024.",
+        "The library closes on 1 December 2026 for winter break.",
+        "The gym registration closes on 1 December 2026.",
+    ):
+        assert _deadline(sentence) is None, sentence
 
 
 # ── audit round 3: a non-firm phrase in a dateless OTHER clause must not demote ─

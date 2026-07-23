@@ -47,13 +47,13 @@ _RECRUIT = re.compile(
 )
 
 # ── deadline signal (D-061) ───────────────────────────────────────────────────
-# NB: "applications open" is deliberately NOT a cue — an *opening* date is the opposite of a
-# deadline (audit round 2). And a *bare* "close(s)" is NOT a cue either: the everyday word
-# ("close to campus", "close collaborator", "office hours close") near an incidental date
-# fabricated firm deadlines (audit round 3). "close(s)" only counts in a deadline context:
-# "close(s) on <date>", or "registration/submissions/applications close(s)".
-_DEADLINE_CUE = (r"deadline|applications?\s+(?:close|due|are\s+due)|"
-                 r"(?:registration|submissions?)\s+closes?|closes?\s+on|"
+# Cues are deliberately kept to **application/submission** contexts. Broader "close" cues
+# ("applications open" round 2; bare "close(s)" round 3; "close(s) on" / "registration closes"
+# round 4) all fabricated firm deadlines from unrelated sentences ("office hours close on
+# Fridays", "the library closes on 1 Dec", "gym registration closes on 1 Dec"). A miss here is
+# an honest `searched_absent` the LLM analyst can resolve later; a fabricated firm date is not
+# (D-010/D-061 — never guess). So "…and close on 1 Dec" without an application subject is missed.
+_DEADLINE_CUE = (r"deadline|applications?\s+(?:close|due|are\s+due)|submissions?\s+(?:close|due)|"
                  r"apply\s+by|closing\s+date|submit(?:ted)?\s+by|due\s+by")
 # a sentence carrying a deadline cue (a date is required separately, below)
 _DEADLINE = re.compile(rf"[^.!?]*\b(?:{_DEADLINE_CUE})\b[^.!?]*[.!?]", re.IGNORECASE)
