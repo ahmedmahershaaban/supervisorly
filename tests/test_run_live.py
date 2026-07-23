@@ -63,8 +63,11 @@ def _transport():
     return tp
 
 
+_FAST = {"rate_limit": 0, "backoff_sleep": lambda _s: None}   # cassettes need no politeness delay
+
+
 def _run(tmp_path):
-    return pipeline.run_live(PLAN, _transport(), tmp_path / "snaps", email=EMAIL)
+    return pipeline.run_live(PLAN, _transport(), tmp_path / "snaps", email=EMAIL, **_FAST)
 
 
 def test_live_scan_discovers_and_produces_valid_export(tmp_path):
@@ -84,7 +87,7 @@ def test_live_scan_states_are_honest(tmp_path):
 
 
 def test_live_scan_has_zero_hallucinations(tmp_path):
-    r = pipeline.run_live(PLAN, _transport(), tmp_path / "snaps", email=EMAIL)
+    r = pipeline.run_live(PLAN, _transport(), tmp_path / "snaps", email=EMAIL, **_FAST)
     snaps = SnapshotStore(tmp_path / "snaps")
     checked = 0
     for p in r["export"]["professors"]:
@@ -97,4 +100,4 @@ def test_live_scan_has_zero_hallucinations(tmp_path):
 
 def test_live_scan_fails_loud_without_a_contact_email(tmp_path):
     with pytest.raises(preflight.MissingCredentials):
-        pipeline.run_live(PLAN, _transport(), tmp_path / "snaps", email="")
+        pipeline.run_live(PLAN, _transport(), tmp_path / "snaps", email="", **_FAST)

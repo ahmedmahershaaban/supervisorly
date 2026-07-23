@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import datetime
 import re
+import time
 
 from . import preflight
 from .discover import ladder as _ladder
@@ -435,7 +436,8 @@ def run_offline(plan: dict, targets: list[dict], transport: Transport, snap_root
 
 
 def run_live(plan: dict, transport: Transport, snap_root, *, email: str,
-             openalex_key=None, db_path=None, optout_path=None, resume=False) -> dict:
+             openalex_key=None, db_path=None, optout_path=None, resume=False,
+             rate_limit: float = 1.0, backoff_sleep=None) -> dict:
     """A **live** scan: preflight → discovery ladder (ROR + OpenAlex) → the *same* fetch → extract
     → claim → score → export → dashboard pipeline as ``run_offline`` (D-028), now from **discovered**
     targets rather than hand-fed ones.
@@ -452,10 +454,10 @@ def run_live(plan: dict, transport: Transport, snap_root, *, email: str,
 
     conn = open_db(db_path) if db_path is not None else open_db()
     snaps = SnapshotStore(snap_root)
-    # Cassette-tested today (fast); when the CLI wires the live httpx transport (L8) it constructs
-    # the fetcher with real politeness (a per-host min-interval + backoff sleep).
-    fetcher = Fetcher(transport, snaps, sleep=lambda _s: None,
-                      rate_limiter=HostRateLimiter(min_interval=0.0))
+    # Polite by default for a real run (per-host min-interval + real backoff sleep); tests pass
+    # rate_limit=0 + a no-op backoff_sleep so the cassette suite stays fast.
+    fetcher = Fetcher(transport, snaps, sleep=backoff_sleep or time.sleep,
+                      rate_limiter=HostRateLimiter(min_interval=rate_limit))
     optout = optout_mod.load_optout(optout_path)
     targets, opted_out = optout_mod.filter_targets(disc["targets"], optout)
 

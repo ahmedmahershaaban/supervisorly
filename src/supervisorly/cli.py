@@ -31,33 +31,62 @@ def cmd_init_db(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_scan(args: argparse.Namespace) -> int:
-    if not args.demo:
-        print("only --demo (offline, synthetic) is wired so far; a live scan needs "
-              "ROR + OpenAlex credentials (see README).")
-        return 2
+def _write_result(result: dict, out: Path, label: str) -> int:
+    """Write the dashboard + sibling JSON and print an ASCII-safe status line."""
     import json
-
-    from .demo import demo_fixture
-    from .pipeline import run_offline
-
-    out = Path(args.out)
     if out.parent != Path("") and not out.parent.exists():
         out.parent.mkdir(parents=True, exist_ok=True)
-    snap_root = out.parent / ".cache" / "snaps"
-
-    tp, targets, plan = demo_fixture()
-    result = run_offline(plan, targets, tp, snap_root, optout_path=args.optout)
     out.write_text(result["html"], encoding="utf-8")
     out.with_suffix(".json").write_text(
-        json.dumps(result["export"], ensure_ascii=False, indent=2), encoding="utf-8"
-    )
-    profs = result["export"]["professors"]
+        json.dumps(result["export"], ensure_ascii=False, indent=2), encoding="utf-8")
+    n = len(result["export"]["professors"])
     # ASCII-only console output — the default Windows console codec (cp1252) can't encode a
     # Unicode arrow, which would crash the command after the files were already written.
-    print(f"scanned {len(profs)} professors (demo) -> {out} "
-          f"(+ {out.with_suffix('.json').name})")
+    print(f"scanned {n} professors ({label}) -> {out} (+ {out.with_suffix('.json').name})")
     return 0
+
+
+def cmd_scan(args: argparse.Namespace) -> int:
+    out = Path(args.out)
+    if out.parent != Path("") and not out.parent.exists():
+        out.parent.mkdir(parents=True, exist_ok=True)   # for snapshots + the live DB
+    snap_root = out.parent / ".cache" / "snaps"
+
+    if args.demo:
+        from .demo import demo_fixture
+        from .pipeline import run_offline
+        tp, targets, plan = demo_fixture()
+        result = run_offline(plan, targets, tp, snap_root, optout_path=args.optout)
+        return _write_result(result, out, "demo")
+
+    # ── live scan ──
+    import os
+
+    from . import preflight
+    email = args.email or os.environ.get(preflight.CONTACT_EMAIL_ENV)
+    try:
+        preflight.require_credentials({preflight.CONTACT_EMAIL_ENV: email or ""})
+    except preflight.MissingCredentials as exc:
+        print(str(exc))
+        return 2
+    if not args.country or not args.field:
+        print("a live scan needs --country and --field (or use --demo for the offline demo). "
+              "See --help.")
+        return 2
+
+    from .fetch.transport import httpx_transport
+    from .pipeline import run_live
+    plan = {"intent_kind": args.intent, "country": args.country, "field": args.field,
+            "university_mode": args.university_mode,
+            "universities": [u.strip() for u in args.universities.split(",")]
+                            if args.universities else []}
+    transport = httpx_transport(user_agent=f"SupervisorlyBot/0.1 (mailto:{email})")
+    result = run_live(
+        plan, transport, snap_root, email=email,
+        openalex_key=(args.openalex_key or os.environ.get(preflight.OPENALEX_KEY_ENV)),
+        db_path=out.parent / "supervisorly.sqlite", optout_path=args.optout, resume=args.resume,
+    )
+    return _write_result(result, out, "live")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -72,10 +101,29 @@ def build_parser() -> argparse.ArgumentParser:
     pi.set_defaults(func=cmd_init_db)
 
     ps = sub.add_parser("scan", help="run a scan and write a dashboard")
-    ps.add_argument("--demo", action="store_true", help="run the offline synthetic demo")
+    ps.add_argument("--demo", action="store_true", help="run the offline synthetic demo (no keys)")
     ps.add_argument("--out", default="output/dashboard.html", help="dashboard output path")
     ps.add_argument("--optout", default=None,
                     help="path to an optout.txt suppression list (D-023)")
+    # live-scan flags
+    ps.add_argument("--country", help="country to scan (a live scan)")
+    ps.add_argument("--field", help="research field / subfield (a live scan)")
+    ps.add_argument("--intent", default="pre_phd",
+                    choices=["training", "pre_master", "pre_phd", "mentor", "master", "phd",
+                             "postdoc"],
+                    help="what you're looking for (default: pre_phd)")
+    ps.add_argument("--universities", default=None,
+                    help="comma-separated universities to prioritise / restrict to")
+    ps.add_argument("--university-mode", dest="university_mode", default="all",
+                    choices=["all", "prioritise", "only"],
+                    help="how to use --universities (default: all)")
+    ps.add_argument("--email", default=None,
+                    help="contact email for the OpenAlex polite pool "
+                         "(or set SUPERVISORLY_CONTACT_EMAIL)")
+    ps.add_argument("--openalex-key", dest="openalex_key", default=None,
+                    help="optional OpenAlex premium key (higher limits)")
+    ps.add_argument("--resume", action="store_true",
+                    help="reuse prior state; skip already-completed targets (cheap re-scan)")
     ps.set_defaults(func=cmd_scan)
 
     return p

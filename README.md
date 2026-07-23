@@ -90,6 +90,35 @@ internal id — one per line) in an `optout.txt` and pass it to a scan; a match 
 any fetch** — never requested, scored, shown, or stored. The `optout.txt` shipped in the repo is
 an empty template and must never contain real personal data.
 
+## A live scan
+
+```bash
+supervisorly scan --country Canada --field "causal ML" --intent pre_phd \
+  --email you@example.com --out output/live.html
+# optional: --universities "University of Toronto,McGill" --university-mode only
+#           --openalex-key <premium>   --optout optout.txt   --resume
+```
+
+`--university-mode` is `all` (default), `prioritise`, or `only`. The scan discovers institutions
+(ROR) and professors (OpenAlex), deep-dives each professor's public pages into quote-verified
+claims (recruiting, deadline, students, collaborations, social), scores + ranks them, and writes a
+self-contained dashboard.
+
+## Scheduled re-scans
+
+Supervisorly is built for repeat runs: `--resume` reuses the warm cache, so an unchanged page is
+never re-extracted, and you get a *"what changed since last time"* delta (new professors, newly-open
+recruiting, newly-published deadlines). Schedule it to keep your shortlist fresh:
+
+```bash
+# macOS / Linux (crontab -e) — every Monday 08:00
+0 8 * * 1  cd /path/to/supervisorly && .venv/bin/supervisorly scan --country Canada \
+  --field "causal ML" --email you@example.com --out output/live.html --resume
+```
+
+On **Windows**, use Task Scheduler → *Create Task* → a weekly trigger running the same command via
+`.venv\Scripts\supervisorly.exe`. Output stays local and is never committed.
+
 ## Ethics
 
 Supervisorly processes public information about identifiable people. It obeys `robots.txt`,

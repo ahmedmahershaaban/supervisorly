@@ -63,3 +63,35 @@ self-contained dashboard.
 - Public sources + open APIs only; never defeat a login or bot-wall — that's the human rung.
 - Honest emptiness: four states, distinct; never drop a professor for missing data.
 - Never read the professor corpus as data (D-035); never commit scan output / personal data.
+
+## Live scan orchestration (Stage-1 → Stage-2)
+
+For a **live** run against real sources, the flow is:
+
+1. **Intent recognition → SearchPlan.** From the student's request (a country, a field, and what
+   they need — pre_phd / master / phd / postdoc / mentor), *generate* a SearchPlan (D-038): resolve
+   the field to OpenAlex topic IDs, pick the country, and note any universities to prioritise or
+   restrict to (`university_mode` = all / prioritise / only). Nothing is looked up from a fixed list.
+2. **Confirm the plan with the user** before anything expensive runs.
+3. **Stage-1 — enumerate.** The discovery ladder (ROR by country → OpenAlex authors-by-institution)
+   produces a de-duplicated list of professor targets with links; login-walled directories go to the
+   **human rung** (never scraped).
+4. **Stage-2 — deep-dive.** Each professor's own public pages are fetched (robots-obeying) and every
+   field becomes a quote-verified **Claim** (D-010): recruiting signal, application deadline, the
+   **students / lab members**, the **companies / collaborations**, and any **advertised social**
+   link. Walled social content (a recruiting post on X/LinkedIn) is routed to the human rung.
+5. **Score & rank.** Professors are scored (intent-aware gates, topic-ID overlap) and rolled up into
+   ranked universities; nobody is dropped for missing data — the **four states** stay honest.
+6. **Dashboard.** A single self-contained page (the Atlas design language) with the results, the
+   deadline watch-dates, and the how-it-works diagram.
+
+The deterministic tools do collection + verification; the LLM analysts (this skill's agents) do the
+Stage-2 judgement. Run it from the CLI:
+
+```
+supervisorly scan --country Canada --field "causal ML" --intent pre_phd \
+  --email you@example.com --out output/live.html
+```
+
+Only a **contact email** is required (ROR is keyless, OpenAlex is free); the corpus is never read
+(D-035). Re-run with `--resume` for a cheap scheduled refresh (warm cache + a "what changed" delta).

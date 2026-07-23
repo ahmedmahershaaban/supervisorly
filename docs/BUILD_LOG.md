@@ -723,3 +723,20 @@ fonts, cells-and-filaments engine, how-it-works view + reduced-motion, cell draw
 **184 passed** (exit 0). **DoD (Phase L7):** the results dashboard + a how-it-works diagram render in
 the Atlas language, self-contained/offline, reduced-motion-aware, four-states + deadline + cell-drawer
 detail working, filaments recompute on resize.
+
+## round L8 — CLI + SKILL orchestration (commit pending)
+
+**Built:** the `scan` CLI now has a full **live path** — flags `--country --field --intent
+--universities --university-mode --email --openalex-key --optout --resume --out`. It fails loud
+without a contact email (ROR keyless, OpenAlex free), needs `--country`+`--field`, builds the httpx
+transport with a polite `mailto` User-Agent, and runs `run_live`. Refactored the write-and-report into
+`_write_result`. `run_live` gained `rate_limit`/`backoff_sleep` (polite defaults for real runs; tests
+pass fast values). `SKILL.md` gained a **live orchestration** section (intent → SearchPlan → confirm →
+Stage-1 enumerate → Stage-2 deep-dive incl. students/companies/social → score/rank → dashboard).
+`README.md` gained a **live scan** command + a **scheduled re-scans** recipe (cron + Windows Task
+Scheduler, using `--resume`).
+**Ran:** `tests/test_cli_live.py` (3): fail-loud without email, needs country+field, and a **full live
+run via a patched transport** (offline) → writes dashboard+JSON, ASCII output, `recruiting_signal`
+value. Full suite → **182 passed** (exit 0). **DoD (Phase L8):** the live flags work; the skill
+documents the flow; scheduling recipe documented. (Earlier L7 log said 184 — the accurate count then
+was 179; recorded here for the trail.)
