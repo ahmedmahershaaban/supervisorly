@@ -14,9 +14,19 @@ to answer questions and edit the UI (D-041). Three parts:
 
 from __future__ import annotations
 
+import re
+
 VALID_STATES = {"value", "searched_absent", "never_attempted", "blocked"}
 VALID_KINDS = {"filter", "sort", "facet", "score-input", "search", "display"}
 SCHEMA_VERSION = "1"
+
+# A contact email is personal data we never emit as a bare field (D-024). Email-typed fields
+# are dropped at build like non-exportable ones; validate flags any that leak through.
+_EMAIL_RE = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
+
+
+def _is_email_field(descriptor: dict) -> bool:
+    return descriptor.get("datatype") == "email"
 
 # required keys on a field descriptor
 _DESCRIPTOR_KEYS = {"id", "label", "kind", "datatype"}
@@ -69,7 +79,10 @@ def build_export(
 ) -> dict:
     """Assemble the export. ``field_descriptors`` may carry ``exportable: False`` to keep
     a field (e.g. an LLM judgement) out of the serialised output (D-024)."""
-    exportable = [d for d in field_descriptors if d.get("exportable", True)]
+    # Drop non-exportable fields (LLM judgements) AND email-typed fields (D-024): a bare
+    # contact email never serialises, by construction.
+    exportable = [d for d in field_descriptors
+                  if d.get("exportable", True) and not _is_email_field(d)]
     clean_descriptors = [{k: v for k, v in d.items() if k != "exportable"} for d in exportable]
 
     out_professors = []
@@ -108,6 +121,9 @@ def validate_export(obj: dict) -> list[str]:
             errors.append(f"descriptor {d.get('id','?')} has invalid kind {d.get('kind')!r}")
         if "exportable" in d:
             errors.append(f"descriptor {d.get('id','?')} leaked internal 'exportable' flag")
+        if _is_email_field(d):
+            errors.append(f"descriptor {d.get('id','?')} is an email field — must not be "
+                          "exported (D-024)")
         declared_ids.add(d.get("id"))
 
     for p in obj.get("professors", []):
@@ -127,4 +143,10 @@ def validate_export(obj: dict) -> list[str]:
                 errors.append(f"{p.get('id','?')}.{fid}: non-'value' state carries a value")
             if st == "value" and not env.get("source_url"):
                 errors.append(f"{p.get('id','?')}.{fid}: a value must cite a source_url (D-010)")
+            # a value that *is* a bare email address (not a sentence mentioning one) is PII
+            # smuggled under a non-email datatype — reject it (D-024).
+            val = env.get("value")
+            if st == "value" and isinstance(val, str) and _EMAIL_RE.fullmatch(val.strip()):
+                errors.append(f"{p.get('id','?')}.{fid}: a bare email address must not be "
+                              "exported (D-024)")
     return errors

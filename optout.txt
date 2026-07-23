@@ -1,0 +1,13 @@
+# Supervisorly opt-out suppression list (D-023/032/053).
+#
+# Anyone who asks to be excluded is listed here, one identifier per line. A line may be a
+# homepage URL, an ORCID, an OpenAlex id, a ROR id, or an internal id. Matching is
+# case-insensitive and ignores a trailing slash. A matched professor is dropped BEFORE any
+# fetch — never scored, shown, or stored.
+#
+# This file is intentionally EMPTY in the repo: it must never contain real personal data.
+# Supply a real suppression list at deploy time (e.g. via --optout path/to/optout.txt).
+#
+# Example (commented out, not active):
+# https://example.edu/~jdoe
+# 0000-0002-1825-0097

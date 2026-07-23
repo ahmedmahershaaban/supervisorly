@@ -298,3 +298,26 @@ order preserved) and a genericity test that an **invented discipline** ("quantum
 in a novel markup shape still runs and extracts honestly — proving there is no embedded field
 dictionary (D-038).
 **Ran:** pytest → **94 passed** (exit 0). **All 18 edge-case-matrix rows now have a passing test.**
+
+## round O — ethics gates in code: opt-out, no-bare-email, LLM-free, corpus-never-read (commit pending)
+
+The §6 DoD requires these as *tested* gates, not prose. Closed the remaining ones.
+
+**Built:**
+- `ethics/optout.py` + repo `optout.txt` (empty template) — the **opt-out suppression list**
+  (D-023/032/053). `run_offline(..., optout_path=)` drops a matched person **before any fetch**
+  (never requested, scored, shown, or stored); identifiers matched: id/url/homepage/orcid/
+  openalex/ror/name, case-insensitive, trailing-slash-insensitive.
+- `export/json_export.py` — the **no-bare-email** rule (D-024): an `email`-typed field is dropped
+  at build like a non-exportable one; `validate_export` flags a leaked email descriptor **and** a
+  value that *is* a bare address (while leaving an email merely *mentioned inside a sentence*
+  alone, so real recruiting quotes aren't false-positived).
+**Tests:**
+- `test_optout.py` — the required *failing test*: suppressing Ada by URL removes her from the
+  export (and the counterfactual shows she's present without it); parsing ignores comments/blanks.
+- `test_ethics.py` — email-field dropped at build; validate rejects a leaked email descriptor and a
+  bare-email value; an incidental in-sentence email is **not** flagged; the **deterministic layer
+  is LLM-free** (scans discover/fetch/model/score/export/pipeline/ingest for model markers); the
+  **methodology corpus path is never referenced** in code (D-035); **no bulk-outreach** helpers exist.
+**Ran:** pytest → **105 passed** (exit 0). Ethics gates (optout, robots, no-bare-emails,
+no-bulk-path, corpus-never-read, LLM-free) are now all test-guarded.

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import re
 
+from .ethics import optout as optout_mod
 from .export import dashboard as dash
 from .export import json_export as jx
 from .fetch.fetcher import Fetcher
@@ -126,21 +127,25 @@ _EXTRACTORS = {
 
 
 def run_offline(plan: dict, targets: list[dict], transport: Transport, snap_root,
-                *, db_path=None) -> dict:
+                *, db_path=None, optout_path=None) -> dict:
     """Run a deterministic scan over ``targets`` (each {id, name, url}) using cassettes.
 
     Returns {run_id, export, html}. The run always finalises with a dashboard — it never
     blocks on the human rung (D-049). Pass ``db_path`` to persist the store across runs
-    (used by the warm-cache path)."""
+    (used by the warm-cache path); ``optout_path`` to enforce the suppression list (D-023)."""
     conn = open_db(db_path) if db_path is not None else open_db()
     snaps = SnapshotStore(snap_root)
     # Offline cassettes never rate-limit us, so any retry needn't actually sleep.
     fetcher = Fetcher(transport, snaps, sleep=lambda _s: None)
 
+    # Opt-out is enforced BEFORE any fetch: a suppressed person is never even requested (D-023).
+    optout = optout_mod.load_optout(optout_path)
+    targets, opted_out = optout_mod.filter_targets(targets, optout)
+
     run_id = runs.create_run(conn)
     runs.set_run_status(conn, run_id, "deep_diving")
 
-    stats = {"extractions": 0, "cache_hits": 0}
+    stats = {"extractions": 0, "cache_hits": 0, "opted_out": opted_out}
     gaps = 0
     for t in targets:
         pid = t["id"]
