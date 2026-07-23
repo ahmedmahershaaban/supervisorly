@@ -85,8 +85,9 @@ def test_md_return_fills_gaps_and_reexports_without_refetching(tmp_path):
     # nothing was re-fetched: the counting transport saw no new calls
     assert tp.calls == calls_after_scan
 
-    # the gap is now filled from the human-assisted source, and the run is finalized
-    assert re["export"]["run"]["status"] == "finalized"
+    # the recruiting gap is now filled from the human-assisted source; eve's other walled fields
+    # (students/industry/social) remain blocked, so the run is honestly finalized_with_open_gaps.
+    assert re["export"]["run"]["status"] == "finalized_with_open_gaps"
     eve = _eve(re["export"])
     assert eve["fields"]["recruiting_signal"]["state"] == "value"
     assert "HCI" in eve["fields"]["recruiting_signal"]["value"]

@@ -122,6 +122,12 @@ FIELD_DESCRIPTORS = [
     {"id": "recruiting_signal", "label": "Recruiting signal", "kind": "filter",
      "datatype": "string"},
     {"id": "deadline", "label": "Application deadline", "kind": "sort", "datatype": "date"},
+    {"id": "students_signal", "label": "Students / lab members", "kind": "filter",
+     "datatype": "string"},
+    {"id": "industry_signal", "label": "Industry / collaborations", "kind": "filter",
+     "datatype": "string"},
+    {"id": "social", "label": "Advertised social profile", "kind": "display",
+     "datatype": "string"},
 ]
 
 
@@ -239,10 +245,67 @@ def extract_deadline(html: str):
     return None
 
 
+# ── the extra collectors the author asked for (students / companies / social) ─────────────────
+# Each is a deterministic candidate signal quoted from the professor's own public page — the LLM
+# synthesist confirms/structures it in Stage 2 (D-009/D-021). Walled social CONTENT (a recruiting
+# post on X/LinkedIn) is never fetched here — only an *advertised* link in the visible text is
+# recorded; the actual walled page goes to the human rung (D-039/043).
+_STUDENTS = re.compile(
+    r"[^.!?]*\b(current\s+(?:phd\s+)?(?:students?|members?)|lab\s+members?|group\s+members?|"
+    r"team\s+members?|alumni|former\s+students?|advisees?|graduated?\s+students?|"
+    r"phd\s+students?\s+in\s+(?:my|the)\s+(?:group|lab))\b[^.!?]*[.!?]",
+    re.IGNORECASE,
+)
+_INDUSTRY = re.compile(
+    r"[^.!?]*\b(industry\s+(?:partner\w*|collaborat\w*|experience|funding)|"
+    r"in\s+collaboration\s+with|collaborat\w*\s+with|partnered?\s+with|"
+    r"consult\w*\s+(?:for|at)|funded\s+by|sponsored\s+by)\b[^.!?]*[.!?]",
+    re.IGNORECASE,
+)
+_SOCIAL_URL = re.compile(
+    r"https?://(?:www\.)?(?:twitter\.com|x\.com|linkedin\.com/in|github\.com|"
+    r"[a-z0-9.-]*mastodon[a-z0-9.-]*|bsky\.app)/[^\s\"'<>)]+",
+    re.IGNORECASE,
+)
+
+
+def _first_sentence(rx, html):
+    m = rx.search(main_text(html))
+    if not m:
+        return None
+    s = m.group(0).strip()
+    return s, s, "quoted_official"
+
+
+def extract_students_signal(html: str):
+    """A sentence naming the professor's students / lab members / alumni, or None."""
+    return _first_sentence(_STUDENTS, html)
+
+
+def extract_industry_signal(html: str):
+    """A sentence naming an industry collaboration / company / sponsor, or None."""
+    return _first_sentence(_INDUSTRY, html)
+
+
+def extract_social(html: str):
+    """An advertised social/profile URL in the page's visible text, or None.
+
+    Only the *link* is recorded (public). The walled page it points to (e.g. a recruiting post on
+    X) is NEVER fetched here — it is routed to the human rung (D-039/043)."""
+    m = _SOCIAL_URL.search(main_text(html))
+    if not m:
+        return None
+    url = m.group(0).rstrip(".,);")
+    return url, url, "quoted_official"
+
+
 # field_id → extractor. Adding a field is adding a row here + a descriptor above (D-038).
 _EXTRACTORS = {
     "recruiting_signal": extract_recruiting_signal,
     "deadline": extract_deadline,
+    "students_signal": extract_students_signal,
+    "industry_signal": extract_industry_signal,
+    "social": extract_social,
 }
 
 

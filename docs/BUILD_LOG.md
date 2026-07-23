@@ -652,3 +652,21 @@ nobody dropped; honest states (2 value, 1 blocked → `finalized_with_open_gaps`
 (selfrun/warm_cache/resume) still green after the refactor. Full suite → **157 passed** (exit 0).
 **DoD (Phase L2):** `run_live` runs end-to-end on cassettes and produces the same honest,
 hallucination-free four-state dashboard as `run_offline`, now from discovered targets.
+
+## round L3 — extra collectors: students / industry / advertised social (commit pending)
+
+**Built:** three field-driven extractors on the professor's own public page (D-038 field-driven), each
+a quote-verified candidate signal (the LLM synthesist confirms/structures in Stage 2, D-009/021):
+`extract_students_signal` (current members / lab / alumni / advisees — deliberately NOT "recruiting
+students", which is future), `extract_industry_signal` (collaborations / partners / funders /
+sponsors), `extract_social` (an *advertised* social/profile link in the visible text — twitter/x/
+linkedin/github/mastodon/bsky). **Only the social LINK is recorded; the walled page it points to is
+never fetched — that's the human rung (D-039/043).** Added to `_EXTRACTORS` + `FIELD_DESCRIPTORS`,
+so they flow through both `run_offline` and `run_live` as generic, filterable columns; absent → honest
+`searched_absent`.
+**Ran:** `tests/test_collectors.py` (6): each extractor value/None, "recruiting students" not read as a
+roster, rich page → all three `value` (quote-verified, social = the bare link), bare page → all
+`searched_absent`. **Fixed (regression):** the walled `eve` now has 3 more fields her MD doesn't fill,
+so the resume re-export is honestly `finalized_with_open_gaps` (assertion corrected). Full suite →
+**163 passed** (exit 0). **DoD (Phase L3):** sourced student/company/social claims where present,
+honest `searched_absent` where not; walled social never scraped.
