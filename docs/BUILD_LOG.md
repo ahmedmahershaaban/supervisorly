@@ -331,3 +331,29 @@ Docs DoD: honest install incl. required credentials, the two run modes, and `sca
 to get them, the dashboard's deadline/detail/four-state behaviour, and an **Opt-out** section.
 `cli.py` — `scan --optout <path>` wired through to `run_offline(optout_path=...)` so the documented
 flow works. **Ran:** pytest (CLI) → green; full suite still **105 passed**.
+
+---
+
+# Phase J — adversarial self-audit (goal §5) and the fixes it drove
+
+A 6-dimension adversarial audit (correctness/provenance, edge-cases, ethics, genericity,
+performance/cost, UX-honesty) ran as a verification workflow: each auditor read the real source;
+an independent skeptic then had to *refute* each finding against the code before it counted.
+**10 findings survived verification** (2 high, 8 medium). Each is fixed below with a regression
+test; the loop repeats until the audit is clean.
+
+## round Q — refine: deadline parser correctness + genericity (findings 2, 3, 4) (commit pending)
+
+**Fixed in `pipeline.py`:**
+- **(genericity, high)** `_normalize_date` now recognises **ordinal** dates ("1st December 2026",
+  "December 1st, 2026") and **numeric** `dd/mm/yyyy` (disambiguated by the >12 rule); a real dated
+  deadline is no longer mis-recorded as `searched_absent`. A genuinely ambiguous numeric date
+  (both parts ≤12) is **not guessed** — honesty over a coin-flip (D-046).
+- **(correctness, medium)** impossible calendar dates (Feb 31, Apr 31, `2026-02-30`) are rejected
+  via `datetime.date` validation — never invented into a `quoted_official` value (D-010/D-061).
+- **(correctness, medium)** a date bound in a *different clause* than the deadline cue
+  ("deadline has passed, but term begins 1 September 2026"; "no fixed deadline; year begins …")
+  is downgraded to a **watch** date via `_NONFIRM` — never shown as firm (D-061). Numeric dates
+  are watch too (locale-uncertain).
+**Ran:** `tests/test_deadline_parse.py` (8 new) + full suite → **113 passed** (exit 0). The demo's
+firm/watch pair and all prior deadline tests still hold.

@@ -19,6 +19,7 @@ A blocked page marks *every* field ``blocked`` (honest — we reached nothing), 
 
 from __future__ import annotations
 
+import datetime
 import re
 
 from .ethics import optout as optout_mod
@@ -56,12 +57,32 @@ _PROJECTED = re.compile(
     r"annually|rolling|expected|projected|anticipated|likely)\b",
     re.IGNORECASE,
 )
+# A date bound in a clause *other than* the deadline cue's makes it unsafe to call firm —
+# e.g. "the deadline has passed, but the semester begins 1 September 2026" (D-061). Such a
+# match is downgraded to a watch date, never shown as firm.
+_NONFIRM = re.compile(
+    r"\b(has\s+passed|passed|no\s+fixed|previous|but|however|semester\s+begins|"
+    r"term\s+begins|classes\s+(?:begin|start)|intake\s+(?:starts|begins)|"
+    r"academic\s+year\s+begins|starts?|began)\b|;",
+    re.IGNORECASE,
+)
 _MONTHS = {m: i for i, m in enumerate(
     ["january", "february", "march", "april", "may", "june", "july", "august",
      "september", "october", "november", "december"], start=1)}
+_ORD = r"(?:st|nd|rd|th)?"          # optional ordinal suffix: 1st, 2nd, 3rd, 4th …
 _ISO = re.compile(r"\b(20\d{2})-(\d{1,2})-(\d{1,2})\b")
-_DMY = re.compile(r"\b(\d{1,2})\s+([A-Za-z]+)\s+(20\d{2})\b")          # 1 December 2026
-_MDY = re.compile(r"\b([A-Za-z]+)\s+(\d{1,2}),?\s+(20\d{2})\b")        # December 1, 2026
+_DMY = re.compile(rf"\b(\d{{1,2}}){_ORD}\s+([A-Za-z]+)\s+(20\d{{2}})\b")   # 1[st] December 2026
+_MDY = re.compile(rf"\b([A-Za-z]+)\s+(\d{{1,2}}){_ORD},?\s+(20\d{{2}})\b") # December 1[st], 2026
+_NUM = re.compile(r"\b(\d{1,2})/(\d{1,2})/(20\d{2})\b")                    # 01/12/2026 (numeric)
+
+
+def _valid_date(y: int, mo: int, d: int) -> bool:
+    """True iff (y, mo, d) is a real calendar day — rejects Feb 31, Apr 31, etc."""
+    try:
+        datetime.date(y, mo, d)
+        return True
+    except ValueError:
+        return False
 
 FIELD_DESCRIPTORS = [
     {"id": "recruiting_signal", "label": "Recruiting signal", "kind": "filter",
@@ -70,27 +91,43 @@ FIELD_DESCRIPTORS = [
 ]
 
 
-def _normalize_date(text: str) -> str | None:
-    """Deterministically parse the first full (day+month+year) date to ISO, else None.
+def _normalize_date(text: str) -> tuple[str, bool] | None:
+    """Deterministically parse the first full (day+month+year) date to ISO.
 
-    Requires all three parts — a bare month/season is not a date and must not be invented.
+    Returns ``(iso, ambiguous)`` or ``None``. Requires all three parts — a bare month/season
+    is never invented into a date, and an impossible calendar date (Feb 31) is rejected.
+    ``ambiguous`` is True for a numeric ``dd/mm/yyyy`` date (locale-uncertain) so the caller
+    can present it as a watch date rather than firm (D-061).
     """
     m = _ISO.search(text)
     if m:
         y, mo, d = (int(x) for x in m.groups())
-    else:
-        m = _DMY.search(text)
-        if m and m.group(2).lower() in _MONTHS:
-            d, mo, y = int(m.group(1)), _MONTHS[m.group(2).lower()], int(m.group(3))
+        return (f"{y:04d}-{mo:02d}-{d:02d}", False) if _valid_date(y, mo, d) else None
+
+    m = _DMY.search(text)
+    if m and m.group(2).lower() in _MONTHS:
+        d, mo, y = int(m.group(1)), _MONTHS[m.group(2).lower()], int(m.group(3))
+        return (f"{y:04d}-{mo:02d}-{d:02d}", False) if _valid_date(y, mo, d) else None
+
+    m = _MDY.search(text)
+    if m and m.group(1).lower() in _MONTHS:
+        mo, d, y = _MONTHS[m.group(1).lower()], int(m.group(2)), int(m.group(3))
+        return (f"{y:04d}-{mo:02d}-{d:02d}", False) if _valid_date(y, mo, d) else None
+
+    m = _NUM.search(text)
+    if m:
+        a, b, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        # Disambiguate by the >12 rule; if both are ≤12 the order is genuinely unknowable, so
+        # we do NOT guess (a wrong deadline is worse than an honest absent one).
+        if a > 12 and b <= 12:      # a is the day → dd/mm
+            d, mo = a, b
+        elif b > 12 and a <= 12:    # b is the day → mm/dd
+            mo, d = a, b
         else:
-            m = _MDY.search(text)
-            if m and m.group(1).lower() in _MONTHS:
-                mo, d, y = _MONTHS[m.group(1).lower()], int(m.group(2)), int(m.group(3))
-            else:
-                return None
-    if not (1 <= mo <= 12 and 1 <= d <= 31):
-        return None
-    return f"{y:04d}-{mo:02d}-{d:02d}"
+            return None
+        # numeric dates are inherently lower-confidence → flag ambiguous (watch, not firm)
+        return (f"{y:04d}-{mo:02d}-{d:02d}", True) if _valid_date(y, mo, d) else None
+    return None
 
 
 def extract_recruiting_signal(html: str):
@@ -105,16 +142,20 @@ def extract_recruiting_signal(html: str):
 def extract_deadline(html: str):
     """Return (iso_date, quote, confidence) for a dated deadline sentence, or None.
 
-    ``confidence`` is ``quoted_official`` for a firm, published date and ``inferred`` for a
-    *projected* one (cue words like "usually"/"each year") — the dashboard shows the latter
-    as a watch date, never firm (D-061).
+    ``confidence`` is ``quoted_official`` only for a firm, published, spelled-out date whose
+    cue owns it; it is ``inferred`` (a *watch* date, D-061) when the sentence is projected
+    ("usually"/"each year"), the date is numeric/locale-ambiguous, or the date sits in a
+    different clause than the cue ("deadline has passed, but term begins 1 September 2026").
     """
     text = main_text(html)
     for m in _DEADLINE.finditer(text):
         sentence = m.group(0).strip()
-        iso = _normalize_date(sentence)
-        if iso:
-            projected = bool(_PROJECTED.search(sentence))
+        nd = _normalize_date(sentence)
+        if nd:
+            iso, ambiguous = nd
+            projected = (ambiguous
+                         or bool(_PROJECTED.search(sentence))
+                         or bool(_NONFIRM.search(sentence)))
             return iso, sentence, ("inferred" if projected else "quoted_official")
     return None
 
