@@ -1,32 +1,31 @@
-"""Pre-run checks: fail loud on missing credentials; warn (don't block) on sparse coverage.
+"""Pre-run checks: fail loud on a missing contact email; warn (don't block) on sparse coverage.
 
 Two independent concerns, kept separate on purpose:
 
-* **Credentials (D-014/020, cost §2)** — a *live* scan needs a ROR client id and a free
-  OpenAlex key. Running on the anonymous, throttled tiers silently is a defect: the run
-  would be slow, rate-limited, and unreproducible. So ``require_credentials`` **raises**
-  with the exact env-var names and how to get them. The offline ``--demo`` / cassette path
-  never calls this — it needs no network and no keys (that is the whole point of the seam).
+* **Being a good API citizen (D-019/023, cost §2).** Reality check on the open services this tool
+  uses: **ROR needs no key** (its REST API is open and unauthenticated), and **OpenAlex is free**
+  and works without a key too. What OpenAlex *does* want is your **email** — the "polite pool"
+  marker (``?mailto=you@example.com``) that earns faster, more reliable service; the same email
+  identifies us in the HTTP ``User-Agent`` on every fetch. So the one thing a live scan genuinely
+  requires is a **contact email**, and ``require_credentials`` **raises** without it rather than
+  hammering public APIs anonymously at scale. An OpenAlex **premium** key is supported but optional.
 
-* **Coverage (D-060)** — some countries/fields are thin in OpenAlex/ROR. That is not a
-  failure; it is a fact to state honestly *up front*. ``coverage_preflight`` returns
-  human-readable **warnings** and never raises — the run continues and the coverage is
-  reported honestly rather than silently looking empty.
+* **Coverage (D-060).** Some countries/fields are thin in OpenAlex/ROR. That is not a failure; it
+  is a fact to state honestly *up front*. ``coverage_preflight`` returns human-readable warnings
+  and never raises — the run continues and the coverage is reported honestly.
 """
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 
-# Env vars a live scan requires (names are documented in the README).
-ROR_CLIENT_ID_ENV = "SUPERVISORLY_ROR_CLIENT_ID"
+# The one required env var for a live scan: your contact email (OpenAlex polite pool + User-Agent).
+CONTACT_EMAIL_ENV = "SUPERVISORLY_CONTACT_EMAIL"
+# Optional: a paid OpenAlex premium key (higher limits / snapshot). Not required for a scan.
 OPENALEX_KEY_ENV = "SUPERVISORLY_OPENALEX_KEY"
 
-_HOW_TO_GET = {
-    ROR_CLIENT_ID_ENV: "register a client id at https://ror.readme.io/ (free)",
-    OPENALEX_KEY_ENV: "get a free key / polite-pool email at https://openalex.org/ and "
-                      "set it here",
-}
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 # Below these, OpenAlex/ROR coverage is thin enough to warn about (order-of-magnitude cut).
 SPARSE_WORKS = 500
@@ -34,25 +33,41 @@ SPARSE_INSTITUTIONS = 5
 
 
 class MissingCredentials(RuntimeError):
-    """A live scan was attempted without the required API credentials (D-014/020)."""
+    """A live scan was attempted without a usable contact email (D-019/023)."""
 
 
 def require_credentials(env: Mapping[str, str]) -> None:
-    """Raise ``MissingCredentials`` naming every missing var and how to get it.
+    """Raise ``MissingCredentials`` unless a valid contact email is set.
 
-    Fail loud, never run silently on the throttled anonymous tiers (D-020). ``env`` is
-    passed in (usually ``os.environ``) so this is testable without touching the process
-    environment.
+    ROR needs no key and OpenAlex is free, so the only hard requirement is identifying ourselves
+    politely. ``env`` is passed in (usually ``os.environ``) so this is testable without touching
+    the process environment.
     """
-    missing = [name for name in (ROR_CLIENT_ID_ENV, OPENALEX_KEY_ENV)
-               if not (env.get(name) or "").strip()]
-    if missing:
-        lines = [f"  - {name}: {_HOW_TO_GET[name]}" for name in missing]
+    email = (env.get(CONTACT_EMAIL_ENV) or "").strip()
+    if not email:
         raise MissingCredentials(
-            "Missing required credentials for a live scan:\n" + "\n".join(lines) +
-            "\n\nSet them and re-run, or use `supervisorly scan --demo` for the offline "
-            "synthetic demo (no credentials needed)."
+            f"A live scan needs a contact email so we use the open APIs politely.\n"
+            f"  - {CONTACT_EMAIL_ENV}: set this to YOUR email (any address you own). It joins the\n"
+            f"    free OpenAlex 'polite pool' (https://openalex.org) and identifies us to servers.\n"
+            f"\nNo keys are required: ROR's API is open (https://ror.org), and OpenAlex is free.\n"
+            f"(Optional: {OPENALEX_KEY_ENV} for a paid OpenAlex premium key — higher limits.)\n"
+            f"\nOr use `supervisorly scan --demo` for the offline synthetic demo (nothing needed)."
         )
+    if not _EMAIL_RE.match(email):
+        raise MissingCredentials(
+            f"{CONTACT_EMAIL_ENV}={email!r} does not look like an email address. Set it to a real\n"
+            f"address you own (used for the OpenAlex polite pool and our User-Agent)."
+        )
+
+
+def contact_email(env: Mapping[str, str]) -> str | None:
+    """The configured contact email (for OpenAlex mailto + User-Agent), or None."""
+    return (env.get(CONTACT_EMAIL_ENV) or "").strip() or None
+
+
+def openalex_key(env: Mapping[str, str]) -> str | None:
+    """The optional OpenAlex premium key, or None (the free tier needs no key)."""
+    return (env.get(OPENALEX_KEY_ENV) or "").strip() or None
 
 
 def coverage_preflight(stats: Mapping[str, object]) -> list[str]:

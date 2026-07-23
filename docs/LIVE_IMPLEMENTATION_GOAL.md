@@ -67,9 +67,14 @@ the extra collectors, wired into that engine — everything remains cassette-tes
   (ROR, OpenAlex, Crossref, etc.) and public pages; obey `robots.txt` (fail closed); **never defeat
   a login or a bot-wall.** Walled sources — X/Twitter, LinkedIn, Scholar, login-only directories —
   go to the existing Phase-3 human rung (generate the prompt; ingest the pasted Markdown).
-- **Credentials fail loud (D-014/020).** A live scan calls `preflight.require_credentials` first
-  and refuses to run on the throttled anonymous tiers; `preflight.coverage_preflight` warns up
-  front for thin countries/fields but never blocks (D-060).
+- **Be a good API citizen; fail loud without a contact email (D-014/019/023).** The open services
+  are **free and keyless** — ROR's API is open, OpenAlex is free. The one hard requirement is a
+  **contact email** (`SUPERVISORLY_CONTACT_EMAIL`): OpenAlex's polite-pool `mailto` marker and the
+  `User-Agent` we identify with. A live scan calls `preflight.require_credentials` first and refuses
+  to run without a valid email rather than hammering public APIs anonymously; an OpenAlex **premium**
+  key (`SUPERVISORLY_OPENALEX_KEY`) is supported but optional. `preflight.coverage_preflight` warns
+  up front for thin countries/fields but never blocks (D-060). **Do not invent a ROR "key" — there
+  isn't one.**
 - **Recruiting normalised to the target cycle (D-050); topic-ID overlap for fit (D-058); reconcile
   fragmented (non-Western) author profiles before scoring (D-057); intent-aware gates (D-059);
   program roll-up (D-031); deadlines as watch-dates unless published (D-061).** These already exist
@@ -86,11 +91,13 @@ the extra collectors, wired into that engine — everything remains cassette-tes
 
 **Phase L0 — Credentialed open-API clients (ROR + OpenAlex), cassette-tested.**
 Add `discover/ror.py` and `discover/openalex.py` — thin clients that take the injected `Transport`
-(so tests use cassettes), send the polite-pool headers, page results, and map raw JSON into the
-domain entities (Institution, Person/author, Topic, Work). Wire `preflight.require_credentials` +
-`coverage_preflight` into the live entry path. *DoD:* both clients round-trip recorded cassettes
-into typed results; a missing key fails loud with the exact fix; a sparse-country preflight warns
-and continues; **no live network in tests.**
+(so tests use cassettes), send the **contact email** as OpenAlex's `mailto` + in the `User-Agent`
+(ROR needs no auth), page results, and map raw JSON into the domain entities (Institution,
+Person/author, Topic, Work). Wire `preflight.require_credentials` + `coverage_preflight` into the
+live entry path. *DoD:* both clients round-trip recorded cassettes into typed results; a **missing
+contact email fails loud** with the exact fix (and the run works with just that email — no ROR key,
+optional OpenAlex premium key); a sparse-country preflight warns and continues; **no live network
+in tests.**
 
 **Phase L1 — Discovery ladder (D-028): country/field → professor targets, two rounds.**
 Build `discover/ladder.py` that, from a confirmed `SearchPlan`, generates targets **without any
@@ -173,7 +180,7 @@ flow matches `product-flow.md`; the CLI help lists every live flag.
 
 | Edge case | Required behaviour |
 |---|---|
-| Missing ROR / OpenAlex key | fail loud with the exact fix; never run on throttled tiers (D-014/020) |
+| Missing contact email | fail loud with the exact fix; never hit public APIs anonymously (D-019/023). ROR is keyless; OpenAlex premium key optional |
 | Sparse country/field | preflight warns up front; run continues; coverage honest (D-060) |
 | Institution has no machine-readable directory | ladder falls through the rungs; if still none → login-wall/human-rung or an honest `CoverageRecord`, never a fabricated roster |
 | Login-walled faculty directory | `roster_enumerate` human-rung task; unit `LOGIN_WALL`; nothing scraped (D-052) |
@@ -205,9 +212,10 @@ flow matches `product-flow.md`; the CLI help lists every live flag.
 3. **Run the skill the way a student would** (via `SKILL.md`) on the cassette fixture and confirm
    the orchestration (intent → confirm plan → Stage-1 → Stage-2 → extra signals → rank → dashboard)
    matches `product-flow.md`.
-4. **Optional credentialed live smoke test** (only if real ROR/OpenAlex keys are available): one
-   small, polite real department; confirm real-world behaviour; then **discard the output — never
-   commit it** (D-005). If keys are absent, mark this step **skipped**, never passed (D-007/§7).
+4. **Optional live smoke test** (only if a real `SUPERVISORLY_CONTACT_EMAIL` is set — that's all
+   it takes; no keys): one small, polite real department; confirm real-world behaviour; then
+   **discard the output — never commit it** (D-005). If no email is configured, mark this step
+   **skipped**, never passed (D-007/§7).
 5. **Budget checks:** a representative scan stays within `cost-and-performance.md`; a warm re-scan
    issues ~0 re-extraction.
 6. **Clean-room fresh-install verification (last, once everything else is green).** Wipe every
@@ -256,7 +264,7 @@ Log each pass. Prefer adversarial verification of your own findings before actin
 - [ ] **Clean-room verification passes** (§4 step 6) on the first try from a clean checkout.
 - [ ] `git status` shows **no scan output / no personal data**; `.gitignore` honoured; only code,
       docs, and synthetic/clearly-public fixtures survive the teardown.
-- [ ] The credentialed live smoke test (§4 step 4) is either **passed with real keys** or explicitly
+- [ ] The live smoke test (§4 step 4) is either **passed with a real contact email** or explicitly
       **skipped** with the reason — never fabricated.
 - [ ] A final **`docs/LIVE_COMPLETION_REPORT.md`**: what was built, full test/eval numbers,
       edge-case coverage, honest known limitations, the exact commit range, and exact run steps.

@@ -453,11 +453,9 @@ hr.soft{border:none;border-top:1px dashed var(--line-2);margin:26px 0}
         <h3>Live scan</h3>
         <p style="color:var(--muted);font-size:14px;margin:.2em 0 .6em">Real professors, real sources.</p>
         <ul>
-          <li>Needs <b>two free keys</b> so it isn't rate-limited:
-            <br>· a <b>ROR</b> id (a registry of institutions)
-            <br>· an <b>OpenAlex</b> key (open research data)</li>
+          <li><b>No keys or sign-ups.</b> The data services (ROR &amp; OpenAlex) are free and open.</li>
+          <li>You just add <b>your own email</b> — a courtesy that gets you the faster “polite” lane.</li>
           <li>Only reads <b>public</b> pages &amp; open databases; obeys each site's <code>robots.txt</code>.</li>
-          <li>The tool <b>fails loudly</b> with the exact fix if a key is missing — it never runs half-broken.</li>
           <li><a href="#live">↓ Full live-setup steps below</a></li>
         </ul>
       </div>
@@ -477,32 +475,34 @@ hr.soft{border:none;border-top:1px dashed var(--line-2);margin:26px 0}
       <p style="margin:0">In short: <b>do the demo now to learn the tool; keep this page for when live lands.</b></p></div>
 
     <div class="step-card">
-      <div class="head"><span class="badge-n">A</span><h3>Get two free keys (about a minute each)</h3></div>
-      <p>These let the tool use the polite, faster lanes of two open services. Both are <b>free</b> — no payment, no credit card.</p>
+      <div class="head"><span class="badge-n">A</span><h3>Good news: no keys to sign up for</h3></div>
+      <p>The two data services the tool uses are <b>free and open</b> — nothing to register for:</p>
       <div class="fair">
-        <div class="f"><span class="tick">1</span><span><b>ROR client id</b> — a registry of universities &amp; institutes. Register at <a href="https://ror.readme.io" target="_blank" rel="noopener">ror.readme.io</a>.</span></div>
-        <div class="f"><span class="tick">2</span><span><b>OpenAlex key</b> (or “polite-pool” email) — open research data. Get one at <a href="https://openalex.org" target="_blank" rel="noopener">openalex.org</a>. Without it you're capped at roughly <b>2 scans a day</b> instead of ~20.</span></div>
+        <div class="f"><span class="tick">✓</span><span><b>ROR</b> (a registry of universities, <a href="https://ror.org" target="_blank" rel="noopener">ror.org</a>) — its data is open; <b>no key at all</b>.</span></div>
+        <div class="f"><span class="tick">✓</span><span><b>OpenAlex</b> (open research data, <a href="https://openalex.org" target="_blank" rel="noopener">openalex.org</a>) — free; it just likes to know <b>who's calling</b>.</span></div>
       </div>
+      <div class="box tip"><div class="lbl">The only thing you provide</div>
+        <p style="margin:0"><b>Your own email address</b> — any one you own. It puts you in OpenAlex's faster
+          “polite pool” and is how the tool politely identifies itself to servers. That's it. (There's an
+          optional <i>paid</i> OpenAlex plan for very heavy use, but you don't need it.)</p></div>
     </div>
 
     <div class="step-card">
-      <div class="head"><span class="badge-n">B</span><h3>Tell the tool your keys</h3></div>
-      <p>You set two <b>environment variables</b> — named boxes your terminal remembers. Paste the block for
-        your system (put your real keys between the quotes).</p>
+      <div class="head"><span class="badge-n">B</span><h3>Tell the tool your email</h3></div>
+      <p>You set one <b>environment variable</b> — a named box your terminal remembers. Paste the block for
+        your system (put your real email between the quotes).</p>
       <div class="win"><div class="bar"><i></i><i></i><i></i><span class="name">PowerShell — Windows</span></div>
         <div class="term"><span class="c"># this terminal session only:</span><br>
-        <span class="p">$</span> $env:<b>SUPERVISORLY_ROR_CLIENT_ID</b> = "your-ror-id"<br>
-        <span class="p">$</span> $env:<b>SUPERVISORLY_OPENALEX_KEY</b>  = "your-openalex-key"<br><br>
-        <span class="c"># to make them permanent, use setx (then reopen the terminal):</span><br>
-        <span class="p">$</span> setx SUPERVISORLY_ROR_CLIENT_ID "your-ror-id"<br>
-        <span class="p">$</span> setx SUPERVISORLY_OPENALEX_KEY "your-openalex-key"</div></div>
+        <span class="p">$</span> $env:<b>SUPERVISORLY_CONTACT_EMAIL</b> = "you@example.com"<br><br>
+        <span class="c"># to make it permanent (then reopen the terminal):</span><br>
+        <span class="p">$</span> setx SUPERVISORLY_CONTACT_EMAIL "you@example.com"</div></div>
       <div class="win"><div class="bar"><i></i><i></i><i></i><span class="name">Terminal — Mac / Linux</span></div>
-        <div class="term"><span class="p">$</span> export <b>SUPERVISORLY_ROR_CLIENT_ID</b>="your-ror-id"<br>
-        <span class="p">$</span> export <b>SUPERVISORLY_OPENALEX_KEY</b>="your-openalex-key"<br>
-        <span class="c"># add those two lines to ~/.zshrc or ~/.bashrc to keep them</span></div></div>
-      <div class="box tip"><div class="lbl">If you forget a key</div>
-        <p style="margin:0">Good news — you can't run it half-broken by accident. The tool <b>stops and tells you
-          exactly which key is missing and where to get it</b>, rather than quietly running on a slow, limited lane.</p></div>
+        <div class="term"><span class="p">$</span> export <b>SUPERVISORLY_CONTACT_EMAIL</b>="you@example.com"<br>
+        <span class="c"># add that line to ~/.zshrc or ~/.bashrc to keep it</span></div></div>
+      <div class="box tip"><div class="lbl">If you forget it</div>
+        <p style="margin:0">You can't run it anonymously by accident. The tool <b>stops and tells you to set your
+          email</b> — being a polite guest of these free services is part of the deal. (An optional paid
+          OpenAlex key goes in <code>SUPERVISORLY_OPENALEX_KEY</code> if you ever want higher limits.)</p></div>
     </div>
 
     <div class="step-card">

@@ -69,15 +69,19 @@ Claude-for-Chrome prompt (paste the result back and the run resumes without re-f
 
 ## Credentials (needed for live runs)
 
-Two free credentials are required for a real scan; the tool **fails loud** (with the exact fix)
-rather than running silently on the throttled anonymous tiers:
+The open data services this tool uses are **free and keyless**: [ROR](https://ror.org)'s API is
+open and needs no account, and [OpenAlex](https://openalex.org) is free. The only thing a live
+scan genuinely needs is a **contact email** — OpenAlex's "polite pool" marker (`?mailto=…`) that
+earns faster, more reliable service, and the address we identify ourselves with in the HTTP
+User-Agent. The tool **fails loud** (with the exact fix) if it's missing, rather than hammering
+public APIs anonymously.
 
-| Environment variable          | What it is                    | Get it |
-|-------------------------------|-------------------------------|--------|
-| `SUPERVISORLY_ROR_CLIENT_ID`  | ROR institution-registry client id | <https://ror.readme.io/> |
-| `SUPERVISORLY_OPENALEX_KEY`   | OpenAlex key / polite-pool email — without it the daily credit ceiling is ~2 scans instead of ~20 | <https://openalex.org/> |
+| Environment variable          | Required? | What it is | Where |
+|-------------------------------|-----------|------------|-------|
+| `SUPERVISORLY_CONTACT_EMAIL`  | **yes** (live) | **Your own email** — used for the OpenAlex polite pool and our User-Agent. Any address you own. | — |
+| `SUPERVISORLY_OPENALEX_KEY`   | optional  | A **paid** OpenAlex premium key for higher limits / the full snapshot. Not needed for a scan. | <https://openalex.org/pricing> |
 
-The offline test suite and `scan --demo` run without either.
+There is **no ROR key** — its API is open. The offline test suite and `scan --demo` need nothing.
 
 ## Opt-out
 
