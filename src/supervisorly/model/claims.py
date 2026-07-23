@@ -115,6 +115,23 @@ def record_web_source(
     return source_id
 
 
+def supersede_prior(conn, entity_kind: str, entity_id: str, field: str,
+                    keep_claim_id: str) -> int:
+    """Mark every other live claim for (entity, field) as superseded by ``keep_claim_id``.
+
+    Used when a fresh claim replaces an earlier head — e.g. a human-rung answer filling a
+    previously ``blocked`` field. Keeps the history (append-only) while making the new claim
+    the single head that ``claims_for`` returns. Returns the number superseded.
+    """
+    cur = conn.execute(
+        "UPDATE claim SET superseded_by=? WHERE entity_kind=? AND entity_id=? AND field=? "
+        "AND claim_id != ? AND superseded_by IS NULL",
+        (keep_claim_id, entity_kind, entity_id, field, keep_claim_id),
+    )
+    conn.commit()
+    return cur.rowcount
+
+
 def claims_for(conn, entity_kind: str, entity_id: str) -> list[dict]:
     import json
     rows = conn.execute(

@@ -202,6 +202,31 @@ def run_offline(plan: dict, targets: list[dict], transport: Transport, snap_root
     return result
 
 
+def reexport(db_path, targets: list[dict]) -> dict:
+    """Rebuild the export + dashboard from persisted claims — **without any fetching** (D-029).
+
+    This is the resume path: after the human rung fills gaps (``ingest.ingest_md``), the run
+    re-exports from the database and snapshots already on disk. It constructs no transport and
+    no fetcher, so nothing can be re-fetched; a field still ``blocked`` keeps the run
+    ``finalized_with_open_gaps``, otherwise it becomes ``finalized`` (D-049).
+    """
+    conn = open_db(db_path)
+    gaps = sum(
+        1 for t in targets
+        if any(c.get("state") == "blocked"
+               for c in claims.claims_for(conn, "person", t["id"]))
+    )
+    status = "finalized_with_open_gaps" if gaps else "finalized"
+    latest = conn.execute(
+        "SELECT run_id FROM run ORDER BY started_at DESC, rowid DESC LIMIT 1"
+    ).fetchone()
+    run_id = latest["run_id"] if latest else "reexport"
+    if latest:
+        runs.set_run_status(conn, run_id, status)
+    return _build_result(conn, run_id, status, targets,
+                         stats={"extractions": 0, "cache_hits": 0, "reexport": True}, gaps=gaps)
+
+
 def _build_result(conn, run_id, status, targets, *, stats, gaps) -> dict:
     """Assemble the export + dashboard from the persisted claims (no fetching here)."""
     professors = [{"id": t["id"], "name": t.get("name")} for t in targets]

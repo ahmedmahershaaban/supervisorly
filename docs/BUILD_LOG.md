@@ -262,3 +262,25 @@ Export/dashboard assembly refactored into `_build_result` (shared with the resum
 **Ran:** pytest → **87 passed** (exit 0): a cold run extracts every reachable page (`cache_hits==0`);
 the warm re-scan does `extractions==0`, `cache_hits≥4`, **adds no duplicate claims**, and yields an
 identical honest export; a genuine content change **busts** the cache and re-extracts only that page.
+
+## round M3 — the human rung, end to end: md-ingester + no-fetch re-export (commit pending)
+
+Edge-case rows *student never returns Phase-3 MD* and *run resumed later, nothing re-fetched* —
+completing Phase G's DoD.
+
+**Built:**
+- `ingest.py` — `ingest_md(conn, md_text)` parses a Phase-3 return in the shared grammar
+  (`extract.md_grammar`) and records each block as a normal, provenance-carrying Claim
+  (`extractor = 'human-assisted (Claude for Chrome)'`, its walled `source_url` logged as a
+  `human_assisted` web source). Human data is not privileged (D-043).
+- `model/claims.py` — `supersede_prior`: a filled field **supersedes** the earlier head
+  (typically the `blocked` placeholder), so the gap closes and `claims_for` returns the human
+  answer as the single live head — history kept (append-only).
+- `pipeline.reexport(db_path, targets)` — rebuilds the export + dashboard from the DB + disk
+  snapshots and **constructs no transport or fetcher**, so nothing can be re-fetched (D-029);
+  it re-derives `finalized` vs `finalized_with_open_gaps` from whether any field is still
+  blocked (D-049).
+**Ran:** pytest → **89 passed** (exit 0): an abandoned Phase-3 still finalises a dashboard
+(`finalized_with_open_gaps`, the walled prof present + `blocked`, not dropped); the MD return
+records 2 claims, and `reexport` flips the run to `finalized`, shows the human value with its
+`x.com` source, keeps the export valid — while a **counting transport proves zero re-fetches**.
