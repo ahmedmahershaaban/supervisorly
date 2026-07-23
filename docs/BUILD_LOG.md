@@ -523,3 +523,12 @@ now captures the CLI output and asserts it is `cp1252`-encodable / ASCII).
 **Ran (from the fresh venv):** `python -m pytest` → **135 passed** (exit 0) on the first try;
 `python -m supervisorly scan --demo` → exit 0, writes `dashboard.html` + `.json`, prints an
 ASCII line. Clean-room **green**.
+
+## COMPLETION — goal met
+
+All phases (A–J) met their DoD; 18/18 edge-case rows have passing tests; the offline self-run is
+hallucination-free; the four-pass adversarial audit (10 → 6 → 2 → 1) is closed with all 19 findings
+fixed + regression-tested; ethics gates are all test-guarded; clean-room verification is green from a
+fresh checkout. **135 tests pass (exit 0).** See `docs/COMPLETION_REPORT.md` for the full sign-off.
+The only step recorded **skipped** (never passed) is the credentialed live smoke test — no
+ROR/OpenAlex keys in this environment; it is the natural next build increment.
