@@ -194,3 +194,16 @@ and `test_demo_deadlines_firm_vs_projected` (Ada firm 2026-12-01 / Ben watch 202
 not guessed; Cara searched_absent; Eve blocked). **DoD (Phase F):** now fully met — four states +
 deadline sort + clickable detail all present; edge-case row *projected deadline → watch date* covered
 through the real pipeline.
+
+## round K — preflight: fail-loud credentials + honest sparse-coverage warning (commit pending)
+
+Two edge-case rows (D-014/020 missing keys; D-060 sparse country) as one small module.
+
+**Built:** `preflight.py` — `require_credentials(env)` **raises** `MissingCredentials` naming each
+missing var (`SUPERVISORLY_ROR_CLIENT_ID`, `SUPERVISORLY_OPENALEX_KEY`) *and how to get it*, and
+points at `--demo` (never runs silently on throttled anonymous tiers, D-020). `coverage_preflight(stats)`
+returns **warnings and never raises** — a thin OpenAlex/ROR country is stated up front and the run
+continues (D-060). `env` is injected, so both are testable without touching the process environment;
+the offline demo path never calls `require_credentials`.
+**Ran:** pytest → **75 passed** (exit 0), incl. missing/partial/complete credentials, sparse-warns-not-blocks,
+well-covered-is-quiet, and *the offline demo needs no credentials*.
