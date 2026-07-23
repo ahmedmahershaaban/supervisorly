@@ -164,3 +164,33 @@ cleanly shows shape-diversity detection and the German page remains the honest-a
 **Ran:** pytest → **65 passed** (exit 0). **DoD (Phase H):** met — genericity holds across ≥3 shapes /
 ≥3 countries, non-English is honest not guessed, blocked isn't dropped, zero-result is graceful, and
 `scan --demo` is a runnable end-to-end entry point.
+
+## round I — deadline/urgency view + clickable detail + deadline extraction (commit pending)
+
+Closes the two Phase-F gaps the docstring promised but the code lacked: the **deadline view**
+(D-061) and **clickable professor detail** (goal §4 step 2).
+
+**Built:**
+- `export/dashboard.py`: a **Deadlines** view ("what closes soon") over any date-typed field,
+  sorted soonest-first, that renders a *projected* date (envelope confidence
+  inferred/unconfirmed/action_needed) as a **watch** badge — visually distinct from a **firm**
+  officially-quoted one — with an on-page note that watch dates are not published deadlines
+  (D-061: never shown as firm). A keyboard-accessible **detail panel**: clicking a professor
+  (row or deadline card) opens an aside listing every field with value, **verbatim quote**,
+  source link, and confidence — so every displayed fact is traceable (D-010). Still one
+  self-contained offline file, script-injection-safe.
+- `pipeline.py`: extraction is now **field-driven** (`_EXTRACTORS`: field_id → deterministic
+  extractor) so a blocked page marks *every* field `blocked` (not `never_attempted`) and adding
+  a field is one row + one descriptor (D-038). New `extract_deadline` finds a dated deadline
+  sentence and marks it firm vs *projected* from unambiguous cue words ("usually"/"each year");
+  `_normalize_date` parses ISO / "1 December 2026" / "December 1, 2026" to ISO deterministically
+  and **requires day+month+year** — a bare month is never invented into a date.
+- `demo.py`: Ada carries a firm published deadline, Ben a projected one → the demo deadline view
+  shows a real firm + watch pair.
+
+**Ran:** pytest → **69 passed** (exit 0), incl. `test_deadline_view_present_and_distinguishes_firm_from_watch`,
+`test_watch_date_is_driven_by_confidence_not_guessed`, `test_professor_detail_is_clickable_and_traceable`,
+and `test_demo_deadlines_firm_vs_projected` (Ada firm 2026-12-01 / Ben watch 2026-09-15, both parsed
+not guessed; Cara searched_absent; Eve blocked). **DoD (Phase F):** now fully met — four states +
+deadline sort + clickable detail all present; edge-case row *projected deadline → watch date* covered
+through the real pipeline.

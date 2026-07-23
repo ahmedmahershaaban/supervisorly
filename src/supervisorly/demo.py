@@ -14,10 +14,12 @@ from .fetch.transport import CassetteTransport
 # Three distinct directory shapes / countries — all synthetic.
 _CA = ("<html><body><main><h1>Dr. Ada Placeholder</h1>"
        "<p>I am recruiting two PhD students to start in Fall 2027.</p>"
+       "<p>Applications close on 1 December 2026.</p>"   # firm, published deadline
        "</main></body></html>")
 _UK = ("<html><body><section class='profile'><h2>Prof. Ben Example</h2>"
-       "<ul><li>Group news</li><li>We are seeking a postdoc in causal inference.</li></ul>"
-       "</section></body></html>")
+       "<ul><li>Group news</li><li>We are seeking a postdoc in causal inference.</li>"
+       "<li>Applications are usually due by 15 September 2026.</li>"  # projected → watch date
+       "</ul></section></body></html>")
 _AU = ("<html><body><div class='staff'><div class='bio'><strong>A/Prof. Cara Sample</strong>"
        "<div>My lab studies NLP; I am accepting a new PhD student for 2027.</div>"
        "</div></div></body></html>")

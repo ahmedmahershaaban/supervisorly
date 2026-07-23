@@ -37,6 +37,22 @@ def test_demo_states_are_honest_per_shape(tmp_path):
     assert st["eve"] == "blocked"         # robots-disallowed → blocked, not dropped
 
 
+def test_demo_deadlines_firm_vs_projected(tmp_path):
+    """Edge (projected deadline, D-061): a published date is firm (quoted_official); a
+    date wrapped in projection language ("usually due by") is a *watch* date (inferred),
+    never presented as firm. Both are parsed deterministically to ISO — never guessed."""
+    result, _, _ = _run_demo(tmp_path)
+    dl = {p["id"]: p["fields"]["deadline"] for p in result["export"]["professors"]}
+    assert dl["ada"]["state"] == "value"
+    assert dl["ada"]["value"] == "2026-12-01"
+    assert dl["ada"]["confidence"] == "quoted_official"        # firm
+    assert dl["ben"]["state"] == "value"
+    assert dl["ben"]["value"] == "2026-09-15"
+    assert dl["ben"]["confidence"] == "inferred"               # projected → watch
+    assert dl["cara"]["state"] == "searched_absent"           # no deadline sentence
+    assert dl["eve"]["state"] == "blocked"                    # blocked page → blocked field
+
+
 def test_demo_has_zero_hallucinations(tmp_path):
     result, snaps, _ = _run_demo(tmp_path)
     for p in result["export"]["professors"]:
