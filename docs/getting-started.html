@@ -1,0 +1,563 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Supervisorly — Beginner's Guide</title>
+<style>
+:root{
+  --bg:#faf8f4; --surface:#ffffff; --raised:#fbfaf7; --line:#e7e2d8; --line-2:#d8d2c4;
+  --ink:#1b1a17; --ink-2:#3d3a34; --muted:#6f6a60; --faint:#9a948a;
+  --accent:#b9821f; --accent-ink:#7a560f; --accent-soft:#f4ead2;
+  --good:#2f8f5b; --warn:#b9821f;
+  --shadow:0 1px 2px rgba(30,25,15,.05), 0 8px 24px rgba(30,25,15,.06);
+  --sans:ui-sans-serif,system-ui,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --mono:ui-monospace,"SF Mono","Cascadia Code","Consolas","Liberation Mono",monospace;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#0c0d10; --surface:#15161a; --raised:#191a1f; --line:#282a31; --line-2:#33353d;
+    --ink:#e9eaed; --ink-2:#c7c9cf; --muted:#8a8d96; --faint:#63666f;
+    --accent:#d9a441; --accent-ink:#e8bf6a; --accent-soft:#2a2416;
+    --good:#7bd88f; --warn:#e8bf6a;
+    --shadow:0 1px 2px rgba(0,0,0,.3), 0 12px 30px rgba(0,0,0,.4);
+  }
+}
+:root[data-theme="light"]{
+  --bg:#faf8f4; --surface:#ffffff; --raised:#fbfaf7; --line:#e7e2d8; --line-2:#d8d2c4;
+  --ink:#1b1a17; --ink-2:#3d3a34; --muted:#6f6a60; --faint:#9a948a;
+  --accent:#b9821f; --accent-ink:#7a560f; --accent-soft:#f4ead2;
+  --good:#2f8f5b; --warn:#b9821f;
+  --shadow:0 1px 2px rgba(30,25,15,.05), 0 8px 24px rgba(30,25,15,.06);
+}
+:root[data-theme="dark"]{
+  --bg:#0c0d10; --surface:#15161a; --raised:#191a1f; --line:#282a31; --line-2:#33353d;
+  --ink:#e9eaed; --ink-2:#c7c9cf; --muted:#8a8d96; --faint:#63666f;
+  --accent:#d9a441; --accent-ink:#e8bf6a; --accent-soft:#2a2416;
+  --good:#7bd88f; --warn:#e8bf6a;
+  --shadow:0 1px 2px rgba(0,0,0,.3), 0 12px 30px rgba(0,0,0,.4);
+}
+
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important;animation:none!important}}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+  font-size:17px;line-height:1.65;-webkit-font-smoothing:antialiased}
+.wrap{max-width:820px;margin:0 auto;padding:0 22px}
+p{margin:0 0 1em;max-width:66ch}
+a{color:var(--accent-ink);text-decoration:underline;text-underline-offset:2px;text-decoration-thickness:1px}
+a:hover{color:var(--accent)}
+:focus-visible{outline:2.5px solid var(--accent);outline-offset:2px;border-radius:4px}
+
+/* ── top bar ── */
+header.top{position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--bg) 86%,transparent);
+  backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+.top .row{display:flex;align-items:center;gap:14px;padding:11px 0}
+.brand{display:flex;align-items:center;gap:9px;font-weight:750;letter-spacing:-.01em}
+.brand .mark{width:26px;height:26px;border-radius:7px;display:grid;place-items:center;
+  background:var(--accent);color:#12100a;font-size:15px;flex:none}
+.top .spacer{flex:1}
+.top a.cta{font-family:var(--mono);font-size:12.5px;text-decoration:none;padding:7px 12px;border-radius:8px;
+  border:1px solid var(--line-2);color:var(--ink-2)}
+.top a.cta:hover{border-color:var(--accent);color:var(--accent)}
+.tbtn{font:inherit;font-size:13px;cursor:pointer;background:transparent;border:1px solid var(--line-2);
+  color:var(--ink-2);border-radius:8px;width:34px;height:34px;display:grid;place-items:center}
+.tbtn:hover{border-color:var(--accent);color:var(--accent)}
+
+/* ── hero ── */
+.hero{padding:64px 0 30px}
+.eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--accent-ink);margin-bottom:18px}
+h1{font-size:clamp(2.1rem,6vw,3.3rem);line-height:1.04;letter-spacing:-.03em;margin:0 0 .4em;
+  font-weight:800;text-wrap:balance}
+.lede{font-size:clamp(1.05rem,2.4vw,1.28rem);color:var(--ink-2);max-width:60ch}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:26px}
+.chip{font-family:var(--mono);font-size:12px;padding:6px 11px;border-radius:999px;
+  border:1px solid var(--line-2);color:var(--muted);background:var(--surface)}
+.chip b{color:var(--accent-ink);font-weight:600}
+
+/* ── sections ── */
+section{padding:34px 0;border-top:1px solid var(--line)}
+h2{font-size:clamp(1.4rem,3.4vw,1.9rem);letter-spacing:-.02em;margin:0 0 .5em;font-weight:750;text-wrap:balance}
+h2 .num{font-family:var(--mono);font-size:.62em;color:var(--accent-ink);margin-right:.55em;
+  border:1px solid var(--line-2);border-radius:6px;padding:.05em .45em}
+h3{font-size:1.12rem;margin:1.6em 0 .4em;letter-spacing:-.01em}
+.sub{color:var(--muted);margin-top:-.3em}
+code:not(pre code){font-family:var(--mono);font-size:.86em;background:var(--accent-soft);
+  color:var(--accent-ink);padding:.12em .42em;border-radius:5px;border:1px solid color-mix(in srgb,var(--accent) 22%,transparent)}
+
+/* ── how-it-works flow ── */
+.flow{display:grid;grid-template-columns:1fr auto 1fr auto 1fr;gap:0;align-items:stretch;margin-top:8px}
+.flow .step{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 16px;text-align:center;box-shadow:var(--shadow)}
+.flow .ico{font-size:26px;line-height:1;margin-bottom:10px}
+.flow .t{font-weight:700;margin-bottom:4px}
+.flow .d{font-size:14px;color:var(--muted);line-height:1.5}
+.flow .arr{display:grid;place-items:center;color:var(--accent);font-size:22px;padding:0 6px}
+@media(max-width:640px){.flow{grid-template-columns:1fr}.flow .arr{transform:rotate(90deg);padding:8px 0}}
+
+/* ── window mockups (terminal + dashboard) ── */
+.win{border:1px solid var(--line-2);border-radius:12px;overflow:hidden;box-shadow:var(--shadow);
+  margin:16px 0;background:#15161a}
+.win .bar{display:flex;align-items:center;gap:7px;padding:9px 13px;background:#1d1e23;border-bottom:1px solid #2a2c33}
+.win .bar i{width:11px;height:11px;border-radius:50%;background:#3a3c44;display:block}
+.win .bar i:nth-child(1){background:#e5695f}.win .bar i:nth-child(2){background:#e6b64c}.win .bar i:nth-child(3){background:#6cc06c}
+.win .bar .name{margin-left:8px;font-family:var(--mono);font-size:12px;color:#8a8d96}
+.term{font-family:var(--mono);font-size:13.5px;line-height:1.8;color:#e9eaed;padding:16px 16px;
+  overflow-x:auto;background:#101115}
+.term .c{color:#8a8d96}                 /* comment */
+.term .p{color:#d9a441;user-select:none}/* prompt $ */
+.term .o{color:#8a8d96}                 /* output */
+.term .g{color:#7bd88f}                 /* good/highlight */
+.term b{color:#fff;font-weight:600}
+
+/* ── dashboard preview (always dark = it's a real screenshot) ── */
+.dash{background:#0c0d10;color:#e9eaed;font-size:13.5px}
+.dash .dhead{padding:14px 16px;border-bottom:1px solid #282a31}
+.dash .dhead .h{font-weight:750;font-size:16px}
+.dash .dhead .m{font-family:var(--mono);font-size:11px;color:#8a8d96;margin-top:3px}
+.dash .ctrl{display:flex;gap:8px;align-items:center;padding:11px 16px;border-bottom:1px solid #282a31;flex-wrap:wrap}
+.dash .fake-input{flex:1;min-width:150px;background:#15161a;border:1px solid #282a31;border-radius:8px;
+  padding:7px 11px;color:#8a8d96;font-family:var(--mono);font-size:12px}
+.dash .vbtn{background:#15161a;border:1px solid #282a31;color:#e9eaed;border-radius:8px;padding:7px 12px;
+  font:inherit;font-size:13px;cursor:pointer}
+.dash .vbtn.on{border-color:#d9a441;color:#d9a441}
+.dwrap{overflow-x:auto}
+table.dg{border-collapse:collapse;width:100%;min-width:520px}
+.dg th,.dg td{text-align:left;padding:10px 14px;border-bottom:1px solid #282a31;vertical-align:top;font-size:13px}
+.dg th{font-family:var(--mono);font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:#8a8d96;font-weight:600}
+.dg td.name{font-weight:650}
+.dg tr{cursor:pointer}
+.dg tr:hover td{background:#15161a}
+.s-value{color:#dff2e7}
+.s-absent{color:#8a8d96;font-style:italic}
+.s-never{color:#5a5d66}
+.s-blocked{color:#e8bf6a}
+.src{color:#63666f;font-size:11px;margin-left:5px;text-decoration:none}
+.hide{display:none}
+.dl{display:flex;flex-direction:column;gap:8px;padding:12px 16px}
+.dl .card{display:flex;gap:12px;align-items:baseline;background:#15161a;border:1px solid #282a31;border-radius:10px;padding:11px 13px;flex-wrap:wrap}
+.dl .date{font-family:var(--mono);font-size:12px;min-width:104px;color:#e9eaed}
+.badge{font-family:var(--mono);font-size:10.5px;padding:2px 8px;border-radius:999px;border:1px solid #282a31}
+.badge.firm{color:#7bd88f;border-color:#3a6b48}
+.badge.watch{color:#e8bf6a;border-color:#7a6528}
+.dl .note{font-size:11px;color:#8a8d96;padding:4px 2px}
+
+/* callouts under the dashboard */
+.callouts{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
+@media(max-width:560px){.callouts{grid-template-columns:1fr}}
+.callout{background:var(--surface);border:1px solid var(--line);border-radius:11px;padding:13px 14px}
+.callout .k{font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--accent-ink);margin-bottom:3px}
+.callout .v{font-size:14px;color:var(--ink-2);line-height:1.5}
+
+/* ── four-state legend ── */
+.states{display:grid;gap:10px;margin-top:6px}
+.state{display:grid;grid-template-columns:auto 1fr;gap:14px;align-items:start;
+  background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.pill{font-family:var(--mono);font-size:12px;padding:5px 10px;border-radius:8px;white-space:nowrap;align-self:start;border:1px solid transparent}
+.pill.value{color:#1e6b45;background:#e4f4ea;border-color:#bfe6ce}
+.pill.absent{color:#6b675e;background:#efece5;border-color:#ded9cd;font-style:italic}
+.pill.never{color:#8a857b;background:#f0eee9;border-color:#e0dcd2}
+.pill.blocked{color:#8a6412;background:#f7ecd2;border-color:#ecd8a8}
+:root[data-theme="dark"] .pill.value{color:#dff2e7;background:#16241b;border-color:#2c4636}
+:root[data-theme="dark"] .pill.absent{color:#9aa;background:#1a1b1f;border-color:#33353d}
+:root[data-theme="dark"] .pill.never{color:#7a7d86;background:#191a1f;border-color:#2b2d34}
+:root[data-theme="dark"] .pill.blocked{color:#e8bf6a;background:#241f12;border-color:#4a3f1f}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]) .pill.value{color:#dff2e7;background:#16241b;border-color:#2c4636}
+  :root:not([data-theme="light"]) .pill.absent{color:#9aa;background:#1a1b1f;border-color:#33353d}
+  :root:not([data-theme="light"]) .pill.never{color:#7a7d86;background:#191a1f;border-color:#2b2d34}
+  :root:not([data-theme="light"]) .pill.blocked{color:#e8bf6a;background:#241f12;border-color:#4a3f1f}
+}
+.state .sv b{color:var(--ink)}
+.state .sv{font-size:14.5px;color:var(--ink-2)}
+
+/* ── generic note / callout boxes ── */
+.box{border:1px solid var(--line);border-left:3px solid var(--accent);background:var(--surface);
+  border-radius:10px;padding:15px 17px;margin:16px 0}
+.box.tip{border-left-color:var(--good)}
+.box .lbl{font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.08em;
+  color:var(--accent-ink);margin-bottom:5px;font-weight:600}
+.box.tip .lbl{color:var(--good)}
+.box p:last-child{margin-bottom:0}
+
+/* two-modes cards */
+.modes{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:8px}
+@media(max-width:600px){.modes{grid-template-columns:1fr}}
+.mode{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px;box-shadow:var(--shadow)}
+.mode.reco{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset,var(--shadow)}
+.mode .tag{font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.mode.reco .tag{color:var(--accent-ink)}
+.mode h3{margin:.35em 0 .3em;font-size:1.18rem}
+.mode ul{margin:.4em 0 0;padding-left:1.15em}
+.mode li{margin:.3em 0;font-size:14.5px;color:var(--ink-2)}
+
+/* human-rung steps */
+.rung{counter-reset:r;display:grid;gap:10px;margin-top:8px}
+.rung .r{display:grid;grid-template-columns:auto 1fr;gap:14px;align-items:start;
+  background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.rung .r .n{counter-increment:r;font-family:var(--mono);font-weight:700;color:var(--accent-ink);
+  width:28px;height:28px;border-radius:8px;border:1px solid var(--line-2);display:grid;place-items:center;font-size:13px}
+.rung .r .n::before{content:counter(r)}
+.rung .r .txt{font-size:14.5px;color:var(--ink-2)}
+.rung .r .txt b{color:var(--ink)}
+
+/* fairness list */
+.fair{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:6px}
+@media(max-width:600px){.fair{grid-template-columns:1fr}}
+.fair .f{display:flex;gap:10px;align-items:flex-start;font-size:14.5px;color:var(--ink-2)}
+.fair .f .tick{color:var(--good);flex:none;font-weight:800}
+
+/* troubleshooting */
+details.tr{border:1px solid var(--line);border-radius:11px;background:var(--surface);margin:9px 0;overflow:hidden}
+details.tr>summary{cursor:pointer;padding:13px 16px;font-weight:650;list-style:none;display:flex;gap:10px;align-items:center}
+details.tr>summary::-webkit-details-marker{display:none}
+details.tr>summary::before{content:"›";color:var(--accent);font-size:20px;transition:transform .15s;line-height:1}
+details.tr[open]>summary::before{transform:rotate(90deg)}
+details.tr .body{padding:0 16px 15px;color:var(--ink-2);font-size:14.5px}
+details.tr .body code{font-size:.82em}
+
+/* step cards */
+.step-card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px 20px 8px;margin:14px 0;box-shadow:var(--shadow)}
+.step-card .head{display:flex;align-items:center;gap:12px;margin-bottom:4px}
+.step-card .badge-n{font-family:var(--mono);font-weight:800;font-size:15px;color:#12100a;background:var(--accent);
+  width:32px;height:32px;border-radius:9px;display:grid;place-items:center;flex:none}
+.step-card .head h3{margin:0;font-size:1.16rem}
+
+footer{padding:40px 0 70px;border-top:1px solid var(--line);color:var(--muted);font-size:14px}
+footer a{color:var(--accent-ink)}
+.foot-links{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 18px}
+.foot-links a{font-family:var(--mono);font-size:12.5px;text-decoration:none;border:1px solid var(--line-2);
+  padding:7px 11px;border-radius:8px;color:var(--ink-2)}
+.foot-links a:hover{border-color:var(--accent);color:var(--accent)}
+hr.soft{border:none;border-top:1px dashed var(--line-2);margin:26px 0}
+.kbd{font-family:var(--mono);font-size:.82em;border:1px solid var(--line-2);border-bottom-width:2px;
+  border-radius:5px;padding:.05em .4em;background:var(--raised);color:var(--ink-2)}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="wrap row">
+    <span class="brand"><span class="mark">S</span> Supervisorly</span>
+    <span class="spacer"></span>
+    <a class="cta" href="#run">▶ Jump to “Run it”</a>
+    <button class="tbtn" id="theme" aria-label="Toggle light/dark theme" title="Toggle theme">◐</button>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <div class="hero">
+    <div class="eyebrow">Beginner's guide · no coding experience needed</div>
+    <h1>Find a research supervisor — with proof for every fact.</h1>
+    <p class="lede">Supervisorly is a small program you run on your own computer. You tell it a
+      country and a field, and it builds you a tidy, filterable list of professors — where
+      <b>every single fact links back to the page it came from</b>. This guide takes you from
+      zero to your first result.</p>
+    <div class="chips">
+      <span class="chip">⏱ <b>~5 minutes</b></span>
+      <span class="chip">💳 <b>Free</b> — the demo needs no account</span>
+      <span class="chip">🔒 Runs <b>on your machine</b></span>
+      <span class="chip">🌍 <b>Any country</b>, any field</span>
+    </div>
+  </div>
+
+  <section id="what">
+    <h2>What is this, really?</h2>
+    <p>Imagine you want to do a PhD (or a master's, or a postdoc, or just research) and you need to
+      find the right professor to work with. Normally you'd open dozens of tabs and copy notes into
+      a document. Supervisorly does that legwork for you — <b>politely and from public sources</b> —
+      and hands you a single web page you can filter and sort. Crucially, it never makes things up:
+      if it can't find something, it <b>tells you honestly</b> instead of guessing.</p>
+
+    <div class="flow" role="list" aria-label="How it works in three steps">
+      <div class="step" role="listitem">
+        <div class="ico">🗣️</div><div class="t">1 · You ask</div>
+        <div class="d">A country, a field, and what you need (PhD, master's, postdoc, a mentor…).</div>
+      </div>
+      <div class="arr" aria-hidden="true">→</div>
+      <div class="step" role="listitem">
+        <div class="ico">🔎</div><div class="t">2 · It gathers</div>
+        <div class="d">Reads public professor pages &amp; open research databases — obeying each site's rules.</div>
+      </div>
+      <div class="arr" aria-hidden="true">→</div>
+      <div class="step" role="listitem">
+        <div class="ico">📋</div><div class="t">3 · You get</div>
+        <div class="d">A filterable dashboard where every fact shows its quote &amp; source link.</div>
+      </div>
+    </div>
+  </section>
+
+  <section id="need">
+    <h2>What you'll need</h2>
+    <p class="sub">Just three things. The offline demo (which this guide uses) needs no accounts and no payment.</p>
+    <div class="fair" style="margin-top:14px">
+      <div class="f"><span class="tick">✓</span><span><b>A computer</b> — Windows, Mac, or Linux all work.</span></div>
+      <div class="f"><span class="tick">✓</span><span><b>Python 3.10 or newer</b> — a free programming language. Download it from <a href="https://python.org/downloads" target="_blank" rel="noopener">python.org/downloads</a> and, on Windows, tick <span class="kbd">Add Python to PATH</span> during install.</span></div>
+      <div class="f"><span class="tick">✓</span><span><b>A “terminal”</b> — a text window where you type commands. On Windows it's <b>PowerShell</b>; on Mac it's <b>Terminal</b>. Don't worry, you'll only paste a few lines.</span></div>
+    </div>
+    <div class="box tip">
+      <div class="lbl">New to the terminal?</div>
+      <p style="margin:0">A terminal is just a place to type instructions instead of clicking. You open it,
+      type a command, press <span class="kbd">Enter</span>, and it does the thing. That's the whole skill.</p>
+    </div>
+  </section>
+
+  <section id="run">
+    <h2><span class="num">RUN</span>Run it — five steps</h2>
+    <p class="sub">Type (or paste) each block into your terminal and press <span class="kbd">Enter</span>. Lines starting with <code>#</code> are just notes — you don't type those.</p>
+
+    <div class="step-card">
+      <div class="head"><span class="badge-n">1</span><h3>Get the files</h3></div>
+      <p>Download the project to a folder on your computer. If you have <b>git</b>, run the first line;
+        otherwise use the green <b>“Code → Download ZIP”</b> button on the project page and unzip it.</p>
+      <div class="win"><div class="bar"><i></i><i></i><i></i><span class="name">terminal</span></div>
+        <div class="term"><span class="c"># get the code (or download the ZIP and unzip it)</span><br>
+        <span class="p">$</span> git clone https://github.com/ahmedmahershaaban/supervisorly.git<br>
+        <span class="p">$</span> cd supervisorly</div></div>
+    </div>
+
+    <div class="step-card">
+      <div class="head"><span class="badge-n">2</span><h3>Set up its own tidy workspace</h3></div>
+      <p>This creates a private “virtual environment” (a sandbox for the program's parts) and installs
+        what it needs. You only do this <b>once</b>.</p>
+      <div class="win"><div class="bar"><i></i><i></i><i></i><span class="name">terminal</span></div>
+        <div class="term"><span class="c"># 1) make the sandbox</span><br>
+        <span class="p">$</span> python -m venv .venv<br><br>
+        <span class="c"># 2) turn it on —  Windows:</span><br>
+        <span class="p">$</span> .venv\Scripts\activate<br>
+        <span class="c">#    Mac / Linux instead:</span><br>
+        <span class="p">$</span> source .venv/bin/activate<br><br>
+        <span class="c"># 3) install the tool</span><br>
+        <span class="p">$</span> python -m pip install -e ".[dev]"<br>
+        <span class="o">Successfully installed supervisorly-0.1.0 …</span></div></div>
+    </div>
+
+    <div class="step-card">
+      <div class="head"><span class="badge-n">3</span><h3>(Optional) Check it's healthy</h3></div>
+      <p>A quick sanity check — this runs the project's own tests. Seeing them pass means everything installed correctly.</p>
+      <div class="win"><div class="bar"><i></i><i></i><i></i><span class="name">terminal</span></div>
+        <div class="term"><span class="p">$</span> python -m pytest<br>
+        <span class="g">...................................................... [100%]</span><br>
+        <span class="g">140 passed</span> <span class="o">in 1.20s</span></div></div>
+    </div>
+
+    <div class="step-card">
+      <div class="head"><span class="badge-n">4</span><h3>Run the demo scan</h3></div>
+      <p>This is the fun part. The <code>--demo</code> flag runs a <b>safe, offline example</b> with
+        made-up professors (no real people, no internet needed) so you can see exactly what the tool produces.</p>
+      <div class="win"><div class="bar"><i></i><i></i><i></i><span class="name">terminal</span></div>
+        <div class="term"><span class="p">$</span> python -m supervisorly scan --demo --out output/dashboard.html<br>
+        <span class="g">scanned 5 professors (demo)</span> <span class="o">-&gt; output\dashboard.html (+ dashboard.json)</span></div></div>
+      <p style="margin-top:12px">It just created two files in an <code>output</code> folder: a
+        <b>dashboard.html</b> (the page you'll open) and a <b>dashboard.json</b> (the same data, for programs to read).</p>
+    </div>
+
+    <div class="step-card">
+      <div class="head"><span class="badge-n">5</span><h3>Open your dashboard</h3></div>
+      <p>Find <code>output/dashboard.html</code> in your file explorer and <b>double-click it</b> — it opens
+        in your normal web browser. That's it. 🎉 Here's what you'll be looking at:</p>
+    </div>
+  </section>
+
+  <section id="see">
+    <h2>What you'll see</h2>
+    <p class="sub">A real, self-contained web page. Try the <b>Table / Deadlines</b> buttons below — this is a live mock-up of the actual thing.</p>
+
+    <div class="win"><div class="bar"><i></i><i></i><i></i><span class="name">dashboard.html — your browser</span></div>
+      <div class="dash">
+        <div class="dhead"><div class="h">Supervisorly</div><div class="m">run demo · finalized · 5 professors · every fact links to its source</div></div>
+        <div class="ctrl">
+          <span class="fake-input">filter by name or any value…</span>
+          <button class="vbtn on" id="vTable">Table</button>
+          <button class="vbtn" id="vDeadlines">Deadlines</button>
+        </div>
+
+        <div id="tableView" class="dwrap">
+          <table class="dg">
+            <thead><tr><th>Professor</th><th>Recruiting signal</th><th>Application deadline</th></tr></thead>
+            <tbody>
+              <tr><td class="name">Dr. Ada Placeholder</td>
+                  <td class="s-value">Recruiting two PhD students for Fall 2027 <a class="src" href="#" onclick="return false">source ↗</a></td>
+                  <td class="s-value">2026-12-01 <a class="src" href="#" onclick="return false">source ↗</a></td></tr>
+              <tr><td class="name">Prof. Ben Example</td>
+                  <td class="s-value">Seeking a postdoc in causal inference <a class="src" href="#" onclick="return false">source ↗</a></td>
+                  <td class="s-blocked">— <span class="s-value" style="color:#e8bf6a">2026-09-15 (watch)</span></td></tr>
+              <tr><td class="name">A/Prof. Cara Sample</td>
+                  <td class="s-value">Accepting a new PhD student for 2027 <a class="src" href="#" onclick="return false">source ↗</a></td>
+                  <td class="s-absent">— we looked, found nothing</td></tr>
+              <tr><td class="name">Prof. Dr. Dana Beispiel</td>
+                  <td class="s-absent">— we looked, found nothing</td>
+                  <td class="s-absent">— we looked, found nothing</td></tr>
+              <tr><td class="name">Prof. Eve Walled</td>
+                  <td class="s-blocked">⏳ awaiting your browser</td>
+                  <td class="s-blocked">⏳ awaiting your browser</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div id="deadlineView" class="hide">
+          <div class="dl">
+            <div class="card"><span class="date">2026-09-15</span><span class="name">Prof. Ben Example</span>
+              <span class="m" style="color:#8a8d96;font-size:12px">Application deadline</span><span class="badge watch">watch · projected</span></div>
+            <div class="card"><span class="date">2026-12-01</span><span class="name">Dr. Ada Placeholder</span>
+              <span class="m" style="color:#8a8d96;font-size:12px">Application deadline</span><span class="badge firm">firm</span></div>
+            <div class="note">Watch dates are projected from past cycles — not published deadlines. Always confirm on the official page.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="callouts">
+      <div class="callout"><div class="k">Filter box</div><div class="v">Type a name, a topic, or a keyword to instantly narrow the list.</div></div>
+      <div class="callout"><div class="k">Click a professor</div><div class="v">Opens a panel with every fact, its exact quote, and a link to the page it came from.</div></div>
+      <div class="callout"><div class="k">Deadlines view</div><div class="v">“What closes soon,” sorted by date. <b>Firm</b> = published; <b>watch</b> = a guess to confirm.</div></div>
+      <div class="callout"><div class="k">Nobody is dropped</div><div class="v">A professor with missing info still appears — you just see honest blanks, explained next.</div></div>
+    </div>
+  </section>
+
+  <section id="states">
+    <h2>The four honest states</h2>
+    <p>This is the heart of the tool. A blank cell can mean very different things, so Supervisorly never
+      leaves you guessing — each field is one of <b>four clearly-labelled states</b>:</p>
+    <div class="states">
+      <div class="state"><span class="pill value">a real value</span>
+        <div class="sv"><b>We found it, and here's the proof.</b> Shown with its quote and a source link. This is a fact you can trust and click through to verify.</div></div>
+      <div class="state"><span class="pill absent">— we looked, found nothing</span>
+        <div class="sv"><b>We checked the right places and there genuinely was nothing.</b> An honest empty — not a bug, not laziness.</div></div>
+      <div class="state"><span class="pill never">· not checked yet</span>
+        <div class="sv"><b>We haven't looked here.</b> Different from “found nothing.” It tells you where more digging could still help.</div></div>
+      <div class="state"><span class="pill blocked">⏳ awaiting your browser</span>
+        <div class="sv"><b>This page is behind a login or a bot-wall.</b> The tool won't sneak past it — it hands the task to <i>you</i> (see “the human rung” below).</div></div>
+    </div>
+    <div class="box"><div class="lbl">Why this matters</div>
+      <p style="margin:0">Most tools show a blank and let you assume the worst. Supervisorly's promise is
+        the opposite: <b>if a fact is shown, it's backed by a quote you can check; if it's missing, you're told exactly why.</b></p></div>
+  </section>
+
+  <section id="modes">
+    <h2>Two ways to run it</h2>
+    <div class="modes">
+      <div class="mode reco">
+        <div class="tag">★ Start here</div>
+        <h3>Offline demo</h3>
+        <p style="color:var(--muted);font-size:14px;margin:.2em 0 .6em">What this guide used.</p>
+        <ul>
+          <li>Made-up professors &amp; example websites — <b>no real people</b>.</li>
+          <li>No internet, no accounts, no keys, no cost.</li>
+          <li>Perfect for learning what the output looks like.</li>
+          <li>Command: <code>scan --demo</code></li>
+        </ul>
+      </div>
+      <div class="mode">
+        <div class="tag">Next step</div>
+        <h3>Live scan</h3>
+        <p style="color:var(--muted);font-size:14px;margin:.2em 0 .6em">Real professors, real sources.</p>
+        <ul>
+          <li>Needs <b>two free keys</b> so it isn't rate-limited:
+            <br>· a <b>ROR</b> id (a registry of institutions)
+            <br>· an <b>OpenAlex</b> key (open research data)</li>
+          <li>Only reads <b>public</b> pages &amp; open databases; obeys each site's <code>robots.txt</code>.</li>
+          <li>The tool <b>fails loudly</b> with the exact fix if a key is missing — it never runs half-broken.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="box"><div class="lbl">Good to know</div>
+      <p style="margin:0">The live discovery pieces are still being wired up in this version — the offline
+        demo is the fully-working path today. Both share the exact same engine, so what you learn from the demo applies directly.</p></div>
+  </section>
+
+  <section id="rung">
+    <h2>When a page is behind a login — “the human rung”</h2>
+    <p>Some pages (like X/Twitter, or a university directory that needs a login) can't be read by a
+      program without breaking the rules. Supervisorly <b>refuses to do that</b>. Instead it politely
+      passes the job to you:</p>
+    <div class="rung">
+      <div class="r"><span class="n"></span><div class="txt">The tool marks that field <b>⏳ awaiting your browser</b> and writes you a ready-to-paste prompt.</div></div>
+      <div class="r"><span class="n"></span><div class="txt">You open the page yourself (e.g. with <b>Claude for Chrome</b>) — where <i>you're</i> logged in and allowed.</div></div>
+      <div class="r"><span class="n"></span><div class="txt">You <b>paste the short result back</b> into the tool.</div></div>
+      <div class="r"><span class="n"></span><div class="txt">It fills the gap and rebuilds your dashboard — <b>without re-doing any of the earlier work</b>.</div></div>
+    </div>
+    <p style="margin-top:14px;color:var(--muted);font-size:14.5px">You're always in control, and nothing is ever accessed that you couldn't access yourself.</p>
+  </section>
+
+  <section id="fair">
+    <h2>It plays fair</h2>
+    <p class="sub">This tool is built to be respectful of both websites and people. In plain terms:</p>
+    <div class="fair" style="margin-top:14px">
+      <div class="f"><span class="tick">✓</span><span>Obeys each website's <code>robots.txt</code> rules, and slows down so it's never rude to a server.</span></div>
+      <div class="f"><span class="tick">✓</span><span>Anyone can ask to be excluded — an <b>opt-out list</b> is honoured before anything is fetched.</span></div>
+      <div class="f"><span class="tick">✓</span><span>Never bypasses a login, and never sends mass emails or auto-messages.</span></div>
+      <div class="f"><span class="tick">✓</span><span>Your results stay <b>on your machine</b> — nothing is uploaded or shared without you.</span></div>
+    </div>
+  </section>
+
+  <section id="trouble">
+    <h2>If something goes wrong</h2>
+    <p class="sub">The usual first-time snags, and the quick fix for each.</p>
+
+    <details class="tr"><summary>“python is not recognized / command not found”</summary>
+      <div class="body">Python isn't installed, or wasn't added to your PATH. Reinstall from
+        <a href="https://python.org/downloads" target="_blank" rel="noopener">python.org</a> and tick
+        <span class="kbd">Add Python to PATH</span>. On Mac/Linux, try <code>python3</code> instead of <code>python</code>.</div></details>
+
+    <details class="tr"><summary>The install fails or seems “locked”</summary>
+      <div class="body">Make sure the sandbox is <b>turned on</b> first (Step 2 — you should see <code>(.venv)</code> at
+        the start of your prompt), then re-run the <code>pip install</code> line. The sandbox avoids permission problems.</div></details>
+
+    <details class="tr"><summary>The dashboard opens but is blank</summary>
+      <div class="body">You probably opened <code>dashboard.json</code> (the raw data) instead of <code>dashboard.html</code>
+        (the page). Double-click the <b>.html</b> file. It works fully offline — no internet required.</div></details>
+
+    <details class="tr"><summary>“Missing credentials” when I try a live scan</summary>
+      <div class="body">That's the tool being honest: a live scan needs the two free keys (ROR &amp; OpenAlex). Set them,
+        or just keep using <code>scan --demo</code> to explore. The message tells you exactly which key is missing and where to get it.</div></details>
+
+    <details class="tr"><summary>Nothing here matches my exact command</summary>
+      <div class="body">Run <code>python -m supervisorly --help</code> to see every available command, or read the
+        <b>README</b> in the project folder for the full details.</div></details>
+  </section>
+
+  <footer>
+    <hr class="soft" style="margin-top:0">
+    <p style="max-width:60ch"><b>That's the whole thing.</b> You installed a tool, ran a safe demo, and learned to
+      read an evidence-backed dashboard where honesty is the default. When you're ready for real results,
+      grab the two free keys and try a live scan.</p>
+    <div class="foot-links">
+      <a href="#run">↑ Back to “Run it”</a>
+      <a href="https://github.com/ahmedmahershaaban/supervisorly" target="_blank" rel="noopener">Project on GitHub</a>
+      <a href="#">README.md — full reference</a>
+      <a href="#">docs/COMPLETION_REPORT.md — what's built</a>
+    </div>
+    <p style="color:var(--faint);font-size:13px;margin:0">Supervisorly · every fact backed by a citable source. You've got this. 🎓</p>
+  </footer>
+
+</main>
+
+<script>
+(function(){
+  // theme toggle (respects OS default, remembers the manual choice for this view)
+  var root=document.documentElement, btn=document.getElementById('theme');
+  function apply(t){ if(t) root.setAttribute('data-theme',t); }
+  var saved=null; try{saved=localStorage.getItem('sv-theme');}catch(e){}
+  apply(saved);
+  btn.addEventListener('click',function(){
+    var cur=root.getAttribute('data-theme');
+    if(!cur){ cur = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark':'light'; }
+    var next = cur==='dark' ? 'light':'dark';
+    apply(next); try{localStorage.setItem('sv-theme',next);}catch(e){}
+  });
+
+  // dashboard preview: Table / Deadlines toggle (mirrors the real dashboard)
+  var vt=document.getElementById('vTable'), vd=document.getElementById('vDeadlines'),
+      tv=document.getElementById('tableView'), dv=document.getElementById('deadlineView');
+  function show(which){
+    var table = which==='table';
+    tv.classList.toggle('hide',!table); dv.classList.toggle('hide',table);
+    vt.classList.toggle('on',table);    vd.classList.toggle('on',!table);
+  }
+  vt.addEventListener('click',function(){show('table');});
+  vd.addEventListener('click',function(){show('deadlines');});
+})();
+</script>
+</body>
+</html>
