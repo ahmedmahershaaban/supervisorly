@@ -27,6 +27,25 @@ roll-up), `export/` (four-state JSON + self-contained dashboard with the deadlin
 (md-ingester), and `pipeline.run_offline` / `pipeline.reexport`. **Your job is the front door and
 the extra collectors, wired into that engine — everything remains cassette-testable offline.**
 
+## ⚑ Persistence — this goal DOES NOT STOP until it is DONE
+
+This is a long-running, autonomous build. **Do not stop, pause, or hand back until every box in the
+Definition of Done (§6) is checked and the live self-run + adversarial audit + clean-room are all
+green.** Concretely:
+
+- After each round, **commit (§8) and immediately continue to the next unmet DoD item** — never end
+  a turn with the goal incomplete and no work in flight.
+- If your context is reset or summarized mid-build, **resume from `docs/BUILD_LOG.md` + `git log` +
+  re-running the suite** — re-enter this goal and keep going; do not restart from scratch and do not
+  re-declare earlier phases "to do."
+- Treat a red suite, an open audit finding, or an unchecked DoD box as **not done** — keep fixing and
+  re-running until green. "It compiles" / "most of it works" is NOT done (§7).
+- The ONLY legitimate stops are: (a) **every** DoD box checked → write `docs/LIVE_COMPLETION_REPORT.md`
+  and declare complete; or (b) a genuine blocker only Ahmed can resolve → record it in
+  `docs/BLOCKERS.md` with the specific ask and stop **there**, not elsewhere.
+
+Report progress as you go, but keep working straight through to completion.
+
 ## 0 — Before you write any code
 
 1. **Read, in this order, and treat as the source of truth:** `docs/HANDOVER.md` →
@@ -36,6 +55,11 @@ the extra collectors, wired into that engine — everything remains cassette-tes
    `docs/research/{data-sources,social-sources,prior-art}.md` → `docs/cost-and-performance.md` →
    `docs/ethics-and-compliance.md` → `docs/COMPLETION_REPORT.md` (what's built) → the source under
    `src/supervisorly/` and the tests under `tests/`.
+   **Also read, as the BINDING front-end + diagram spec:** `design_handoff_supervisorly_atlas/README.md`
+   (the hifi "Supervisorly Atlas — Living" design language — tokens, layout shell, and the
+   cells-and-filaments diagram engine) and `design_handoff_supervisorly_atlas/Supervisorly Atlas -
+   Living.dc.html` (the reference prototype + the diagram/decision data + final copy). **Reimplement**
+   that design in this codebase's conventions; **never ship** the `.dc.html`/`support.js` runtime.
 2. **Never contradict a locked decision.** If you become convinced one is wrong or impossible,
    **stop and record it in `docs/BLOCKERS.md`** with evidence — do not silently deviate.
 3. **Keep `docs/BUILD_LOG.md`** — one short entry per round: what you built, what you ran, what
@@ -82,6 +106,14 @@ the extra collectors, wired into that engine — everything remains cassette-tes
 - **Ethics in code (D-005/019/023/024/032/053).** Opt-out enforced at build *and* on re-export;
   `robots` fail-closed; no bare-email / email-list / mailto in exports; no bulk-outreach path; no
   LLM-judgements exported; **never commit scan output, snapshots, DB, or any personal data.**
+- **Front-end & diagrams follow the Atlas design language (binding).** Every UI and every diagram
+  the tool ships uses the hifi **"Supervisorly Atlas — Living"** language in
+  `design_handoff_supervisorly_atlas/` (Phase L7): the bioluminescent token system, Space Grotesk +
+  Space Mono type, the sidebar/drawer/lightbox shell, and the **glowing cells + curved animated
+  filament** diagram engine. **BUT the shipped dashboard stays a single self-contained, offline file
+  (D-033/D-048):** self-host/inline the fonts (no Google-Fonts URL, no CDN, no external request),
+  everything CSS/SVG/inline-JS, `prefers-reduced-motion` honoured, injection/scheme-safe. Recreate
+  the look faithfully; never ship the `.dc.html`/`support.js` runtime.
 
 ## 2 — Build plan (phased; each phase has a Definition of Done you must meet before moving on)
 
@@ -166,7 +198,43 @@ professors, newly-open recruiting, newly-published deadlines). Document a safe s
 over unchanged cassettes issues ~0 new extraction and reports an empty, honest delta; a changed
 page shows up in the delta.
 
-**Phase L7 — CLI + SKILL orchestration.**
+**Phase L7 — Front-end & diagrams in the Atlas design language (binding spec:
+`design_handoff_supervisorly_atlas/`).**
+Recreate the results UI and every diagram in the hifi **"Supervisorly Atlas — Living"** language.
+The `README.md` in that folder is the binding spec; the `.dc.html` holds the reference prototype,
+the diagram/decision **data**, and the final **copy** — port the data as-is, reimplement the runtime.
+- **Tokens verbatim:** base void `#05070c`; tissue-type kind colors (teal `#43c9d6` tool, chartreuse
+  `#79d06a` verified, coral `#f0839a` human, amber `#e8b24a` core, violet `#b58cf0` rule, slate
+  `#7d828e` skip); amber `#e8b24a` global accent; teal `#7fd6e0` focus ring; the radii/shadows and
+  the keyframes `omBreathe`/`omHalo`/`omFlow`/`omDrift`/`omScan`.
+- **Type:** Space Grotesk (display/UI) + Space Mono (labels/codes), with the documented scale/tracking.
+- **Layout shell:** the fixed decorative background (nebula blooms + vignette + drifting orbs + scan
+  line), the left "CATALOGUE" sidebar (→ top drop-down < 900px), the main column, the scroll-progress
+  bar, the **cell drawer** + **law/detail drawer** (right sheet), and the **isolate lightbox**.
+- **The diagram engine — this is "how diagrams appear":** each diagram is a stage of glowing **cell**
+  nodes (nested halo / membrane body / nucleus, sized by kind) and **filament** edges computed in a
+  layout effect as **cubic-bezier curves** bowed perpendicular (deterministic sign per `hash(from+to)`),
+  each drawn as **4 stacked SVG elements** (soft glow + base line + animated light-packet dashes
+  `omFlow` + arrowhead) with optional midpoint label pills; **highlight-connected** on hover/focus
+  (dim non-neighbors + non-touching edges); **scroll-spy** active nav. Recompute all geometry on
+  mount / resize / font-load / lightbox-open; node coordinates are data, derive the rest.
+- **Apply it to the product, not just the architecture atlas:** render (a) the architecture "specimens"
+  (context/components/pipeline/data/rules/roles/lifecycle/observability), (b) a **how-it-works** flow,
+  and (c) the **results dashboard** — where the four-state honesty, the deadline watch-date view, and
+  clickable professor detail all survive: professor detail becomes a **cell drawer**, and a professor's
+  students/collaborations render as a **filament graph**.
+- **Hard constraint — self-contained & offline (D-033/D-048):** the shipped dashboard is ONE file with
+  **no external resources** — self-host/inline the two fonts (or a faithful fallback), no Google-Fonts
+  URL, no CDN, no fetch; all CSS/SVG/inline-JS. Honour `prefers-reduced-motion` (kill all animation),
+  keep it keyboard-operable (focus triggers highlight; Escape closes lightbox→drawer) with a visible
+  focus ring, and injection/scheme-safe.
+*DoD:* the results dashboard **and** at least one architecture/how-it-works diagram render in the
+Atlas language from real (cassette-discovered) data — fully self-contained, offline, **no console
+errors, no external requests**; `prefers-reduced-motion` disables animation; the four states +
+deadline view + clickable cell-drawer detail all work; a diagram's filaments recompute correctly on
+resize and when the lightbox opens.
+
+**Phase L8 — CLI + SKILL orchestration.**
 Finish the CLI (`scan` live flags: field/country/intent/universities/optout/out/schedule) and
 update `.claude/skills/supervisorly/SKILL.md` so a student's request flows: **intent recognition →
 generated `SearchPlan` → confirm with the user → live scan (Stage-1 enumerate → Stage-2 deep-dive →
@@ -174,7 +242,7 @@ students/companies/social → score/rank) → dashboard**, with the LLM agents d
 and the deterministic tools doing collection. *DoD:* the skill contract validates; the documented
 flow matches `product-flow.md`; the CLI help lists every live flag.
 
-**Phase L8 — Eval + self-test (§4) + refine (§5) + clean-room + `docs/COMPLETION_REPORT.md`.**
+**Phase L9 — Eval + self-test (§4) + refine (§5) + clean-room + `docs/LIVE_COMPLETION_REPORT.md`.**
 
 ## 3 — Edge-case matrix (each row needs a passing test before Done)
 
@@ -245,10 +313,14 @@ Log each pass. Prefer adversarial verification of your own findings before actin
 
 ## 6 — Definition of Done (mark complete ONLY when EVERY item is true)
 
-- [ ] Every phase (L0–L8) meets its DoD.
+- [ ] Every phase (L0–L9) meets its DoD.
 - [ ] `scan` (no `--demo`) runs the **full live path end-to-end on cassettes** and produces a
       correct, honest, hallucination-free four-state dashboard from **discovered** targets — with
       students, company/collaboration links, and recruiting/social status where present.
+- [ ] **The UI + diagrams are recreated in the Atlas design language** (`design_handoff_supervisorly_
+      atlas/`): the results dashboard and ≥1 architecture/how-it-works diagram render faithfully
+      (tokens, type, cell-and-filament engine, drawers, lightbox), **fully self-contained and offline**
+      — no external requests, no console errors — with `prefers-reduced-motion` and keyboard support.
 - [ ] **Every edge case in §3 has a passing test.**
 - [ ] Ranking (universities + professors) is deterministic, re-weightable, and intent-aware.
 - [ ] University scope (all / prioritise / only) works and is tested; default is all.
