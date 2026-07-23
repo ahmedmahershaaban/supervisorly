@@ -79,7 +79,22 @@ fetched*, *missing robots fails closed*, *deadline change invalidates cache*.
 **DoD (Phase C):** substantially met — the fetch layer runs offline on cassettes with robots + rate
 limit + snapshots. Remaining C work (the discovery ladder rungs) folds into Phase D wiring.
 
-**Remaining phases:** D (LLM agents + wiring quote-verification into extraction), E (scoring:
-intent gates, topic-ID match, works reconciliation), F (dashboard), G (human-rung wiring +
-roster-enumeration), H (eval set), I (self-run), J (refine), then clean-room verify. SKILL.md +
-agent definition files still to write.
+## round D1 — claim recorder (commit `07ca05f`)
+
+`model/claims.py` — quote-in-snapshot enforced for tool/LLM value claims (hallucination rejected
+before storage, D-010); four states; human-assisted accepted without snapshot (D-043). pytest → 41.
+
+## round B3 — SKILL.md + agent contracts (commit pending)
+
+**Built:** `.claude/skills/supervisorly/SKILL.md` (the orchestrator: intent→SearchPlan→confirm→
+tiers/phases→dashboard, with the D-055 vocabulary crosswalk and the governing rules), and the five
+agent definition files (`recruiting-analyst`, `eligibility-analyst`, `profile-synthesist`,
+`evidence-auditor`, `adapter-author`) with frontmatter + contracts (inputs, task, output = write
+claims / return status, never prose). `tests/test_skill_contracts.py` guards their structure.
+**Ran:** pytest → **44 passed**. **DoD (Phase B):** complete — contracts (MD, JSON) + SKILL + agents
+all written and validated.
+
+**Remaining phases:** E (scoring: intent-aware gates, topic-ID match, works reconciliation, D-057/58/59),
+F (dashboard: four-state HTML+JSX, deadline view), G (human-rung wiring: chrome-prompt-generator +
+md-ingester glue + roster-enumeration), H (hand-labelled cassette eval set + golden-path integration),
+I (self-run on cassettes), J (refine loop), then clean-room verify.
