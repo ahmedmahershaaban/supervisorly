@@ -22,6 +22,10 @@ from __future__ import annotations
 import datetime
 import re
 
+from . import preflight
+from .discover import ladder as _ladder
+from .discover import openalex as _openalex
+from .discover import ror as _ror
 from .ethics import optout as optout_mod
 from .export import dashboard as dash
 from .export import json_export as jx
@@ -285,6 +289,57 @@ def _record_blocked(conn, pid, field):
     return rec
 
 
+def _process_targets(conn, run_id, targets, fetcher, snaps, *, stats, resume) -> int:
+    """Deep-dive each target (fetch → extract → claim) — the shared core of run_offline/run_live.
+
+    Returns the gap count (targets with any still-``blocked`` field), derived from claim state so
+    the run status can never contradict the exported cells (D-046/D-049). A target with no page URL
+    (e.g. an OpenAlex professor with no discoverable homepage) is an honest open gap for the human
+    rung, never a fabricated value.
+    """
+    for t in targets:
+        pid = t["id"]
+        if resume and runs.target_stage_done(conn, "person", pid, "deep_dive"):
+            stats["resumed_skipped"] += 1
+            continue
+        task = runs.add_task(conn, run_id, "person", pid, stage="deep_dive")
+        url = t.get("url")
+        res = fetcher.fetch(url) if url else None
+        if res is not None and res.ok:
+            html = snaps.load(res.snapshot_hash)
+            chash = content_hash(html)
+            if xcache.lookup(conn, "person", pid, chash, PROMPT_VERSION, MODEL_ID,
+                             CACHE_SCHEMA_VERSION):
+                stats["cache_hits"] += 1
+                runs.set_task_status(conn, task, "done")
+                continue
+            src_id = claims.record_web_source(
+                conn, url, snapshot_hash=res.snapshot_hash, http_status=200,
+                source_tier="official_institutional", robots_allowed=True,
+            )
+            claim_ids: list[str] = []
+            for field, extractor in _EXTRACTORS.items():
+                rec = _record_evidence(conn, pid, field, extractor(html), src_id=src_id,
+                                       snapshot_hash=res.snapshot_hash, html=html)
+                if rec and rec.ok:
+                    claim_ids.append(rec.claim_id)
+            xcache.record(conn, "person", pid, chash, PROMPT_VERSION, MODEL_ID,
+                          CACHE_SCHEMA_VERSION, claim_ids)
+            stats["extractions"] += 1
+            runs.set_task_status(conn, task, "done")
+        else:
+            for field in _EXTRACTORS:
+                _record_blocked(conn, pid, field)
+            err = res.error if res is not None else "no page url — open for the human rung"
+            runs.set_task_status(conn, task, "blocked", last_error=err)
+
+    return sum(
+        1 for t in targets
+        if any(c.get("state") == "blocked"
+               for c in claims.claims_for(conn, "person", t["id"]))
+    )
+
+
 def run_offline(plan: dict, targets: list[dict], transport: Transport, snap_root,
                 *, db_path=None, optout_path=None, resume=False) -> dict:
     """Run a deterministic scan over ``targets`` (each {id, name, url}) using cassettes.
@@ -307,59 +362,42 @@ def run_offline(plan: dict, targets: list[dict], transport: Transport, snap_root
     runs.set_run_status(conn, run_id, "deep_diving")
 
     stats = {"extractions": 0, "cache_hits": 0, "opted_out": opted_out, "resumed_skipped": 0}
-    for t in targets:
-        pid = t["id"]
-        # Resume: a target already deep-dived in a prior run is not re-fetched — its claims
-        # are already persisted. This is what makes an interrupted scan cheap to finish (D-029).
-        if resume and runs.target_stage_done(conn, "person", pid, "deep_dive"):
-            stats["resumed_skipped"] += 1
-            continue
-        task = runs.add_task(conn, run_id, "person", pid, stage="deep_dive")
-        res = fetcher.fetch(t["url"])
-        if res.ok:
-            html = snaps.load(res.snapshot_hash)
-            chash = content_hash(html)
-            if xcache.lookup(conn, "person", pid, chash, PROMPT_VERSION, MODEL_ID,
-                             CACHE_SCHEMA_VERSION):
-                # warm re-scan: this exact content was already extracted — reuse the
-                # claims from the prior run, do no work, create no duplicates (cost §3b-i).
-                stats["cache_hits"] += 1
-                runs.set_task_status(conn, task, "done")
-                continue
-            src_id = claims.record_web_source(
-                conn, t["url"], snapshot_hash=res.snapshot_hash, http_status=200,
-                source_tier="official_institutional", robots_allowed=True,
-            )
-            claim_ids: list[str] = []
-            for field, extractor in _EXTRACTORS.items():
-                rec = _record_evidence(conn, pid, field, extractor(html), src_id=src_id,
-                                       snapshot_hash=res.snapshot_hash, html=html)
-                if rec and rec.ok:
-                    claim_ids.append(rec.claim_id)
-            xcache.record(conn, "person", pid, chash, PROMPT_VERSION, MODEL_ID,
-                          CACHE_SCHEMA_VERSION, claim_ids)
-            stats["extractions"] += 1
-            runs.set_task_status(conn, task, "done")
-        else:
-            # a failed/blocked source is an honest 'blocked' state on every field — we reached
-            # nothing (not 'never attempted'), but a failed re-fetch never erases evidence we
-            # already hold (e.g. a human-rung answer).
-            for field in _EXTRACTORS:
-                _record_blocked(conn, pid, field)
-            runs.set_task_status(conn, task, "blocked", last_error=res.error)
-
-    # An open gap is a field still 'blocked' after this run — derived from claim state so the
-    # run status can never contradict the exported cells (D-046/D-049). Matches reexport().
-    gaps = sum(
-        1 for t in targets
-        if any(c.get("state") == "blocked"
-               for c in claims.claims_for(conn, "person", t["id"]))
-    )
+    gaps = _process_targets(conn, run_id, targets, fetcher, snaps, stats=stats, resume=resume)
     status = "finalized_with_open_gaps" if gaps else "finalized"
     runs.set_run_status(conn, run_id, status)
+    return _build_result(conn, run_id, status, targets, stats=stats, gaps=gaps)
 
-    result = _build_result(conn, run_id, status, targets, stats=stats, gaps=gaps)
-    return result
+
+def run_live(plan: dict, transport: Transport, snap_root, *, email: str,
+             openalex_key=None, db_path=None, optout_path=None, resume=False) -> dict:
+    """A **live** scan: preflight → discovery ladder (ROR + OpenAlex) → the *same* fetch → extract
+    → claim → score → export → dashboard pipeline as ``run_offline`` (D-028), now from **discovered**
+    targets rather than hand-fed ones.
+
+    Requires a contact email (fails loud without one, D-019/023); ROR is keyless, the OpenAlex
+    premium ``openalex_key`` is optional. The ``transport`` serves both the open-API JSON (ROR/
+    OpenAlex, via the clients) and the professor pages (via the robots-gated ``Fetcher``) — one seam,
+    so a live run is exactly the cassette-tested path with httpx swapped in.
+    """
+    preflight.require_credentials({preflight.CONTACT_EMAIL_ENV: email})
+    ror_client = _ror.RorClient(transport, email=email)
+    oa_client = _openalex.OpenAlexClient(transport, email=email, key=openalex_key)
+    disc = _ladder.build_targets(plan, ror_client, oa_client)
+
+    conn = open_db(db_path) if db_path is not None else open_db()
+    snaps = SnapshotStore(snap_root)
+    fetcher = Fetcher(transport, snaps)                 # real backoff/sleep for live politeness
+    optout = optout_mod.load_optout(optout_path)
+    targets, opted_out = optout_mod.filter_targets(disc["targets"], optout)
+
+    run_id = runs.create_run(conn)
+    runs.set_run_status(conn, run_id, "deep_diving")
+    stats = {"extractions": 0, "cache_hits": 0, "opted_out": opted_out, "resumed_skipped": 0,
+             "discovered": len(disc["targets"]), "institutions": len(disc["institutions"])}
+    gaps = _process_targets(conn, run_id, targets, fetcher, snaps, stats=stats, resume=resume)
+    status = "finalized_with_open_gaps" if gaps else "finalized"
+    runs.set_run_status(conn, run_id, status)
+    return _build_result(conn, run_id, status, targets, stats=stats, gaps=gaps)
 
 
 def reexport(db_path, targets: list[dict], *, optout_path=None) -> dict:

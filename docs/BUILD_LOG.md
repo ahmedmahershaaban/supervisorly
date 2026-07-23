@@ -634,3 +634,21 @@ the deep-dive fetcher + human rung, never scraped here.
 topics unioned), topic-ids-from-field, `only`/`prioritise` scope, `all` default. Full suite →
 **153 passed** (exit 0). **DoD (Phase L1, Round 1):** targets enumerated with nobody duplicated/dropped;
 scope modes honoured; identities reconciled — all on cassettes, no network.
+
+## round L2 — the live driver `pipeline.run_live` (commit pending)
+
+**Built:** refactored the per-target deep-dive loop out of `run_offline` into a shared
+`_process_targets` (fetch → extract → claim → gap-derive), so `run_offline` and the new `run_live`
+share one proven core (D-046/D-049 gap logic unchanged). `run_live(plan, transport, snap_root, *,
+email, openalex_key=None, db_path, optout_path, resume)`: **fails loud without a contact email**
+(D-019/023) → builds the ROR + OpenAlex clients on the injected transport → runs the ladder
+(Round 1) → feeds discovered targets through the same fetch/extract/claim/export/dashboard path.
+One transport serves both the open-API JSON and the professor pages (robots-gated `Fetcher`), so a
+live run is the cassette-tested path with httpx swapped in; a professor with no discoverable homepage
+is an honest **blocked** open gap (human rung), never a fabricated value.
+**Ran:** `tests/test_run_live.py` (4): discovers 3 professors across 2 institutions → valid export,
+nobody dropped; honest states (2 value, 1 blocked → `finalized_with_open_gaps`); **zero hallucinations**
+(quotes re-verified in snapshots); **fails loud** without an email. Offline pipeline tests
+(selfrun/warm_cache/resume) still green after the refactor. Full suite → **157 passed** (exit 0).
+**DoD (Phase L2):** `run_live` runs end-to-end on cassettes and produces the same honest,
+hallucination-free four-state dashboard as `run_offline`, now from discovered targets.
