@@ -50,6 +50,18 @@ def _best_claim(claims: list[dict], field_id: str) -> dict | None:
     return max(candidates, key=lambda c: c.get("observed_at") or c.get("created_at") or "")
 
 
+def _redact_pii(value):
+    """Replace a value that *is* a bare email address with a safe placeholder (D-024).
+
+    Applied at build so a bare contact email never serialises even when it arrives via the
+    human rung (which bypasses the deterministic extractors). A merely *mentioned* email
+    inside a sentence is left intact — only a whole-value address is redacted.
+    """
+    if isinstance(value, str) and _EMAIL_RE.fullmatch(value.strip()):
+        return "[email redacted — see source]"
+    return value
+
+
 def _envelope(claim: dict | None) -> dict:
     """Turn a claim (or its absence) into a four-state value envelope."""
     if claim is None:
@@ -59,8 +71,9 @@ def _envelope(claim: dict | None) -> dict:
     state = claim.get("state", "value")
     return {
         "state": state,
-        "value": claim.get("value") if state == "value" else None,
-        "quote": claim.get("quote"),
+        "value": _redact_pii(claim.get("value")) if state == "value" else None,
+        "quote": _redact_pii(claim.get("quote")),
+        "source_url": claim.get("source_url"),
         "source_url": claim.get("source_url"),
         "snapshot_hash": claim.get("snapshot_hash"),
         "observed_at": claim.get("observed_at"),

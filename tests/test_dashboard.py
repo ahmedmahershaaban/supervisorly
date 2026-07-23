@@ -90,17 +90,34 @@ def test_deadline_view_present_and_distinguishes_firm_from_watch():
     assert "badge firm" in html and "badge watch" in html
     # the honesty note that watch dates are not published deadlines
     assert "not published deadlines" in html.lower()
-    # both dates are present in the inlined data; sort is soonest-first in code
+    # both dates are present in the inlined data; sort is soonest-first by parsed date
     assert "2026-09-15" in html and "2026-12-01" in html
-    assert "when < b.when" in html                 # ascending sort by date
+    assert "dateKey(a.when) - dateKey(b.when)" in html   # ascending sort by parsed date
 
 
-def test_watch_date_is_driven_by_confidence_not_guessed():
-    # the projected/watch classification keys on inferred/unconfirmed/action_needed only
+def test_firm_badge_requires_an_official_confidence_not_the_default():
+    # audit finding 8: only quoted_official/derived read as firm; null/unknown → watch (D-061)
     html = db.build_dashboard(_deadline_export())
-    assert "WATCH_CONF" in html
-    for conf in ("inferred", "unconfirmed", "action_needed"):
-        assert conf in html
+    assert "FIRM_CONF" in html and "quoted_official" in html and "derived" in html
+    assert "isFirm" in html and "isWatch" in html
+    # the firm badge is gated on isFirm(...), so a missing/other confidence falls through to watch
+    assert "isFirm(r.env)" in html
+
+
+def test_source_links_are_scheme_guarded_against_javascript_urls():
+    # audit finding 9: a javascript:/data: source_url must never become a clickable link
+    html = db.build_dashboard(_deadline_export())
+    assert "safeUrl" in html and "srcLink" in html
+    assert "https?:" in html                       # only http(s) is linkified
+    # source_url is never inlined directly into an href without going through srcLink/safeUrl
+    assert 'href="\'+esc(env.source_url)' not in html
+
+
+def test_deadline_view_sorts_by_parsed_date_not_lexicographically():
+    # audit finding 10: sort by a parsed date key so non-ISO values order correctly
+    html = db.build_dashboard(_deadline_export())
+    assert "dateKey" in html and "Date.parse" in html
+    assert "dateKey(a.when) - dateKey(b.when)" in html
 
 
 def test_professor_detail_is_clickable_and_traceable():

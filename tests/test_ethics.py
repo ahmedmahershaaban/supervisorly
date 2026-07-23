@@ -56,6 +56,29 @@ def test_validate_rejects_a_leaked_email_field():
     assert any("email" in e and "D-024" in e for e in jx.validate_export(bad))
 
 
+def test_bare_email_value_is_redacted_at_build_not_just_in_validate():
+    # audit finding 6: a bare email arriving via the human rung under a string field must be
+    # redacted by build_export itself — the shipping path never calls validate_export.
+    export = jx.build_export(
+        run_summary={"run_id": "r", "status": "finalized"},
+        field_descriptors=[
+            {"id": "recruiting_signal", "label": "Recruiting", "kind": "filter",
+             "datatype": "string"},
+        ],
+        professors=[{"id": "p1", "name": "P One"}],
+        claims_by_entity={"p1": [
+            {"field": "recruiting_signal", "state": "value", "value": "prof@uni.edu",
+             "quote": "prof@uni.edu", "source_url": "https://p1/"},
+        ]},
+        generated_at="2026-07-23T00:00:00+00:00",
+    )
+    import json
+    blob = json.dumps(export)
+    assert "prof@uni.edu" not in blob                       # the bare address never serialises
+    assert "redacted" in export["professors"][0]["fields"]["recruiting_signal"]["value"]
+    assert jx.validate_export(export) == []                 # and the result is still valid
+
+
 def test_validate_rejects_a_bare_email_value_under_a_string_field():
     bad = {"schema_version": "1", "generated_at": "t", "run": {},
            "fields": [{"id": "contact", "label": "Contact", "kind": "display",

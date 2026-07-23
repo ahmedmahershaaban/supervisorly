@@ -357,3 +357,25 @@ test; the loop repeats until the audit is clean.
   are watch too (locale-uncertain).
 **Ran:** `tests/test_deadline_parse.py` (8 new) + full suite → **113 passed** (exit 0). The demo's
 firm/watch pair and all prior deadline tests still hold.
+
+## round R — refine: human-rung parity guards (findings 6, 8, 9, 10) (commit pending)
+
+Values arriving via the human rung bypass the deterministic extractors, so the same honesty/PII/
+safety guards are now enforced at **build and render** time.
+
+**Fixed:**
+- **(ethics, medium — finding 6)** `json_export._redact_pii` redacts a value/quote that *is* a bare
+  email at **build** (the shipping path never called `validate_export`); a mentioned-in-a-sentence
+  email is left intact (D-024).
+- **(UX-honesty, medium — finding 8)** `dashboard.py` firm/watch now keys on `FIRM_CONF =
+  {quoted_official, derived}`: a `null`/unknown confidence (reachable when the human rung omits the
+  optional field) renders **watch**, never firm (D-061).
+- **(UX-honesty, medium — finding 9)** `srcLink`/`safeUrl` only linkify an `http(s)` `source_url`;
+  a `javascript:`/`data:` URL (possible via the human rung) is shown as inert text, never a live
+  link — closing an XSS vector `esc()` didn't cover.
+- **(UX-honesty, medium — finding 10)** the Deadlines view now sorts by a **parsed date key**
+  (`Date.parse`, unparseable → last) instead of lexicographically, so a non-ISO human-returned date
+  ("March 1, 2026") orders correctly in a "what closes soon" view.
+**Ran:** full suite → **116 passed** (exit 0), incl. new tests for redaction, firm-requires-official-
+confidence, scheme-guarded source links, and parsed-date sort; stale `WATCH_CONF`/lexicographic-sort
+assertions updated.

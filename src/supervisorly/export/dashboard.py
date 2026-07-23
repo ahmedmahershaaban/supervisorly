@@ -84,16 +84,28 @@ color:var(--muted);font-size:13px}
 _JS = r"""
 const stateLabel = {searched_absent:"— we looked, found nothing",
   never_attempted:"· not checked yet", blocked:"⏳ awaiting your browser"};
-const WATCH_CONF = {inferred:1, unconfirmed:1, action_needed:1};  // projected, not firm (D-061)
+// Only an explicitly official/derived date reads as FIRM. Everything else — a projected
+// confidence, an unknown one, or a missing one — is a watch date, never shown as firm (D-061).
+const FIRM_CONF = {quoted_official:1, derived:1};
 function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,c=>(
   {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
+// Only render a clickable link for an http(s) URL; a javascript:/data: source_url (possible via
+// the human rung) is shown as inert text, never an executable link.
+function safeUrl(u){return (typeof u==="string" && /^https?:\/\//i.test(u.trim())) ? u : null;}
+function srcLink(u){
+  var s = safeUrl(u);
+  if(s) return ' <a class="src" href="'+esc(s)+'" target="_blank" rel="noopener">source</a>';
+  return u ? ' <span class="src" title="non-web source — see the record">source (non-web)</span>' : '';
+}
+// Sort key for a date value: parse to a timestamp; anything unparseable sorts to the end.
+function dateKey(v){var t=Date.parse(v);return isNaN(t)?Infinity:t;}
 function dateFields(){return DATA.fields.filter(function(f){return f.datatype==="date";});}
-function isWatch(env){return !!(env && WATCH_CONF[env.confidence]);}
+function isFirm(env){return !!(env && FIRM_CONF[env.confidence]);}
+function isWatch(env){return !isFirm(env);}
 function cell(env){
   if(!env) return '<span class="s-never_attempted">'+stateLabel.never_attempted+'</span>';
   if(env.state==="value"){
-    var src = env.source_url ? ' <a class="src" href="'+esc(env.source_url)+'" target="_blank" rel="noopener">source</a>' : '';
-    return '<span class="s-value">'+esc(env.value)+'</span>'+src;
+    return '<span class="s-value">'+esc(env.value)+'</span>'+srcLink(env.source_url);
   }
   return '<span class="s-'+env.state+'">'+(stateLabel[env.state]||env.state)+'</span>';
 }
@@ -135,16 +147,15 @@ function renderDeadlines(){
       }
     });
   });
-  rows.sort(function(a,b){return a.when < b.when ? -1 : a.when > b.when ? 1 : 0;});  // soonest first
+  rows.sort(function(a,b){return dateKey(a.when) - dateKey(b.when);});  // soonest first; unparseable last
   var host = document.getElementById("deadlines");
   if(!dfs.length || !rows.length){
     host.innerHTML = '<div class="empty">No deadline-shaped data was collected for this search.</div>';
     return;
   }
   host.innerHTML = '<div class="dl-list">'+rows.map(function(r){
-    var watch = isWatch(r.env);
-    var badge = watch ? '<span class="badge watch">watch · projected</span>'
-                      : '<span class="badge firm">firm</span>';
+    var badge = isFirm(r.env) ? '<span class="badge firm">firm</span>'
+                              : '<span class="badge watch">watch · projected</span>';
     return '<div class="dl-card" tabindex="0" role="button" data-id="'+esc(r.p.id)+'">'+
       '<span class="dl-date">'+esc(r.when)+'</span>'+
       '<span class="name">'+esc(r.p.name||r.p.id)+'</span>'+
@@ -161,7 +172,7 @@ function openDetail(id){
     if(env.state==="value"){
       v = '<div class="v s-value">'+esc(env.value)+'</div>'+
           (env.quote? '<blockquote>“'+esc(env.quote)+'”</blockquote>':'')+
-          (env.source_url? '<a class="src" href="'+esc(env.source_url)+'" target="_blank" rel="noopener">source</a>':'')+
+          srcLink(env.source_url)+
           (env.confidence? ' <span class="meta">'+esc(env.confidence)+(isWatch(env)?' · watch':'')+'</span>':'');
     } else {
       v = '<div class="v s-'+env.state+'">'+(stateLabel[env.state]||env.state)+'</div>';
