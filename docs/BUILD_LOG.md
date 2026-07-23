@@ -451,3 +451,18 @@ verified findings** — mostly *adjacent* issues the first fixes exposed. Fixing
 **Ran:** `test_monthly_rescan_does_not_clobber_a_human_filled_value` (value survives; one live head)
 and `test_retried_blocked_target_supersedes_its_blocked_claims` (blocked→value on resume, single
 head, reexport agrees `finalized`) + full suite → **127 passed** (exit 0).
+
+## round X — refine²: email-list + mailto PII redaction (findings 5, 6) (commit pending)
+
+**Fixed in `export/json_export.py`:**
+- **(finding 5, medium)** a bare email **list** ("a@b.com, c@d.com") slipped past the `fullmatch`
+  guard. New `_is_pii_email` redacts a bare single address **or any value carrying 2+ addresses**,
+  while still allowing a single email *mentioned in a sentence* (the design-intended recruiting
+  quote). Applied in both `_redact_pii` (build) and `validate_export` (D-024).
+- **(finding 6, low)** an email embedded in a `source_url` (`mailto:prof@uni.edu`) serialised into
+  the JSON. `_redact_url` strips it (`mailto:[email]`) while keeping the field truthy so a value
+  still cites a source (D-010); `validate_export` now also flags an email-bearing `source_url`.
+- Removed a **duplicate `source_url` key** in `_envelope` (slipped in during round R).
+**Ran:** `test_bare_email_list_is_redacted_at_build`, `test_email_in_a_mailto_source_url_is_stripped`,
+`test_single_incidental_email_in_a_sentence_still_allowed` + full suite → **130 passed** (exit 0).
+**All 6 second-pass findings are fixed with regression tests.**

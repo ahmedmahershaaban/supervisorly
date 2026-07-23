@@ -50,16 +50,31 @@ def _best_claim(claims: list[dict], field_id: str) -> dict | None:
     return max(candidates, key=lambda c: c.get("observed_at") or c.get("created_at") or "")
 
 
-def _redact_pii(value):
-    """Replace a value that *is* a bare email address with a safe placeholder (D-024).
+def _is_pii_email(value) -> bool:
+    """True if ``value`` is PII we must not serialise (D-024): a bare single address, or a
+    *list* of 2+ addresses. A single email merely *mentioned inside a sentence* is allowed
+    (a legitimate recruiting quote), so it is not flagged."""
+    if not isinstance(value, str):
+        return False
+    emails = _EMAIL_RE.findall(value)
+    return len(emails) >= 2 or (len(emails) == 1 and bool(_EMAIL_RE.fullmatch(value.strip())))
 
-    Applied at build so a bare contact email never serialises even when it arrives via the
-    human rung (which bypasses the deterministic extractors). A merely *mentioned* email
-    inside a sentence is left intact — only a whole-value address is redacted.
+
+def _redact_pii(value):
+    """Redact a value that is a bare email / email list to a safe placeholder (D-024).
+
+    Applied at build so contact emails never serialise even via the human rung (which bypasses
+    the deterministic extractors). A single email inside a sentence is left intact.
     """
-    if isinstance(value, str) and _EMAIL_RE.fullmatch(value.strip()):
-        return "[email redacted — see source]"
-    return value
+    return "[email redacted — see source]" if _is_pii_email(value) else value
+
+
+def _redact_url(url):
+    """Strip any email embedded in a source_url (e.g. ``mailto:prof@uni.edu``) so it can't leak
+    into the JSON, while keeping the field truthy so a value still cites a source (D-010/D-024)."""
+    if isinstance(url, str) and _EMAIL_RE.search(url):
+        return _EMAIL_RE.sub("[email]", url)
+    return url
 
 
 def _envelope(claim: dict | None) -> dict:
@@ -73,8 +88,7 @@ def _envelope(claim: dict | None) -> dict:
         "state": state,
         "value": _redact_pii(claim.get("value")) if state == "value" else None,
         "quote": _redact_pii(claim.get("quote")),
-        "source_url": claim.get("source_url"),
-        "source_url": claim.get("source_url"),
+        "source_url": _redact_url(claim.get("source_url")),
         "snapshot_hash": claim.get("snapshot_hash"),
         "observed_at": claim.get("observed_at"),
         "confidence": claim.get("confidence"),
@@ -156,10 +170,12 @@ def validate_export(obj: dict) -> list[str]:
                 errors.append(f"{p.get('id','?')}.{fid}: non-'value' state carries a value")
             if st == "value" and not env.get("source_url"):
                 errors.append(f"{p.get('id','?')}.{fid}: a value must cite a source_url (D-010)")
-            # a value that *is* a bare email address (not a sentence mentioning one) is PII
-            # smuggled under a non-email datatype — reject it (D-024).
-            val = env.get("value")
-            if st == "value" and isinstance(val, str) and _EMAIL_RE.fullmatch(val.strip()):
-                errors.append(f"{p.get('id','?')}.{fid}: a bare email address must not be "
+            # a bare email / email list smuggled under a non-email datatype is PII (D-024)
+            if st == "value" and _is_pii_email(env.get("value")):
+                errors.append(f"{p.get('id','?')}.{fid}: a bare email must not be "
                               "exported (D-024)")
+            # …and a source_url must not carry a contact address (e.g. mailto:) into the JSON
+            src = env.get("source_url")
+            if isinstance(src, str) and _EMAIL_RE.search(src):
+                errors.append(f"{p.get('id','?')}.{fid}: source_url leaks an email (D-024)")
     return errors

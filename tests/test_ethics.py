@@ -79,6 +79,59 @@ def test_bare_email_value_is_redacted_at_build_not_just_in_validate():
     assert jx.validate_export(export) == []                 # and the result is still valid
 
 
+def test_bare_email_list_is_redacted_at_build():
+    # audit-2 finding 5: a *list* of addresses (fullmatch misses it) must also be redacted
+    export = jx.build_export(
+        run_summary={"run_id": "r", "status": "finalized"},
+        field_descriptors=[
+            {"id": "contact", "label": "Contact", "kind": "display", "datatype": "string"},
+        ],
+        professors=[{"id": "p1", "name": "P One"}],
+        claims_by_entity={"p1": [
+            {"field": "contact", "state": "value", "value": "a@b.com, c@d.com",
+             "quote": "Contacts: a@b.com, c@d.com", "source_url": "https://p1/"},
+        ]},
+        generated_at="2026-07-23T00:00:00+00:00",
+    )
+    import json
+    blob = json.dumps(export)
+    assert "a@b.com" not in blob and "c@d.com" not in blob      # neither address survives
+    assert jx.validate_export(export) == []
+
+
+def test_email_in_a_mailto_source_url_is_stripped():
+    # audit-2 finding 6: an email embedded in source_url (mailto:) must not serialise
+    export = jx.build_export(
+        run_summary={"run_id": "r", "status": "finalized"},
+        field_descriptors=[
+            {"id": "recruiting", "label": "R", "kind": "filter", "datatype": "string"},
+        ],
+        professors=[{"id": "p1", "name": "P One"}],
+        claims_by_entity={"p1": [
+            {"field": "recruiting", "state": "value", "value": "recruiting",
+             "quote": "recruiting", "source_url": "mailto:prof@uni.edu"},
+        ]},
+        generated_at="2026-07-23T00:00:00+00:00",
+    )
+    import json
+    blob = json.dumps(export)
+    assert "prof@uni.edu" not in blob                            # the address is stripped
+    env = export["professors"][0]["fields"]["recruiting"]
+    assert env["source_url"] and "prof@uni.edu" not in env["source_url"]   # still truthy (D-010)
+    assert jx.validate_export(export) == []
+
+
+def test_single_incidental_email_in_a_sentence_still_allowed():
+    # the design-intended allowed case must keep working after the stricter rule
+    ok = {"schema_version": "1", "generated_at": "t", "run": {},
+          "fields": [{"id": "recruiting", "label": "R", "kind": "filter",
+                      "datatype": "string"}],
+          "professors": [{"id": "p", "fields": {"recruiting": {
+              "state": "value", "value": "Email me at jane@uni.edu to apply.",
+              "source_url": "https://p/"}}}]}
+    assert jx.validate_export(ok) == []
+
+
 def test_validate_rejects_a_bare_email_value_under_a_string_field():
     bad = {"schema_version": "1", "generated_at": "t", "run": {},
            "fields": [{"id": "contact", "label": "Contact", "kind": "display",
