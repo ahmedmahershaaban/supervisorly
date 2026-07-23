@@ -670,3 +670,21 @@ roster, rich page → all three `value` (quote-verified, social = the bare link)
 so the resume re-export is honestly `finalized_with_open_gaps` (assertion corrected). Full suite →
 **163 passed** (exit 0). **DoD (Phase L3):** sourced student/company/social claims where present,
 honest `searched_absent` where not; walled social never scraped.
+
+## round L4 — university + professor ranking (commit pending)
+
+**Built:** `score/ranking.py` — reuses `score_professor` (intent gates D-059, topic-ID overlap D-058,
+works reconciliation D-057) and adds `rank_professors` (best-first) + `rank_universities` (D-031
+roll-up: aggregate members' fit + recruiting-fraction + activity into a transparent, **re-weightable**
+`university_score`, with `confidence` lowered — never faked — for sparse institutions). Deterministic,
+LLM-free.
+**Ran:** `tests/test_ranking.py` (6): professors ordered best-first; universities aggregated + ordered;
+re-weightable (fit-heavy vs recruiting-heavy differ); sparse university confidence not inflated;
+fragmented profile reconciled not dropped; **pre_phd not gated on PhD-admission rules**. Full suite →
+**169 passed** (exit 0). **DoD (Phase L4):** met.
+
+## round L5 — university scope (all / prioritise / only) — met via L1
+
+The scope form is already implemented and tested in the ladder: `select_institutions` honours
+`university_mode` all/prioritise/only + `universities_json` (`tests/test_discover_ladder.py`
+`only`/`prioritise`/`all`). Surfacing it as a CLI/skill flag is Phase L8. No new code this round.
