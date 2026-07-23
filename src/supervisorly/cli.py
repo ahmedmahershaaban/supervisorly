@@ -53,7 +53,10 @@ def cmd_scan(args: argparse.Namespace) -> int:
         json.dumps(result["export"], ensure_ascii=False, indent=2), encoding="utf-8"
     )
     profs = result["export"]["professors"]
-    print(f"scanned {len(profs)} professors (demo) → {out} (+ {out.with_suffix('.json').name})")
+    # ASCII-only console output — the default Windows console codec (cp1252) can't encode a
+    # Unicode arrow, which would crash the command after the files were already written.
+    print(f"scanned {len(profs)} professors (demo) -> {out} "
+          f"(+ {out.with_suffix('.json').name})")
     return 0
 
 

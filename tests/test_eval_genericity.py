@@ -96,10 +96,15 @@ def test_arbitrary_field_and_country_still_runs(tmp_path):
     assert env["state"] == "value" and "quantum basket weaving" in env["value"]
 
 
-def test_cli_scan_demo_writes_dashboard(tmp_path):
+def test_cli_scan_demo_writes_dashboard(tmp_path, capsys):
     out = tmp_path / "out" / "dashboard.html"
     rc = main(["scan", "--demo", "--out", str(out)])
     assert rc == 0
     assert out.exists() and out.with_suffix(".json").exists()
     html = out.read_text(encoding="utf-8")
     assert "<!doctype html>" in html.lower() and "Ada Placeholder" in html
+    # the CLI's console output must be ASCII-safe — a non-ASCII char crashes on a cp1252
+    # (default Windows) console *after* the files are written (caught by clean-room verify).
+    printed = capsys.readouterr().out
+    printed.encode("cp1252")            # raises UnicodeEncodeError if the output isn't console-safe
+    assert printed.isascii()

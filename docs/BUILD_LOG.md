@@ -502,3 +502,24 @@ conservative spec, not a weakened one).
 **Ran:** `test_deadline_parse.py` (application phrasings still firm; office-hours/library/gym
 "close on" → none) + full suite → **135 passed** (exit 0). **Audit trend 10 → 6 → 2 → 1; the parser
 now never fabricates a firm deadline from a non-application sentence.**
+
+---
+
+# Clean-room verification (goal §4 step 6)
+
+Tore down all generated/transient state (`.venv`, `.pytest_cache`, `*.egg-info`, every
+`__pycache__`); confirmed `git status` showed **no tracked generated state, no personal data, no
+scan output**. Recreated the venv fresh and ran `pip install -e ".[dev]"` (succeeded), then re-ran
+the offline self-test from the clean checkout.
+
+## round AA — clean-room caught a portability bug the tests missed (commit pending)
+
+**Fixed (portability):** `scan --demo` wrote the dashboard + JSON correctly but then **crashed on
+its final `print()`** — it used a Unicode arrow (`→`) that the default Windows console codec
+(cp1252) can't encode, so the command exited 1 *after* doing its work. pytest captures stdout as
+UTF-8, so the unit test never hit it; running the real CLI on a cp1252 console did. Replaced the
+arrow with ASCII `->` and **added a regression assertion** (`test_cli_scan_demo_writes_dashboard`
+now captures the CLI output and asserts it is `cp1252`-encodable / ASCII).
+**Ran (from the fresh venv):** `python -m pytest` → **135 passed** (exit 0) on the first try;
+`python -m supervisorly scan --demo` → exit 0, writes `dashboard.html` + `.json`, prints an
+ASCII line. Clean-room **green**.
