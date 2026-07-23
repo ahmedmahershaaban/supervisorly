@@ -82,3 +82,17 @@ def test_login_wall_page_is_not_extracted_and_is_blocked(tmp_path):
     for field in ("recruiting_signal", "deadline", "students_signal", "industry_signal", "social"):
         assert f[field]["state"] == "blocked", field       # nothing extracted from the wall
     assert r["export"]["run"]["status"] == "finalized_with_open_gaps"
+
+
+def test_content_page_with_noscript_js_banner_is_extracted_not_blocked(tmp_path):
+    # live audit-2: wiring the wall gate into the deep-dive must NOT block a normal, content-rich page
+    # that merely carries a <noscript>Please enable JavaScript</noscript> fallback — its real signals
+    # are extracted, not thrown away as false "blocked" emptiness.
+    page = RICH.replace(
+        "<main>",
+        "<noscript>Please enable JavaScript to use all features of this site.</noscript><main>", 1)
+    r = _run(tmp_path, page)
+    f = r["export"]["professors"][0]["fields"]
+    assert f["recruiting_signal"]["state"] == "value"
+    assert f["students_signal"]["state"] == "value"
+    assert f["social"]["state"] == "value" and f["social"]["value"] == "https://twitter.com/drrichpage"

@@ -225,6 +225,29 @@ def test_domain_word_in_a_modifier_is_not_an_application_deadline():
         assert _deadline(sentence) is None, sentence
 
 
+def test_payment_subject_with_adjacent_domain_word_is_not_a_deadline():
+    # live audit-2 finding: a fee/tuition/deposit due-date whose money noun is governed via
+    # "for <domain>" ("the deposit FOR PhD studentships is due") must NOT be a firm deadline — the
+    # domain word sits in a payment modifier, so the DATE attaches to the money (D-010/D-061). This
+    # is the adjacent-domain-token bypass the bare _PAYMENT guard missed.
+    for sentence in (
+        "The deposit for PhD studentships is due by 1 December 2026.",
+        "Tuition for the postdoc positions is due by 1 December 2026.",
+        "Tuition fees for PhD studentships are due by 1 December 2026.",
+        "Payment for the fellowship is due by 1 December 2026.",
+        "The deposit for the scholarship is due by 1 December 2026.",
+    ):
+        assert _deadline(sentence) is None, sentence
+
+
+def test_real_application_deadline_beside_a_fee_word_in_one_clause_still_qualifies():
+    # live audit-2 finding: the _PAYMENT exclusion must not over-drop a REAL "Applications close"
+    # deadline merely because a fee word co-occurs in the same undelimited clause — the application
+    # is the clean subject of its own cue, so the close date is firm.
+    iso, _, conf = _deadline("Applications close on 1 December 2026 and the fee is due then.")
+    assert iso == "2026-12-01" and conf == "quoted_official"
+
+
 # ── audit round 5: no quadratic blow-up on long unpunctuated text ──────────────
 def test_long_unpunctuated_text_does_not_blow_up():
     # a large boilerplate/nav dump with no sentence punctuation must stay fast (no O(n^2))

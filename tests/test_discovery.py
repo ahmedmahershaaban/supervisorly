@@ -31,6 +31,26 @@ def test_detect_login_wall_is_conservative():
     )
 
 
+def test_noscript_enable_javascript_banner_beside_content_is_not_a_wall():
+    # live audit-2: a content-rich page that merely ships a <noscript>Please enable JavaScript</noscript>
+    # fallback (WordPress / embedded map / Disqus) is NOT a wall — its real signals must still be
+    # extracted, never discarded as false "blocked" emptiness (D-022/037/046).
+    page = ("<html><body>"
+            "<noscript>Please enable JavaScript to use all features of this site.</noscript>"
+            "<main><h1>Prof. Jane Doe</h1>"
+            "<p>I am recruiting PhD students for 2027. Current members of my lab include Alice "
+            "and Bob. Find me at https://twitter.com/janedoe for updates on our research.</p>"
+            "</main></body></html>")
+    assert roster.detect_login_wall(page) is False
+
+
+def test_content_free_js_shell_is_still_a_wall():
+    # a genuinely JS-only shell (server rendered no content) IS a wall — routed to the human rung.
+    shell = ('<html><body><div id="root"></div>'
+             "<noscript>Please enable JavaScript to run this app.</noscript></body></html>")
+    assert roster.detect_login_wall(shell) is True
+
+
 def test_classify_directory_three_ways():
     assert roster.classify_directory(_blocked()) == roster.LOGIN_WALL
     assert roster.classify_directory(_not_found()) == roster.NOT_FOUND

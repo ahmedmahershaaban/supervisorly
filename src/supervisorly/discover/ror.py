@@ -72,6 +72,10 @@ class RorClient:
         while page <= max_pages:
             data = self._page(country_code, page)
             if not data:
+                # a page fetch failed mid-enumeration (transport / non-200 / bad JSON) — the rest of
+                # the country's institutions are unknown, so record truncation (coverage → PARTIAL,
+                # D-037). A country ROR lists as empty returns 200 with items=[] above, not None.
+                self.truncated_sources.append(f"institutions@{country_code}")
                 return out
             items = data.get("items", [])
             out.extend(_map_institution(it) for it in items)

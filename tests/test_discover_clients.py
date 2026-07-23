@@ -120,6 +120,28 @@ def test_ror_truncation_is_recorded_when_cap_hit():
     assert len(insts) == 1 and rc.truncated_sources == ["institutions@CA"]
 
 
+def test_openalex_mid_pagination_failure_records_truncation():
+    # live audit-2: a full page then a transient non-200 stops enumeration — coverage must report
+    # PARTIAL (a truncation marker), never silently claim completeness (D-037).
+    tp = CassetteTransport()
+    tp.record(openalex.authors_url("I1", EMAIL, page=1), 200, _authors(25))   # full page
+    tp.record(openalex.authors_url("I1", EMAIL, page=2), 500, "boom")          # transient failure
+    oa = openalex.OpenAlexClient(tp, email=EMAIL)
+    authors = oa.authors_by_institution("I1")
+    assert len(authors) == 25 and oa.truncated_sources == ["authors@I1"]
+
+
+def test_ror_mid_pagination_failure_records_truncation():
+    # ror.py has the same defect/fix: a mid-pagination failure before natural completion is PARTIAL.
+    tp = CassetteTransport()
+    tp.record(ror.country_url("CA", 1), 200, json.dumps({"number_of_results": 500, "items": [
+        {"id": "https://ror.org/1", "name": "U", "country": {"country_code": "CA"}, "links": []}]}))
+    tp.record(ror.country_url("CA", 2), 500, "boom")
+    rc = ror.RorClient(tp)
+    insts = rc.institutions_in_country("CA")
+    assert len(insts) == 1 and rc.truncated_sources == ["institutions@CA"]
+
+
 def test_openalex_premium_key_is_included_when_present():
     # the optional paid key rides in the query when configured; email always does
     url = openalex.topics_url("x", EMAIL, key="sk-123")

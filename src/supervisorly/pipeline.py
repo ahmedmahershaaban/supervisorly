@@ -77,25 +77,43 @@ _STRONG_APP = re.compile(r"\b(?:applications?|applicants?|apply|admissions?|subm
 _DOMAIN_DEADLINE = re.compile(
     rf"\b(?:{_DOMAIN}|applications?|submissions?|admissions?|entry|programmes?|programs?|courses?|intake)"
     r"\s+deadline\b", re.IGNORECASE)
-_DOMAIN_SUBJECT = re.compile(
-    rf"\b(?:{_DOMAIN})\s+(?:closes?\b|closing\b|(?:are|is)\s+due|due\s+by|submit(?:ted)?\s+by)",
+# An application/domain programme that is CLEANLY the SUBJECT of a deadline cue ("Applications
+# close…", "PhD studentship closes…", "submissions are due…"). Subject-tied, so a domain word that
+# is only a MODIFIER ("registration for the PhD orientation closes") never qualifies.
+_APP_SUBJECT = re.compile(
+    rf"\b(?:{_DOMAIN}|applications?|submissions?|admissions?)\s+"
+    rf"(?:closes?\b|closing\b|(?:are|is)\s+due|due\s+by|submit(?:ted)?\s+by)",
     re.IGNORECASE)
-
 
 # A clause about money (a fee / tuition / fine / deposit due date) is NOT an application deadline
 # even when it mentions "application(s)"/"applicants" as a modifier ("the application FEE is due by…").
-_PAYMENT = re.compile(
-    r"\b(fees?|tuition|payment|deposit|fines?|rent|invoice|balance|dues|charges?|"
-    r"instal?ments?)\b", re.IGNORECASE)
+_PAYMENT_NOUNS = (r"fees?|tuition|payment|deposit|fines?|rent|invoice|balance|dues|charges?|"
+                  r"instal?ments?")
+_PAYMENT = re.compile(rf"\b(?:{_PAYMENT_NOUNS})\b", re.IGNORECASE)
+# The MONEY is what's actually "due" — a payment noun HEADS the phrase, governing the subject via a
+# "for/of <domain>" modifier ("the deposit FOR PhD studentships is due", "tuition FOR the postdoc
+# positions is due"). Whatever domain word sits in that modifier, the DATE attaches to the payment,
+# so the clause is never an application deadline (live audit-2: subject-tie the _PAYMENT exclusion so
+# it can't be bypassed by an adjacent domain word, and can't over-drop a real "Applications close").
+_PAYMENT_HEAD = re.compile(
+    rf"\b(?:{_PAYMENT_NOUNS})\b(?:\s+\w+){{0,3}}?\s+(?:for|of|toward|towards)\b", re.IGNORECASE)
 
 
 def _is_application_deadline(clause: str) -> bool:
     """True if the clause's deadline plausibly attaches to an application (not a tuition/fee/event one).
 
-    A subject-tied domain deadline ("PhD studentship closes", "application deadline") always
-    qualifies; a bare application noun qualifies only when the clause is not about a payment.
+    A "<application/domain> deadline" noun-phrase always qualifies. Otherwise an application/domain
+    word must be the CLEAN subject of a cue — NOT a subject a payment noun governs via a "for/of"
+    modifier ("the deposit for PhD studentships is due" is a payment date, never an application
+    deadline). A bare application noun qualifies only when the clause is not about money at all.
     """
-    if _DOMAIN_DEADLINE.search(clause) or _DOMAIN_SUBJECT.search(clause):
+    if _DOMAIN_DEADLINE.search(clause):
+        return True
+    for m in _APP_SUBJECT.finditer(clause):
+        # skip a subject the money heads ("deposit for PhD studentships is due"): the payment noun
+        # sits in a short modifier just before the subject, so a bounded window is enough (and O(1)).
+        if _PAYMENT_HEAD.search(clause[max(0, m.start() - 64):m.start()]):
+            continue
         return True
     return bool(_STRONG_APP.search(clause)) and not _PAYMENT.search(clause)
 # cue words that make a date *projected*, not a published/firm deadline (→ watch date)

@@ -8,7 +8,7 @@ from supervisorly.fetch.transport import CassetteTransport
 
 EMAIL = "me@uni.edu"
 
-ROR_CA = json.dumps({"items": [
+ROR_CA = json.dumps({"number_of_results": 2, "items": [
     {"id": "https://ror.org/00abc11", "name": "Maple University",
      "country": {"country_code": "CA"}, "links": ["https://maple.example/"], "types": ["Education"]},
     {"id": "https://ror.org/00abc22", "name": "Northern Institute",

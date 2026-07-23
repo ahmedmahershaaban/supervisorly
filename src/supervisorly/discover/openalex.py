@@ -135,6 +135,11 @@ class OpenAlexClient:
         while page <= max_pages:
             data = self._get_json(authors_url(institution_id, self._email, self._key, page=page))
             if not data:
+                # a page fetch failed mid-enumeration (transport / non-200 / bad JSON) — we do NOT
+                # know what those pages held, so record truncation: coverage reports PARTIAL, never
+                # a false "complete" (D-037). A legit empty institution returns 200/[] above, not None.
+                self.truncated_sources.append(
+                    f"authors@{_short_id(institution_id) or institution_id}")
                 return out
             results = data.get("results", [])
             out.extend(_map_author(a) for a in results)

@@ -25,19 +25,45 @@ OPEN = "OPEN"
 LOGIN_WALL = "LOGIN_WALL"
 NOT_FOUND = "NOT_FOUND"
 
-# Text that betrays a login / bot wall behind an otherwise-200 page. Conservative on
-# purpose: these phrases are near-unambiguous, so we don't mislabel a real roster.
-_LOGIN_MARKERS = re.compile(
+# Strong, near-unambiguous login / bot-wall phrases: a match anywhere means the real content is
+# behind the wall, so we never extract it (D-039/044) and we don't mislabel a real roster.
+_WALL_MARKERS = re.compile(
     r"(sign\s*in\s+to\s+(?:continue|view|access)|log\s*in\s+to\s+(?:continue|view|access)|"
-    r"create\s+an?\s+account\s+to\s+(?:view|continue)|please\s+enable\s+javascript|"
+    r"create\s+an?\s+account\s+to\s+(?:view|continue)|"
     r"access\s+denied|you\s+must\s+be\s+logged\s+in|captcha)",
     re.IGNORECASE,
 )
+# "Please enable JavaScript" is AMBIGUOUS: a genuinely JS-only page shows only this, but
+# content-rich pages (WordPress, embedded maps, Disqus) ship the same <noscript> fallback
+# ALONGSIDE their real, extractable text. So it signals a wall ONLY when the server rendered
+# essentially no content — otherwise the real signals must still be extracted (D-022/037/046).
+_JS_WALL = re.compile(
+    r"(please\s+enable\s+javascript|enable\s+javascript\s+to\s+(?:run|use|view))",
+    re.IGNORECASE,
+)
+# A JS banner is a wall only when the page has essentially NO extractable text of its own — a
+# content-free JS shell (main_text ≈ empty). The floor sits well below the smallest real content
+# page (a lone recruiting sentence ≈ 40 chars) so we never drop extractable content; a shell
+# (`<div id="root"></div>` + a stripped <noscript>) yields ~0 chars and is correctly a wall.
+_JS_CONTENT_FLOOR = 30
 
 
 def detect_login_wall(html: str | None) -> bool:
-    """True if the page text looks like a login/bot wall rather than a real directory."""
-    return bool(html) and bool(_LOGIN_MARKERS.search(html))
+    """True if the page looks like a login / bot / JS wall rather than a real content page.
+
+    Strong login markers fire on their own. The ubiquitous "please enable JavaScript" fallback is
+    a wall ONLY when the page rendered essentially no content (``main_text`` — which strips
+    ``<noscript>`` — is near-empty); a content-rich page that merely ships a ``<noscript>`` banner
+    is NOT a wall, so its real signals are still extracted (live audit-2).
+    """
+    if not html:
+        return False
+    if _WALL_MARKERS.search(html):
+        return True
+    if _JS_WALL.search(html):
+        from ..fetch.normalize import main_text
+        return len(main_text(html)) < _JS_CONTENT_FLOOR
+    return False
 
 
 def classify_directory(fetch_result, html: str | None = None) -> str:
