@@ -591,7 +591,7 @@ noun "admissions") can still surface. Per the design (D-009/D-021) the **LLM rec
 analyst does the real classification in Stage 2**; the deterministic tier only surfaces a
 quote-verified candidate. Further refinement is delegated to that layer rather than chased in regex.
 
-## COMPLETION — goal met
+## COMPLETION — goal met (offline engine)
 
 All phases (A–J) met their DoD; 18/18 edge-case rows have passing tests; the offline self-run is
 hallucination-free; the four-pass adversarial audit (10 → 6 → 2 → 1) is closed with all 19 findings
@@ -599,3 +599,24 @@ fixed + regression-tested; ethics gates are all test-guarded; clean-room verific
 fresh checkout. **135 tests pass (exit 0).** See `docs/COMPLETION_REPORT.md` for the full sign-off.
 The only step recorded **skipped** (never passed) is the credentialed live smoke test — no
 ROR/OpenAlex keys in this environment; it is the natural next build increment.
+
+---
+
+# LIVE build (branch `build/live`) — goal: docs/LIVE_IMPLEMENTATION_GOAL.md
+
+Reuses the green offline engine; adds the real front door + collectors + Atlas front-end. Each
+round is a tracked commit leaving the suite green.
+
+## round L0 — ROR + OpenAlex clients behind the transport seam (commit pending)
+
+**Built:** `discover/ror.py` (keyless ROR client: country → `{ror_id,name,country_code,homepage,
+types}`; open API, polite email only) and `discover/openalex.py` (free OpenAlex client with the
+`mailto` polite-pool param + optional premium `api_key`: `topic_ids`, `authors_by_institution` →
+professor-target dicts, `works_by_author` → activity). Both take the injected `Transport` (cassette-
+testable), with module-level URL builders so tests record the exact request URL. Nothing dropped for
+missing data (honest `None`/`[]`); LLM-free (D-009).
+**Ran:** `tests/test_discover_clients.py` (6) — ROR maps + honest-empty-homepage + error→[]; OpenAlex
+topic-ids, authors→targets, works, premium-key-in-query — and the ethics LLM-free scan (now covers
+`discover/`). Full suite → **148 passed** (exit 0). **DoD (Phase L0):** clients round-trip cassettes
+into typed results, no live network in tests. (Preflight fail-loud on a missing contact email already
+lands via `preflight.require_credentials`; the live entry wiring is L2/L8.)
