@@ -27,6 +27,7 @@ from . import preflight
 from .discover import ladder as _ladder
 from .discover import openalex as _openalex
 from .discover import ror as _ror
+from .discover import roster as _roster
 from .ethics import optout as optout_mod
 from .export import dashboard as dash
 from .export import json_export as jx
@@ -365,6 +366,18 @@ def _record_blocked(conn, pid, field):
     return rec
 
 
+# Known third-party aggregators — a page there is not the professor's own official page (D-047).
+_AGGREGATORS = re.compile(
+    r"(researchgate\.net|academia\.edu|linkedin\.com|scholar\.google|semanticscholar\.org|"
+    r"orcid\.org|twitter\.com|x\.com)", re.IGNORECASE)
+
+
+def _source_tier(url: str | None) -> str:
+    """Coarse trust tier for a fetched page — an aggregator is ``community_unverified``, an
+    institutional/personal page is ``official_institutional`` (don't over-claim provenance)."""
+    return "community_unverified" if _AGGREGATORS.search(url or "") else "official_institutional"
+
+
 def _process_targets(conn, run_id, targets, fetcher, snaps, *, stats, resume) -> int:
     """Deep-dive each target (fetch → extract → claim) — the shared core of run_offline/run_live.
 
@@ -383,6 +396,15 @@ def _process_targets(conn, run_id, targets, fetcher, snaps, *, stats, resume) ->
         res = fetcher.fetch(url) if url else None
         if res is not None and res.ok:
             html = snaps.load(res.snapshot_hash)
+            if _roster.detect_login_wall(html):
+                # a robots-allowed 200 that is really a login/JS/bot wall — its chrome text is NOT
+                # the professor's content, so never extract it; mark blocked → the human rung
+                # (D-039/D-044). This is what keeps a wall from being silently defeated.
+                for field in _EXTRACTORS:
+                    _record_blocked(conn, pid, field)
+                runs.set_task_status(conn, task, "blocked",
+                                     last_error="login/bot wall — routed to the human rung")
+                continue
             chash = content_hash(html)
             if xcache.lookup(conn, "person", pid, chash, PROMPT_VERSION, MODEL_ID,
                              CACHE_SCHEMA_VERSION):
@@ -391,7 +413,7 @@ def _process_targets(conn, run_id, targets, fetcher, snaps, *, stats, resume) ->
                 continue
             src_id = claims.record_web_source(
                 conn, url, snapshot_hash=res.snapshot_hash, http_status=200,
-                source_tier="official_institutional", robots_allowed=True,
+                source_tier=_source_tier(url), robots_allowed=True,
             )
             claim_ids: list[str] = []
             for field, extractor in _EXTRACTORS.items():

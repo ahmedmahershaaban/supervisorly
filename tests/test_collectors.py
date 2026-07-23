@@ -70,3 +70,15 @@ def test_bare_page_yields_honest_searched_absent(tmp_path):
     f = _run(tmp_path, BARE)["export"]["professors"][0]["fields"]
     for field in ("students_signal", "industry_signal", "social", "recruiting_signal"):
         assert f[field]["state"] == "searched_absent", field
+
+
+def test_login_wall_page_is_not_extracted_and_is_blocked(tmp_path):
+    # audit (live): a robots-allowed 200 that is really a login/bot wall must NOT have its chrome
+    # extracted (even recruiting-ish chrome) — it is routed to the human rung as blocked (D-039/044).
+    wall = ("<html><body><main><p>Sign in to view this profile. People also viewed: "
+            "labs hiring PhD students now.</p></main></body></html>")
+    r = _run(tmp_path, wall)
+    f = r["export"]["professors"][0]["fields"]
+    for field in ("recruiting_signal", "deadline", "students_signal", "industry_signal", "social"):
+        assert f[field]["state"] == "blocked", field       # nothing extracted from the wall
+    assert r["export"]["run"]["status"] == "finalized_with_open_gaps"
