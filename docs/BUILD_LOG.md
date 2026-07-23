@@ -740,3 +740,41 @@ run via a patched transport** (offline) → writes dashboard+JSON, ASCII output,
 value. Full suite → **182 passed** (exit 0). **DoD (Phase L8):** the live flags work; the skill
 documents the flow; scheduling recipe documented. (Earlier L7 log said 184 — the accurate count then
 was 179; recorded here for the trail.)
+
+## round L9 -- live discovery wired + adversarial refine loop (section 5)
+
+**Built:** the real discovery front door on the existing engine -- `discover/ror.py` (keyless ROR
+country->institutions, paginated), `discover/openalex.py` (free OpenAlex topics/institutions/authors/
+works, `mailto` polite pool, optional premium key), `discover/ladder.py` (Round-1 select-institutions
+with all/prioritise/only scope + word-boundary matching, enumerate + reconcile professors),
+`pipeline.run_live` (preflight -> clients -> ladder -> shared `_process_targets` deep-dive), the extra
+collectors (`extract_students_signal`/`extract_industry_signal`/`extract_social`), `score/ranking.py`
+(professor + university roll-up, re-weightable), `export/delta.py` (scheduled-rescan "what changed").
+
+**Refine loop (section 5) -- three adversarial audit passes, each finding fixed with a regression test:**
+- **Pass 1 (rounds L9b-L9g)** -- 9 confirmed findings fixed: deadline payment-exclusion; login-wall
+  detection wired into the deep-dive; discovery pagination + truncation marker + word-boundary scope;
+  dashboard `_inline_json` script-injection escape; unanchored `.cache/`/`snaps/` gitignore; ranking
+  independence (roll up from independent axes, no double-count); delta recruiting-highlight relabeled
+  to `recruiting_changed` (a review signal, never "now recruiting"). -> 195 passed.
+- **Pass 2 (round L9h, commit `cc587b2`)** -- 6 confirmed findings fixed: (1/4/5) the `please enable
+  javascript` marker false-positived on content-rich pages shipping a `<noscript>` fallback ->
+  discarded real signals; split into strong `_WALL_MARKERS` (fire anywhere) + `_JS_WALL` that is a
+  wall only when `main_text` is near-empty (a genuine JS shell, floor 30 chars). (2/6) the `_PAYMENT`
+  guard was co-occurrence-based -> a payment noun with an adjacent domain word fabricated a firm
+  deadline, while a real "Applications close" beside a fee word was over-dropped; made it subject-tied
+  via `_PAYMENT_HEAD`. (3) a mid-pagination fetch failure returned partial results with **no**
+  truncation marker -> false completeness; both clients now mark PARTIAL on the not-data early return.
+  -> 202 passed (+7 regression tests).
+- **Pass 3 (attempted)** -- the third independent multi-agent audit **could not run: all 3 finder
+  agents errored on a session usage limit** (0 ran). Per section 7 that is **not** a "zero findings"
+  result, so I did not treat it as convergence. Substituted an **in-loop adversarial probe** of the
+  L9h areas (`scratchpad/probe_l9h.py`, real code), which reproduced one residual defect ->
+- **Round L9i (commit `272ed0c`)** -- `_PAYMENT_NOUNS` listed a bare `deposit`, so `\bdeposit\b` missed
+  the plural "Deposits" and "Deposits for PhD applicants are due 1 Dec" fabricated a firm deadline;
+  made every payment noun plural-tolerant. Regression cases added. -> probe 0 failures; **202 passed**.
+
+**State:** suite green at **202 passed** (exit 0), commits `cc587b2`->`272ed0c` on `build/live`.
+**Pending before DoD:** clean-room fresh-install verification (section 4 step 6); a final independent
+multi-agent audit pass returning zero (to formally close section 5 -- blocked pending the session-limit
+reset; the in-loop probe is currently clean); `docs/LIVE_COMPLETION_REPORT.md` finalization.
