@@ -143,3 +143,24 @@ hallucinations and the four states rendering.
 **Remaining:** H (broaden the eval set to ≥3 directory shapes/≥3 countries per D-063; wire `scan` into
 the CLI), roster-enumeration (D-052, minor), J (adversarial refine loop + COMPLETION_REPORT),
 clean-room verify.
+
+## round H — genericity eval set + `scan` CLI (commit pending)
+
+**Built:** `demo.py` — a fully **synthetic** offline fixture (invented names, `example` domains, no
+real person — D-035): three directory *shapes* (`<main><p>`, `<section><ul><li>`, nested
+`<div class=bio>`) across three countries, plus a **non-English** (German) page and a **robots-blocked**
+one — the D-063 genericity bar. `cli.py` gains `scan --demo --out` (writes dashboard `.html` + export
+`.json`, creating parent + `.cache/snaps`). `tests/test_eval_genericity.py` asserts, across all shapes:
+valid export, every professor present (nobody dropped), honest per-shape states (three `value`,
+German → `searched_absent`, blocked → `blocked`), **zero hallucinations** (each value's quote
+re-verified in its snapshot), the **zero-result** edge case (empty targets → valid empty export +
+"no professors" dashboard, not a crash), and the CLI writing both files.
+**Fixed (self-test caught):** the AU demo page originally read *"No openings are advertised"* — a
+*negative* recruiting statement. The deterministic English signal tier correctly returns
+`searched_absent` on it (it surfaces positive candidates only; negatives are the LLM analyst's Stage-2
+call), which contradicted a test expecting `value`. Rather than weaken the tier, the demo's AU page
+now carries a genuine positive in the third markup shape ("accepting a new PhD student"), so the demo
+cleanly shows shape-diversity detection and the German page remains the honest-absent example.
+**Ran:** pytest → **65 passed** (exit 0). **DoD (Phase H):** met — genericity holds across ≥3 shapes /
+≥3 countries, non-English is honest not guessed, blocked isn't dropped, zero-result is graceful, and
+`scan --demo` is a runnable end-to-end entry point.

@@ -31,6 +31,32 @@ def cmd_init_db(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_scan(args: argparse.Namespace) -> int:
+    if not args.demo:
+        print("only --demo (offline, synthetic) is wired so far; a live scan needs "
+              "ROR + OpenAlex credentials (see README).")
+        return 2
+    import json
+
+    from .demo import demo_fixture
+    from .pipeline import run_offline
+
+    out = Path(args.out)
+    if out.parent != Path("") and not out.parent.exists():
+        out.parent.mkdir(parents=True, exist_ok=True)
+    snap_root = out.parent / ".cache" / "snaps"
+
+    tp, targets, plan = demo_fixture()
+    result = run_offline(plan, targets, tp, snap_root)
+    out.write_text(result["html"], encoding="utf-8")
+    out.with_suffix(".json").write_text(
+        json.dumps(result["export"], ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    profs = result["export"]["professors"]
+    print(f"scanned {len(profs)} professors (demo) → {out} (+ {out.with_suffix('.json').name})")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="supervisorly", description=__doc__)
     p.add_argument("--version", action="version", version=f"{PRODUCT_NAME} {__version__}")
@@ -41,6 +67,11 @@ def build_parser() -> argparse.ArgumentParser:
     pi = sub.add_parser("init-db", help="create/migrate a scan database")
     pi.add_argument("--db", default="supervisorly.sqlite", help="database path")
     pi.set_defaults(func=cmd_init_db)
+
+    ps = sub.add_parser("scan", help="run a scan and write a dashboard")
+    ps.add_argument("--demo", action="store_true", help="run the offline synthetic demo")
+    ps.add_argument("--out", default="output/dashboard.html", help="dashboard output path")
+    ps.set_defaults(func=cmd_scan)
 
     return p
 
