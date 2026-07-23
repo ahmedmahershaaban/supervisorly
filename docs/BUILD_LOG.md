@@ -56,7 +56,16 @@ still exported, all fields `never_attempted` (D-037). Contract doc.
 **Ran:** pytest → **22 passed**. **DoD (Phase B contracts):** met — MD round-trips into claims;
 the JSON validates against a worked example and rejects leaks.
 
-**Remaining phases:** C (discovery ladder + fetcher/snapshots/cache), D (extraction + LLM agents
-+ quote-verification), E (scoring: intent gates, topic-ID match, works reconciliation), F (dashboard),
-G (human-rung wiring: chrome-prompt-generator + md-ingester + resume, roster-enumeration), H (eval
+## round C1 — fetch primitives: normalisation, cache hash, quote verification, robots (commit pending)
+
+**Built:** `fetch/normalize.py` — `main_text` (faithful content, keeps dates, for quote
+verification), `content_hash` (volatile tokens masked → stable cache key, cost §3b-i),
+`quote_in_snapshot` (the anti-hallucination primitive, D-010). `fetch/robots.py` — `is_allowed`,
+fail-closed (D-019/D-039), honest User-Agent. Pure stdlib (no HTML-parser dep) — testable offline.
+**Ran:** pytest → **29 passed**, incl. the edge-case-matrix rows: *content hash stable across
+volatile chrome* and *quote-in-snapshot rejects a fabricated quote*.
+
+**Remaining phases:** C2 (transport/cassettes + fetcher 3-phase + snapshot store + HTTP cache),
+D (LLM agents + wiring quote-verification into extraction), E (scoring: intent gates, topic-ID
+match, works reconciliation), F (dashboard), G (human-rung wiring + roster-enumeration), H (eval
 set), I (self-run), J (refine), then clean-room verify. SKILL.md + agent definition files still to write.
