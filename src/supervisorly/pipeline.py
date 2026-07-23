@@ -31,6 +31,7 @@ from .export import dashboard as dash
 from .export import json_export as jx
 from .fetch.fetcher import Fetcher
 from .fetch.normalize import content_hash, main_text
+from .fetch.ratelimit import HostRateLimiter
 from .fetch.snapshot import SnapshotStore
 from .fetch.transport import Transport
 from .model import claims, extraction_cache as xcache, runs
@@ -414,8 +415,10 @@ def run_offline(plan: dict, targets: list[dict], transport: Transport, snap_root
     state persists in ``db_path`` (D-029)."""
     conn = open_db(db_path) if db_path is not None else open_db()
     snaps = SnapshotStore(snap_root)
-    # Offline cassettes never rate-limit us, so any retry needn't actually sleep.
-    fetcher = Fetcher(transport, snaps, sleep=lambda _s: None)
+    # Cassettes are synthetic — no real host to be polite to, so neither the backoff nor the
+    # per-host rate limiter should actually sleep (keeps the offline suite fast).
+    fetcher = Fetcher(transport, snaps, sleep=lambda _s: None,
+                      rate_limiter=HostRateLimiter(min_interval=0.0))
 
     # Opt-out is enforced BEFORE any fetch: a suppressed person is never even requested (D-023).
     optout = optout_mod.load_optout(optout_path)
@@ -449,7 +452,10 @@ def run_live(plan: dict, transport: Transport, snap_root, *, email: str,
 
     conn = open_db(db_path) if db_path is not None else open_db()
     snaps = SnapshotStore(snap_root)
-    fetcher = Fetcher(transport, snaps)                 # real backoff/sleep for live politeness
+    # Cassette-tested today (fast); when the CLI wires the live httpx transport (L8) it constructs
+    # the fetcher with real politeness (a per-host min-interval + backoff sleep).
+    fetcher = Fetcher(transport, snaps, sleep=lambda _s: None,
+                      rate_limiter=HostRateLimiter(min_interval=0.0))
     optout = optout_mod.load_optout(optout_path)
     targets, opted_out = optout_mod.filter_targets(disc["targets"], optout)
 

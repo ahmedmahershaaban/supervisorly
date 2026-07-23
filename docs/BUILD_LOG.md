@@ -688,3 +688,18 @@ fragmented profile reconciled not dropped; **pre_phd not gated on PhD-admission 
 The scope form is already implemented and tested in the ladder: `select_institutions` honours
 `university_mode` all/prioritise/only + `universities_json` (`tests/test_discover_ladder.py`
 `only`/`prioritise`/`all`). Surfacing it as a CLI/skill flag is Phase L8. No new code this round.
+
+## round L6 — scheduled re-scan delta + test-speed fix (commit pending)
+
+**Built:** `export/delta.py` — `compute_delta(previous, current)` over two export dicts: new/removed
+professors + changed fields, with the two the student cares about highlighted (**newly_recruiting**,
+**newly_deadline**). Pure, no fetch, no LLM; a first run reports everything new.
+**Fixed (perf, self-test caught):** the internal `Fetcher`'s per-host rate limiter used a real 1s
+sleep, so the growing set of fetch-heavy cassette tests pushed the suite past 2 min. Cassettes are
+synthetic — no host to be polite to — so `run_offline`/`run_live` now inject a no-wait rate limiter
+(`min_interval=0`); **real live politeness is applied on the httpx fetcher wired in L8**. Suite time
+2 min+ → **~21 s**.
+**Ran:** `tests/test_delta.py` (5): new/removed/changed + highlights; first-run-all-new; newly-published
+deadline; warm re-scan → `extractions==0` + empty delta; changed page shows in delta. Full suite →
+**174 passed** (exit 0, ~21 s). **DoD (Phase L6):** re-scan ≈0 re-extraction + honest delta. (The
+Task-Scheduler/cron recipe is documented with the CLI in L8.)
