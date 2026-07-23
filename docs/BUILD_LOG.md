@@ -248,3 +248,17 @@ the retry (now asserts `[1.5]`).
 **Ran:** pytest → **85 passed** (exit 0): retries-then-succeeds (`[1.0, 2.0]`), gives-up-after-max
 (exactly 3 waits, non-decreasing, ≤ cap, attempts=4), delays-capped (`[10,15,15]`), jitter bounded,
 and *404 is not retried*.
+
+## round M2 — warm-rescan ExtractionCache (commit pending)
+
+Edge-case row *monthly re-scan, nothing changed → ~zero re-extraction; normalised-hash cache hits*.
+
+**Built:** `model/extraction_cache.py` — `lookup`/`record` over the 4-tuple (content-hash, prompt,
+model, schema). `pipeline.run_offline` now takes an optional persistent `db_path`, hashes each page's
+normalised content, and on a cache hit **reuses the prior run's claims** — no fresh extraction, no
+duplicate claims (cost §3b-i). It also now finalises `finalized_with_open_gaps` when a target was
+blocked (D-049), appends that to the coverage line, and returns `stats {extractions, cache_hits}`.
+Export/dashboard assembly refactored into `_build_result` (shared with the resume path to come).
+**Ran:** pytest → **87 passed** (exit 0): a cold run extracts every reachable page (`cache_hits==0`);
+the warm re-scan does `extractions==0`, `cache_hits≥4`, **adds no duplicate claims**, and yields an
+identical honest export; a genuine content change **busts** the cache and re-extracts only that page.

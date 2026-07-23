@@ -24,11 +24,17 @@ import re
 from .export import dashboard as dash
 from .export import json_export as jx
 from .fetch.fetcher import Fetcher
-from .fetch.normalize import main_text
+from .fetch.normalize import content_hash, main_text
 from .fetch.snapshot import SnapshotStore
 from .fetch.transport import Transport
-from .model import claims, runs
+from .model import claims, extraction_cache as xcache, runs
 from .model.db import open_db, utcnow
+
+# ExtractionCache key parts for the deterministic signal tier (cost §3b-i). The "prompt"
+# and "model" are notional here — the point is a stable key so a warm re-scan skips work.
+PROMPT_VERSION = "det-signal-v1"
+MODEL_ID = "deterministic"
+CACHE_SCHEMA_VERSION = "1"
 
 # ── recruiting signal ─────────────────────────────────────────────────────────
 # a recruiting-related sentence (candidate signal — not a classification)
@@ -134,21 +140,31 @@ def run_offline(plan: dict, targets: list[dict], transport: Transport, snap_root
     run_id = runs.create_run(conn)
     runs.set_run_status(conn, run_id, "deep_diving")
 
+    stats = {"extractions": 0, "cache_hits": 0}
+    gaps = 0
     for t in targets:
         pid = t["id"]
         task = runs.add_task(conn, run_id, "person", pid, stage="deep_dive")
         res = fetcher.fetch(t["url"])
         if res.ok:
             html = snaps.load(res.snapshot_hash)
+            chash = content_hash(html)
+            if xcache.lookup(conn, chash, PROMPT_VERSION, MODEL_ID, CACHE_SCHEMA_VERSION):
+                # warm re-scan: this exact content was already extracted — reuse the
+                # claims from the prior run, do no work, create no duplicates (cost §3b-i).
+                stats["cache_hits"] += 1
+                runs.set_task_status(conn, task, "done")
+                continue
             src_id = claims.record_web_source(
                 conn, t["url"], snapshot_hash=res.snapshot_hash, http_status=200,
                 source_tier="official_institutional", robots_allowed=True,
             )
+            claim_ids: list[str] = []
             for field, extractor in _EXTRACTORS.items():
                 found = extractor(html)
                 if found:
                     value, quote, confidence = found
-                    claims.record_claim(
+                    rec = claims.record_claim(
                         conn, entity_kind="person", entity_id=pid, field=field,
                         value=value, quote=quote, source_id=src_id,
                         snapshot_hash=res.snapshot_hash, snapshot_html=html,
@@ -156,11 +172,16 @@ def run_offline(plan: dict, targets: list[dict], transport: Transport, snap_root
                         confidence=confidence,
                     )
                 else:
-                    claims.record_claim(
+                    rec = claims.record_claim(
                         conn, entity_kind="person", entity_id=pid, field=field,
                         state="searched_absent", source_id=src_id,
                         extractor_agent="deterministic",
                     )
+                if rec.ok:
+                    claim_ids.append(rec.claim_id)
+            xcache.record(conn, chash, PROMPT_VERSION, MODEL_ID, CACHE_SCHEMA_VERSION,
+                          claim_ids)
+            stats["extractions"] += 1
             runs.set_task_status(conn, task, "done")
         else:
             # a failed/blocked source is an honest 'blocked' state on every field —
@@ -171,9 +192,18 @@ def run_offline(plan: dict, targets: list[dict], transport: Transport, snap_root
                     state="blocked", extractor_agent="deterministic",
                 )
             runs.set_task_status(conn, task, "blocked", last_error=res.error)
+            gaps += 1
 
-    runs.set_run_status(conn, run_id, "finalized")
+    # An unreached (blocked) target is an open gap the human rung can later fill (D-049).
+    status = "finalized_with_open_gaps" if gaps else "finalized"
+    runs.set_run_status(conn, run_id, status)
 
+    result = _build_result(conn, run_id, status, targets, stats=stats, gaps=gaps)
+    return result
+
+
+def _build_result(conn, run_id, status, targets, *, stats, gaps) -> dict:
+    """Assemble the export + dashboard from the persisted claims (no fetching here)."""
     professors = [{"id": t["id"], "name": t.get("name")} for t in targets]
     claims_by_entity = {t["id"]: claims.claims_for(conn, "person", t["id"]) for t in targets}
     enumerated = len(targets)
@@ -183,12 +213,15 @@ def run_offline(plan: dict, targets: list[dict], transport: Transport, snap_root
     coverage = ("No sources returned any professors for this search — this is a coverage "
                 "gap, not a filtered result." if enumerated == 0
                 else f"{enumerated} professor(s) enumerated; none were dropped for missing data.")
+    if gaps:
+        coverage += f" {gaps} target(s) are blocked and open for the human rung."
     export = jx.build_export(
-        run_summary={"run_id": run_id, "status": "finalized",
+        run_summary={"run_id": run_id, "status": status,
                      "counts": {"enumerated": enumerated}, "coverage": coverage},
         field_descriptors=FIELD_DESCRIPTORS,
         professors=professors,
         claims_by_entity=claims_by_entity,
         generated_at=utcnow(),
     )
-    return {"run_id": run_id, "export": export, "html": dash.build_dashboard(export)}
+    return {"run_id": run_id, "export": export, "html": dash.build_dashboard(export),
+            "stats": stats}
