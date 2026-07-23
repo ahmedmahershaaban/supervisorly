@@ -17,10 +17,14 @@
 *.sqlite-wal
 .cache_tmp/
 
-# --- HTTP + API response cache ----------------------------------------------
-# Cached pages make re-runs cheap, but they are large and reproducible.
-/.cache/
-/cache/
+# --- HTTP + API response cache + page snapshots -----------------------------
+# Cached pages / snapshots hold raw personal data (real academics' pages). These are UNANCHORED
+# so a scan with a non-default --out (e.g. results/dash.html -> results/.cache/snaps/) still has
+# its snapshots ignored — the D-005 guarantee is content-based, not layout-dependent.
+.cache/
+cache/
+**/.cache/
+**/snaps/
 *.cache.sqlite
 *.cache.sqlite-journal
 

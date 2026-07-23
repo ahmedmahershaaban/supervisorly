@@ -297,9 +297,22 @@ document.addEventListener("DOMContentLoaded",function(){
 """
 
 
+def _inline_json(obj: dict) -> str:
+    """JSON for a <script> block, with every HTML-significant sequence neutralised: escape
+    every '<' (so '</script>'/'<!--'/'<script' in a value can't break out) and the JS line
+    separators U+2028/U+2029."""
+    import json as _json
+    return (_json.dumps(obj, ensure_ascii=False)
+            .replace("<", "\\u003c")
+            .replace(" ", "\\u2028")
+            .replace(" ", "\\u2029"))
+
+
 def build_dashboard(export_obj: dict) -> str:
     """Return a complete, self-contained HTML document rendering ``export_obj`` (Atlas language)."""
-    data = json.dumps(export_obj, ensure_ascii=False).replace("</", "<\\/")
+    # Inline the data safely: escape EVERY '<' (so no '</script>', '<!--' or '<script' in a value
+    # can terminate/confuse the <script> block) plus the JS line separators U+2028/U+2029.
+    data = _inline_json(export_obj)
     run = export_obj.get("run", {})
     meta = (f"run {run.get('run_id', '?')} · {run.get('status', '?')} · "
             f"generated {export_obj.get('generated_at', '?')}")

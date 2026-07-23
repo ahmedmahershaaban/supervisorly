@@ -175,6 +175,18 @@ def test_corpus_path_is_never_referenced_in_code():
 
 
 # ── no bulk-outreach path (D-024/053) ─────────────────────────────────────────
+def test_gitignore_covers_snapshots_under_any_out_path():
+    # audit (live): scan snapshots (raw academic pages = personal data) must be ignored no matter
+    # where --out points, not only under the default output/ (D-005).
+    import subprocess
+    repo = Path(__file__).resolve().parents[1]
+    for path in ("results/.cache/snaps/abc.html", "output/.cache/snaps/x.html",
+                 "anywhere/deep/.cache/snaps/y.html", "some/snaps/z.html"):
+        r = subprocess.run(["git", "check-ignore", path], cwd=repo,
+                           capture_output=True, text=True)
+        assert r.returncode == 0, f"{path} is NOT gitignored (D-005 leak risk)"
+
+
 def test_no_bulk_outreach_helpers_exist():
     banned = ("smtplib", "send_email", "send_bulk", "mailto_all", "sendmail")
     offenders = []

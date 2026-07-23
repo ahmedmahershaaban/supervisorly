@@ -53,7 +53,16 @@ def test_data_is_inlined_and_script_safe():
     exp["professors"][0]["fields"]["recruiting"]["value"] = "closing </script> soon"
     html = db.build_dashboard(exp)
     assert "</script> soon" not in html            # neutralised
-    assert "<\\/script> soon" in html
+    assert "\\u003c/script> soon" in html          # every '<' escaped as <
+
+
+def test_inlined_data_escapes_comment_and_script_open():
+    # audit (live): a value with '<!--' + '<script' must not break out of the DATA <script> block
+    exp = _export()
+    exp["professors"][0]["fields"]["recruiting"]["value"] = "use <!-- and <script here"
+    html = db.build_dashboard(exp)
+    assert "use <!-- and <script" not in html      # the raw dangerous sequence never survives
+    assert "\\u003c!-- and \\u003cscript" in html  # escaped instead
 
 
 def _deadline_export():
