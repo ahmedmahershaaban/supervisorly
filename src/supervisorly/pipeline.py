@@ -81,11 +81,22 @@ _DOMAIN_SUBJECT = re.compile(
     re.IGNORECASE)
 
 
+# A clause about money (a fee / tuition / fine / deposit due date) is NOT an application deadline
+# even when it mentions "application(s)"/"applicants" as a modifier ("the application FEE is due by…").
+_PAYMENT = re.compile(
+    r"\b(fees?|tuition|payment|deposit|fines?|rent|invoice|balance|dues|charges?|"
+    r"instal?ments?)\b", re.IGNORECASE)
+
+
 def _is_application_deadline(clause: str) -> bool:
-    """True if the clause's deadline plausibly attaches to an application (not a tuition/event one)."""
-    return bool(_STRONG_APP.search(clause)
-                or _DOMAIN_DEADLINE.search(clause)
-                or _DOMAIN_SUBJECT.search(clause))
+    """True if the clause's deadline plausibly attaches to an application (not a tuition/fee/event one).
+
+    A subject-tied domain deadline ("PhD studentship closes", "application deadline") always
+    qualifies; a bare application noun qualifies only when the clause is not about a payment.
+    """
+    if _DOMAIN_DEADLINE.search(clause) or _DOMAIN_SUBJECT.search(clause):
+        return True
+    return bool(_STRONG_APP.search(clause)) and not _PAYMENT.search(clause)
 # cue words that make a date *projected*, not a published/firm deadline (→ watch date)
 _PROJECTED = re.compile(
     r"\b(typically|usually|generally|normally|around|about|each\s+year|every\s+year|"

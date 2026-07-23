@@ -189,6 +189,29 @@ def test_domain_context_deadline_phrasings_are_recognised():
 # ── audit round 6: a domain word in a MODIFIER (not the cue's subject) is not an
 #    application deadline — tuition/registration/event deadlines that merely mention
 #    "PhD"/"program" must not be fabricated as firm application deadlines. ───────
+def test_payment_due_dates_are_not_application_deadlines():
+    # audit (live): a fee/tuition/fine/deposit date that merely mentions "application(s)"/"applicants"
+    # must NOT be emitted as a firm application deadline (D-061/D-010).
+    for sentence in (
+        "The application fee is due by 1 December 2026.",
+        "Application fees are due by 1 December 2026.",
+        "Tuition fees for applicants are due by 1 December 2026.",
+        "Library fines for applicants are due by 1 December 2026.",
+        "The application deposit is due by 1 December 2026.",
+    ):
+        assert _deadline(sentence) is None, sentence
+
+
+def test_real_application_deadlines_still_qualify_next_to_no_payment_word():
+    for sentence in (
+        "Applications are due by 1 December 2026.",
+        "The application deadline is 1 December 2026.",
+        "Apply by 1 December 2026.",
+    ):
+        iso, _, conf = _deadline(sentence)
+        assert iso == "2026-12-01" and conf == "quoted_official", sentence
+
+
 def test_domain_word_in_a_modifier_is_not_an_application_deadline():
     for sentence in (
         "Tuition and fees for the PhD program are due by 1 December 2026.",
