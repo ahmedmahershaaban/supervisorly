@@ -94,7 +94,17 @@ claims / return status, never prose). `tests/test_skill_contracts.py` guards the
 **Ran:** pytest → **44 passed**. **DoD (Phase B):** complete — contracts (MD, JSON) + SKILL + agents
 all written and validated.
 
-**Remaining phases:** E (scoring: intent-aware gates, topic-ID match, works reconciliation, D-057/58/59),
-F (dashboard: four-state HTML+JSX, deadline view), G (human-rung wiring: chrome-prompt-generator +
-md-ingester glue + roster-enumeration), H (hand-labelled cassette eval set + golden-path integration),
-I (self-run on cassettes), J (refine loop), then clean-room verify.
+## round E — scoring: intent gates, topic-ID match, works reconciliation (commit pending)
+
+**Built:** `score/scorer.py` — `gates_for`/`evaluate_eligibility` (intent-aware, D-059; only
+`quoted_official`/`derived` failing facts block — D-047; unreliable facts sort not gate — D-023),
+`topic_match` (deterministic OpenAlex topic-ID overlap, interdisciplinary-safe, D-058),
+`reconcile_works` + `score_professor` (fragmented non-Western profiles reconciled before scoring so
+they aren't wrongly dropped; disambiguation risk lowers score *confidence* not activity — D-057),
+re-weightable weights + tier bands.
+**Ran:** pytest → **49 passed**, incl DoD rows: *pre_phd not gated on PhD rules*, *fragmented
+profile reconciled not dropped*, *topic-ID interdisciplinary match*, *re-weightable*.
+
+**Remaining phases:** F (dashboard: four-state HTML+JSX, deadline view), G (orchestration glue:
+end-to-end scan on cassettes + chrome-prompt-generator + roster-enumeration), H (hand-labelled
+cassette eval set + golden-path integration), I (self-run), J (refine), then clean-room verify.
