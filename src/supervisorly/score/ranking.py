@@ -41,7 +41,10 @@ def rank_universities(professors: list[dict], plan: dict, *, weights: dict | Non
     out = []
     for inst, members in by_inst.items():
         n = len(members)
-        mean_fit = sum(f.score_total for f, _ in members) / n
+        # Roll up from INDEPENDENT axes — research fit (topic_match), recruiting, activity — NOT
+        # from score_total (which already blends recruiting+activity in), so uni_weights genuinely
+        # re-weights each signal and zeroing one axis truly isolates it (audit finding).
+        mean_fit = sum(f.components.get("topic_match", 0.0) for f, _ in members) / n
         recruiting_fraction = sum(1 for _, r in members if r >= 0.5) / n
         activity = sum(f.components.get("activity", 0.0) for f, _ in members) / n
         uni_score = (uw["fit"] * mean_fit + uw["recruiting"] * recruiting_fraction

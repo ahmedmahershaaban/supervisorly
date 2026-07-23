@@ -21,10 +21,28 @@ def test_delta_reports_new_removed_and_changed():
     d = delta.compute_delta(prev, curr)
     assert d["new_professors"] == ["Prof C"]
     assert d["removed_professors"] == ["Prof B"]
-    assert d["newly_recruiting"] == ["Prof A"]            # A went searched_absent → value
+    assert d["recruiting_changed"] == ["Prof A"]         # A's recruiting signal changed — review it
+    assert "newly_recruiting" not in d                    # never asserts "now recruiting"
     assert any(c["field"] == "recruiting_signal" and c["professor"] == "Prof A"
                for c in d["changed_fields"])
     assert d["unchanged"] is False
+
+
+def test_recruiting_highlight_is_a_review_signal_not_a_classification():
+    # audit (live): recruiting_signal is a raw candidate, not open/closed. A negative sentence
+    # appearing, or a closed->open change, is surfaced for REVIEW — never as a "now recruiting" claim.
+    neg = delta.compute_delta(
+        _export_with([{"id": "a", "name": "A", "fields": {"recruiting_signal": {"state": "searched_absent"}}}]),
+        _export_with([{"id": "a", "name": "A", "fields": {"recruiting_signal": {
+            "state": "value", "value": "I am not accepting students this year."}}}]))
+    assert neg["recruiting_changed"] == ["A"] and "newly_recruiting" not in neg
+
+    flip = delta.compute_delta(
+        _export_with([{"id": "a", "name": "A", "fields": {"recruiting_signal": {
+            "state": "value", "value": "Not currently accepting students."}}}]),
+        _export_with([{"id": "a", "name": "A", "fields": {"recruiting_signal": {
+            "state": "value", "value": "Now seeking PhD students for 2027."}}}]))
+    assert flip["recruiting_changed"] == ["A"]            # closed->open change is caught (was missed)
 
 
 def test_first_run_reports_everything_new():

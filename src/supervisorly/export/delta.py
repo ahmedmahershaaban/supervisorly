@@ -2,9 +2,10 @@
 
 A repeat/scheduled scan reuses the warm cache (≈0 re-extraction on unchanged pages, cost §3b-i);
 this computes the honest diff between the previous export and the current one so the student sees
-only what moved: **new/removed professors** and **changed fields**, with the two changes they most
-care about highlighted — *newly-open recruiting* and *newly-published deadlines*. Pure function over
-two export dicts; no fetching, no LLM.
+only what moved: **new/removed professors** and **changed fields**, with two review highlights —
+*recruiting signal changed* (any change to the raw recruiting candidate — a signal to review, **not**
+an assertion the professor is now recruiting; open/closed is the Stage-2 LLM's call) and
+*newly-published deadlines*. Pure function over two export dicts; no fetching, no LLM.
 """
 
 from __future__ import annotations
@@ -29,7 +30,7 @@ def compute_delta(previous: dict | None, current: dict) -> dict:
     removed = [_name(prev[i]) for i in prev if i not in curr]
 
     changed_fields = []
-    newly_recruiting = []
+    recruiting_changed = []
     newly_deadline = []
     for i in curr:
         if i not in prev:
@@ -41,18 +42,21 @@ def compute_delta(previous: dict | None, current: dict) -> dict:
                           "from_state": penv.get("state"), "to_state": env.get("state"),
                           "value": env.get("value")}
                 changed_fields.append(change)
-                # highlights: a field that just BECAME a value the student acts on
-                became_value = env.get("state") == "value" and penv.get("state") != "value"
-                if became_value and fid == "recruiting_signal":
-                    newly_recruiting.append(_name(curr[i]))
-                if became_value and fid == "deadline":
+                # The recruiting_signal field is a *candidate sentence*, not an open/closed
+                # classification (that's the Stage-2 LLM's job, D-009/D-021). So we flag it as a
+                # signal to REVIEW on ANY change — never assert "now recruiting" (a negative
+                # sentence like "not accepting students" must not read as newly-open).
+                if fid == "recruiting_signal":
+                    recruiting_changed.append(_name(curr[i]))
+                # a deadline DATE appearing is a concrete actionable event (a date is a date)
+                if fid == "deadline" and env.get("state") == "value" and penv.get("state") != "value":
                     newly_deadline.append({"professor": _name(curr[i]), "deadline": env.get("value")})
 
     return {
         "new_professors": new,
         "removed_professors": removed,
         "changed_fields": changed_fields,
-        "newly_recruiting": newly_recruiting,
+        "recruiting_changed": recruiting_changed,   # review these — NOT "now recruiting"
         "newly_deadline": newly_deadline,
         "unchanged": not (new or removed or changed_fields),
     }

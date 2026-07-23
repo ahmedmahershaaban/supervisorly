@@ -45,6 +45,18 @@ def test_ranking_is_reweightable():
     assert maple_fit["university_score"] != maple_rec["university_score"]
 
 
+def test_zeroing_a_uni_weight_truly_isolates_that_signal():
+    # audit (live): recruiting must not leak through mean_fit — with recruiting uni-weight 0, two
+    # institutions differing ONLY in recruiting must score identically (no double-count).
+    uw = {"fit": 0.5, "recruiting": 0.0, "activity": 0.2}
+    base = {"topic_ids": ["T1"], "works_count": 40, "evidence_count": 12}
+    hi = ranking.rank_universities(
+        [{**base, "id": "a", "institution": "X", "recruiting": 1.0}], PLAN, uni_weights=uw)
+    lo = ranking.rank_universities(
+        [{**base, "id": "b", "institution": "X", "recruiting": 0.0}], PLAN, uni_weights=uw)
+    assert hi[0]["university_score"] == lo[0]["university_score"]
+
+
 def test_sparse_university_has_lower_confidence():
     unis = ranking.rank_universities(PROFS, PLAN)
     maple = next(u for u in unis if u["institution"] == "Maple University")
