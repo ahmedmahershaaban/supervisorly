@@ -5,6 +5,7 @@ professor, do no fresh extraction, and create **no duplicate claims** — while 
 the same honest export."""
 
 from supervisorly import demo, pipeline
+from supervisorly.fetch.transport import CassetteTransport
 from supervisorly.model import claims
 from supervisorly.model.db import open_db
 
@@ -58,3 +59,25 @@ def test_changed_content_busts_the_cache(tmp_path):
     # Ada re-extracts (miss); the unchanged pages still hit cache
     assert r2["stats"]["extractions"] >= 1
     assert r2["stats"]["cache_hits"] >= 3
+
+
+def test_identical_content_across_professors_does_not_drop_the_second(tmp_path):
+    """Audit finding 7: two different professors with byte-identical pages must EACH be
+    extracted — a content-only cache key would short-circuit the second and leave it with no
+    claims, dishonestly 'never_attempted' for a page that was actually fetched."""
+    same_html = ("<html><body><main><h1>Prof</h1>"
+                 "<p>I am recruiting two PhD students for Fall 2027.</p></main></body></html>")
+    tp = CassetteTransport()
+    tp.record("https://u.edu/robots.txt", 200, "User-agent: *\nAllow: /\n")
+    tp.record("https://u.edu/people/p1", 200, same_html)
+    tp.record("https://u.edu/people/p2", 200, same_html)   # identical content, different person
+    targets = [{"id": "p1", "name": "Prof One", "url": "https://u.edu/people/p1"},
+               {"id": "p2", "name": "Prof Two", "url": "https://u.edu/people/p2"}]
+    plan = {"intent_kind": "pre_phd", "resolved_topic_ids": ["T"]}
+
+    result = pipeline.run_offline(plan, targets, tp, tmp_path / "snaps")
+    st = {p["id"]: p["fields"]["recruiting_signal"]["state"]
+          for p in result["export"]["professors"]}
+    assert st == {"p1": "value", "p2": "value"}     # neither is dropped to never_attempted
+    assert result["stats"]["extractions"] == 2      # both were actually extracted
+    assert result["stats"]["cache_hits"] == 0

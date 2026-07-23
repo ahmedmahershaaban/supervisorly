@@ -388,3 +388,14 @@ claims were stored is dropped from the re-exported dashboard/JSON — opt-out wa
 only on `run_offline`'s fetch path (D-023/D-053). **Ran:** `tests/test_optout.py::
 test_reexport_resume_path_also_honours_optout` (Ada opts out after round 1 → absent from re-export,
 name nowhere in the JSON, `opted_out == 1`) + full suite → **117 passed** (exit 0).
+
+## round T — refine: ExtractionCache keyed per-entity (finding 7) (commit pending)
+
+**Fixed (performance/honesty, medium — finding 7):** the extraction cache was keyed on content
+only, so two professors with byte-identical pages collided — the second got a cache hit, recorded
+no claims, and was dishonestly shown `never_attempted` for a page that *was* fetched (violating
+D-022/037/046). `extraction_cache` now includes `entity_kind`+`entity_id` in its UNIQUE key and
+`lookup`/`record` take the entity, so a hit means "already extracted **for this professor**". Warm
+re-scan (same entity, same content) still hits; cross-entity identical content no longer collides.
+**Ran:** `test_identical_content_across_professors_does_not_drop_the_second` (both → `value`,
+`extractions==2`) + full suite → **118 passed** (exit 0).

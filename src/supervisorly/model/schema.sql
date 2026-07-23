@@ -92,15 +92,20 @@ CREATE INDEX IF NOT EXISTS idx_checkpoint_run ON checkpoint(run_id, created_at);
 -- ── ExtractionCache (cost §3b-i) ──────────────────────────────────────────────
 -- The dominant cost lever: if the (normalised) page and the prompt are unchanged,
 -- the extraction is not re-run. The 4-tuple is the unique key.
+-- Keyed per ENTITY as well as content: two different professors whose pages happen to have
+-- identical normalised content must each be extracted (a content-only key would short-circuit
+-- the second and leave it with no claims — dishonestly 'never_attempted').
 CREATE TABLE IF NOT EXISTS extraction_cache (
   cache_id              TEXT PRIMARY KEY,
+  entity_kind           TEXT NOT NULL DEFAULT 'person',
+  entity_id             TEXT NOT NULL DEFAULT '',
   snapshot_content_hash TEXT NOT NULL,
   prompt_version        TEXT NOT NULL,
   model_id              TEXT NOT NULL,
   schema_version        TEXT NOT NULL,
   result_refs_json      TEXT NOT NULL DEFAULT '[]',  -- claim_ids this extraction produced
   created_at            TEXT NOT NULL,
-  UNIQUE (snapshot_content_hash, prompt_version, model_id, schema_version)
+  UNIQUE (entity_kind, entity_id, snapshot_content_hash, prompt_version, model_id, schema_version)
 );
 
 -- ── WebSource + Snapshot pointer ──────────────────────────────────────────────

@@ -195,7 +195,8 @@ def run_offline(plan: dict, targets: list[dict], transport: Transport, snap_root
         if res.ok:
             html = snaps.load(res.snapshot_hash)
             chash = content_hash(html)
-            if xcache.lookup(conn, chash, PROMPT_VERSION, MODEL_ID, CACHE_SCHEMA_VERSION):
+            if xcache.lookup(conn, "person", pid, chash, PROMPT_VERSION, MODEL_ID,
+                             CACHE_SCHEMA_VERSION):
                 # warm re-scan: this exact content was already extracted — reuse the
                 # claims from the prior run, do no work, create no duplicates (cost §3b-i).
                 stats["cache_hits"] += 1
@@ -225,8 +226,8 @@ def run_offline(plan: dict, targets: list[dict], transport: Transport, snap_root
                     )
                 if rec.ok:
                     claim_ids.append(rec.claim_id)
-            xcache.record(conn, chash, PROMPT_VERSION, MODEL_ID, CACHE_SCHEMA_VERSION,
-                          claim_ids)
+            xcache.record(conn, "person", pid, chash, PROMPT_VERSION, MODEL_ID,
+                          CACHE_SCHEMA_VERSION, claim_ids)
             stats["extractions"] += 1
             runs.set_task_status(conn, task, "done")
         else:

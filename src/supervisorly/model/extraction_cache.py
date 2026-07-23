@@ -16,30 +16,35 @@ import sqlite3
 from .db import new_id, utcnow
 
 
-def lookup(conn: sqlite3.Connection, content_hash: str, prompt_version: str,
-           model_id: str, schema_version: str) -> dict | None:
-    """Return the cached extraction row for this 4-tuple, or None (a cache miss)."""
+def lookup(conn: sqlite3.Connection, entity_kind: str, entity_id: str, content_hash: str,
+           prompt_version: str, model_id: str, schema_version: str) -> dict | None:
+    """Return the cached extraction row for this (entity + content + params) key, or None.
+
+    A hit means "this content was already extracted **for this entity**" — not merely that
+    the bytes were seen for someone else (see the table comment / audit finding 7).
+    """
     row = conn.execute(
-        "SELECT * FROM extraction_cache WHERE snapshot_content_hash=? AND prompt_version=? "
-        "AND model_id=? AND schema_version=?",
-        (content_hash, prompt_version, model_id, schema_version),
+        "SELECT * FROM extraction_cache WHERE entity_kind=? AND entity_id=? AND "
+        "snapshot_content_hash=? AND prompt_version=? AND model_id=? AND schema_version=?",
+        (entity_kind, entity_id, content_hash, prompt_version, model_id, schema_version),
     ).fetchone()
     return dict(row) if row else None
 
 
-def record(conn: sqlite3.Connection, content_hash: str, prompt_version: str,
-           model_id: str, schema_version: str, claim_ids: list[str]) -> str:
-    """Record that this extraction ran, pointing at the claims it produced.
+def record(conn: sqlite3.Connection, entity_kind: str, entity_id: str, content_hash: str,
+           prompt_version: str, model_id: str, schema_version: str,
+           claim_ids: list[str]) -> str:
+    """Record that this extraction ran for this entity, pointing at the claims it produced.
 
-    ``INSERT OR IGNORE`` so a concurrent/duplicate write can't violate the UNIQUE 4-tuple.
+    ``INSERT OR IGNORE`` so a concurrent/duplicate write can't violate the UNIQUE key.
     """
     cache_id = new_id("xcache")
     conn.execute(
-        "INSERT OR IGNORE INTO extraction_cache(cache_id, snapshot_content_hash, "
-        "prompt_version, model_id, schema_version, result_refs_json, created_at) "
-        "VALUES(?,?,?,?,?,?,?)",
-        (cache_id, content_hash, prompt_version, model_id, schema_version,
-         json.dumps(claim_ids), utcnow()),
+        "INSERT OR IGNORE INTO extraction_cache(cache_id, entity_kind, entity_id, "
+        "snapshot_content_hash, prompt_version, model_id, schema_version, result_refs_json, "
+        "created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+        (cache_id, entity_kind, entity_id, content_hash, prompt_version, model_id,
+         schema_version, json.dumps(claim_ids), utcnow()),
     )
     conn.commit()
     return cache_id
