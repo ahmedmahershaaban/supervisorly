@@ -121,11 +121,25 @@ clean-room verify.
 
 ---
 
-### Status at this checkpoint
-**10 rounds, 52 tests, all green.** Complete: Phase A (scaffold/schema/state machine), Phase B
-(MD + JSON contracts, SKILL.md, 5 agents), Phase C (fetch layer), Phase D1 (claim recorder /
-anti-hallucination), Phase E (scoring), Phase G1 (chrome-prompt-generator). The foundation and every
-design-sensitive seam (provenance, the human-rung handoff, the cache, the three review fixes) are
-built and tested. Remaining is the dashboard, the end-to-end orchestration glue + self-run, the
-eval set, the refine loop, and the clean-room verify — best continued in a fresh context window from
-this commit history.
+### Status at earlier checkpoint
+10 rounds, 52 tests. Foundation + contracts + fetch + provenance + scoring + human-rung emit half.
+
+## round F — self-contained dashboard (commit `12c7173`)
+`export/dashboard.py` — single-file HTML, four states distinct, no CDN/offline, script-safe. pytest → 56.
+
+## round G2+I — end-to-end pipeline + the self-run (commit pending)
+
+**Built:** `pipeline.py` `run_offline` — fetch → deterministic regex signal extraction → quote-verified
+claim → export → dashboard, no LLM / no network (cassettes). Added `claims.record_web_source` +
+`claims_for` join so claims resolve their `source_url`. `tests/test_selfrun.py` = **the self-run**
+(goal §4): a full offline scan produces a valid export with value/searched_absent/blocked across 3
+professors (nobody dropped) and a self-contained dashboard, and asserts **zero hallucinated facts**
+(every value's quote re-verified present in its snapshot).
+**Fixed (self-run caught):** value claims weren't citing a source_url → export rejected them (D-010);
+now the pipeline records a `web_source` and the claim references it.
+**Ran:** pytest → **60 passed**. **DoD Phase I:** core met — the offline self-run is green with zero
+hallucinations and the four states rendering.
+
+**Remaining:** H (broaden the eval set to ≥3 directory shapes/≥3 countries per D-063; wire `scan` into
+the CLI), roster-enumeration (D-052, minor), J (adversarial refine loop + COMPLETION_REPORT),
+clean-room verify.

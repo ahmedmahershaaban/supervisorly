@@ -94,9 +94,43 @@ def record_claim(
     return RecordResult(claim_id)
 
 
+def record_web_source(
+    conn,
+    url: str,
+    *,
+    snapshot_hash: str | None = None,
+    http_status: int | None = None,
+    source_tier: str | None = None,
+    robots_allowed: bool | None = None,
+) -> str:
+    """Record the page a claim came from; returns its source_id (claims reference this)."""
+    source_id = new_id("src")
+    conn.execute(
+        "INSERT INTO web_source(source_id, url, fetched_at, http_status, snapshot_hash, "
+        "source_tier, robots_allowed) VALUES(?,?,?,?,?,?,?)",
+        (source_id, url, utcnow(), http_status, snapshot_hash, source_tier,
+         None if robots_allowed is None else int(robots_allowed)),
+    )
+    conn.commit()
+    return source_id
+
+
 def claims_for(conn, entity_kind: str, entity_id: str) -> list[dict]:
+    import json
     rows = conn.execute(
-        "SELECT * FROM claim WHERE entity_kind=? AND entity_id=? AND superseded_by IS NULL",
+        "SELECT c.*, w.url AS source_url FROM claim c "
+        "LEFT JOIN web_source w ON c.source_id = w.source_id "
+        "WHERE c.entity_kind=? AND c.entity_id=? AND c.superseded_by IS NULL",
         (entity_kind, entity_id),
     ).fetchall()
-    return [dict(r) for r in rows]
+    out = []
+    for r in rows:
+        d = dict(r)
+        # value is stored JSON-encoded; decode to native for callers/export
+        if d.get("value") is not None:
+            try:
+                d["value"] = json.loads(d["value"])
+            except (ValueError, TypeError):
+                pass
+        out.append(d)
+    return out
