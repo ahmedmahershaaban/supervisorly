@@ -399,3 +399,14 @@ D-022/037/046). `extraction_cache` now includes `entity_kind`+`entity_id` in its
 re-scan (same entity, same content) still hits; cross-entity identical content no longer collides.
 **Ran:** `test_identical_content_across_professors_does_not_drop_the_second` (both → `value`,
 `extractions==2`) + full suite → **118 passed** (exit 0).
+
+## round U — refine: resume-without-refetch (finding 5) (commit pending)
+
+**Fixed (edge-case/cost, medium — finding 5):** `run_offline` re-fetched every target on each call,
+so the edge row *"run interrupted mid-Stage-2, resumed later → nothing re-fetched (D-029)"* was
+neither implemented nor tested. Added `runs.target_stage_done` and a `run_offline(resume=True)` path
+that **skips (does not re-fetch)** any target whose deep-dive Task is already `done` in the persisted
+DB; its claims are reused from storage, and `stats["resumed_skipped"]` records how many. **Ran:**
+`test_resume_does_not_refetch_already_completed_targets` (a counting transport proves p1/p2 are not
+re-requested on resume while a newly-added p3 is; all three present in the export) + full suite →
+**119 passed** (exit 0). **The adversarial audit's 10 findings are now all fixed with regression tests.**

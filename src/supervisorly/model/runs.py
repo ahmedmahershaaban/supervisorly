@@ -146,6 +146,22 @@ def tasks_for_run(conn: sqlite3.Connection, run_id: str) -> list[dict[str, Any]]
     return [dict(r) for r in rows]
 
 
+def target_stage_done(
+    conn: sqlite3.Connection, target_kind: str, target_ref: str, stage: str
+) -> bool:
+    """True if any prior run already completed this (target × stage).
+
+    The basis of resume-without-refetch (D-029): a target whose deep-dive Task is ``done``
+    in the persisted state is not fetched again — its claims are already stored.
+    """
+    row = conn.execute(
+        "SELECT 1 FROM task WHERE target_kind=? AND target_ref=? AND stage=? "
+        "AND status='done' LIMIT 1",
+        (target_kind, target_ref, stage),
+    ).fetchone()
+    return row is not None
+
+
 # ── Checkpoint ────────────────────────────────────────────────────────────────
 def save_checkpoint(
     conn: sqlite3.Connection, run_id: str, stage: str, cursor: str | None = None

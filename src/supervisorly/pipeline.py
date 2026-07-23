@@ -168,12 +168,14 @@ _EXTRACTORS = {
 
 
 def run_offline(plan: dict, targets: list[dict], transport: Transport, snap_root,
-                *, db_path=None, optout_path=None) -> dict:
+                *, db_path=None, optout_path=None, resume=False) -> dict:
     """Run a deterministic scan over ``targets`` (each {id, name, url}) using cassettes.
 
     Returns {run_id, export, html}. The run always finalises with a dashboard — it never
     blocks on the human rung (D-049). Pass ``db_path`` to persist the store across runs
-    (used by the warm-cache path); ``optout_path`` to enforce the suppression list (D-023)."""
+    (used by the warm-cache path); ``optout_path`` to enforce the suppression list (D-023);
+    ``resume=True`` to skip (not re-fetch) any target already deep-dived in a prior run whose
+    state persists in ``db_path`` (D-029)."""
     conn = open_db(db_path) if db_path is not None else open_db()
     snaps = SnapshotStore(snap_root)
     # Offline cassettes never rate-limit us, so any retry needn't actually sleep.
@@ -186,10 +188,15 @@ def run_offline(plan: dict, targets: list[dict], transport: Transport, snap_root
     run_id = runs.create_run(conn)
     runs.set_run_status(conn, run_id, "deep_diving")
 
-    stats = {"extractions": 0, "cache_hits": 0, "opted_out": opted_out}
+    stats = {"extractions": 0, "cache_hits": 0, "opted_out": opted_out, "resumed_skipped": 0}
     gaps = 0
     for t in targets:
         pid = t["id"]
+        # Resume: a target already deep-dived in a prior run is not re-fetched — its claims
+        # are already persisted. This is what makes an interrupted scan cheap to finish (D-029).
+        if resume and runs.target_stage_done(conn, "person", pid, "deep_dive"):
+            stats["resumed_skipped"] += 1
+            continue
         task = runs.add_task(conn, run_id, "person", pid, stage="deep_dive")
         res = fetcher.fetch(t["url"])
         if res.ok:

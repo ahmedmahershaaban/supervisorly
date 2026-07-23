@@ -4,6 +4,7 @@ The blocked professor is never dropped; the human answer supersedes the blocked 
 
 from supervisorly import demo, ingest, pipeline
 from supervisorly.export import json_export as jx
+from supervisorly.fetch.transport import CassetteTransport
 from supervisorly.model.db import open_db
 
 # The student's Phase-3 return for the robots-blocked professor (retrieved by hand in a
@@ -27,14 +28,18 @@ note: no deadline mentioned on the profile
 
 
 class CountingTransport:
-    """Wraps the demo cassette transport and counts every network-ish get()."""
+    """Wraps a cassette transport and records every network-ish get()."""
 
     def __init__(self, inner):
         self._inner = inner
-        self.calls = 0
+        self.urls = []
+
+    @property
+    def calls(self):
+        return len(self.urls)
 
     def get(self, url):
-        self.calls += 1
+        self.urls.append(url)
         return self._inner.get(url)
 
     def record(self, *a, **k):
@@ -93,3 +98,41 @@ def test_md_return_fills_gaps_and_reexports_without_refetching(tmp_path):
     # the other professors are unchanged (re-exported from the same claims)
     ada = next(p for p in re["export"]["professors"] if p["id"] == "ada")
     assert ada["fields"]["recruiting_signal"]["state"] == "value"
+
+
+def _page(who):
+    return (f"<html><body><main><p>{who} is recruiting PhD students for 2027.</p>"
+            "</main></body></html>")
+
+
+def test_resume_does_not_refetch_already_completed_targets(tmp_path):
+    """Edge (D-029): an interrupted scan, resumed later, resumes from Task state and does not
+    re-fetch targets already completed — only the remaining ones hit the network."""
+    inner = CassetteTransport()
+    inner.record("https://u.edu/robots.txt", 200, "User-agent: *\nAllow: /\n")
+    for who in ("p1", "p2", "p3"):
+        inner.record(f"https://u.edu/people/{who}", 200, _page(who))
+    tp = CountingTransport(inner)
+    db = tmp_path / "run.sqlite"
+    snaps = tmp_path / "snaps"
+    plan = {"intent_kind": "pre_phd", "resolved_topic_ids": ["T"]}
+    t = lambda who: {"id": who, "name": who, "url": f"https://u.edu/people/{who}"}
+
+    # first pass completes p1 and p2
+    pipeline.run_offline(plan, [t("p1"), t("p2")], tp, snaps, db_path=db)
+
+    # resume with an added p3 — completed targets must not be re-requested
+    mark = len(tp.urls)
+    r2 = pipeline.run_offline(plan, [t("p1"), t("p2"), t("p3")], tp, snaps,
+                              db_path=db, resume=True)
+    fetched_on_resume = tp.urls[mark:]
+
+    assert "https://u.edu/people/p1" not in fetched_on_resume   # not re-fetched
+    assert "https://u.edu/people/p2" not in fetched_on_resume
+    assert "https://u.edu/people/p3" in fetched_on_resume       # the new one IS fetched
+    assert r2["stats"]["resumed_skipped"] == 2
+    # all three are present in the final export (completed ones from persisted claims)
+    ids = {p["id"] for p in r2["export"]["professors"]}
+    assert ids == {"p1", "p2", "p3"}
+    assert all(p["fields"]["recruiting_signal"]["state"] == "value"
+               for p in r2["export"]["professors"])
