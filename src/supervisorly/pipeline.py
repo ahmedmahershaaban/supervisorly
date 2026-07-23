@@ -87,8 +87,10 @@ _APP_SUBJECT = re.compile(
 
 # A clause about money (a fee / tuition / fine / deposit due date) is NOT an application deadline
 # even when it mentions "application(s)"/"applicants" as a modifier ("the application FEE is due by…").
-_PAYMENT_NOUNS = (r"fees?|tuition|payment|deposit|fines?|rent|invoice|balance|dues|charges?|"
-                  r"instal?ments?")
+# NB: keep every noun plural-tolerant (``deposits``/``payments``/…) — a bare ``deposit`` would let
+# "Deposits for PhD applicants are due 1 Dec" bypass the payment exclusion (live probe, L9i).
+_PAYMENT_NOUNS = (r"fees?|tuitions?|payments?|deposits?|fines?|rents?|invoices?|balances?|dues|"
+                  r"charges?|instal?ments?")
 _PAYMENT = re.compile(rf"\b(?:{_PAYMENT_NOUNS})\b", re.IGNORECASE)
 # The MONEY is what's actually "due" — a payment noun HEADS the phrase, governing the subject via a
 # "for/of <domain>" modifier ("the deposit FOR PhD studentships is due", "tuition FOR the postdoc

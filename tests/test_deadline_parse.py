@@ -198,6 +198,9 @@ def test_payment_due_dates_are_not_application_deadlines():
         "Tuition fees for applicants are due by 1 December 2026.",
         "Library fines for applicants are due by 1 December 2026.",
         "The application deposit is due by 1 December 2026.",
+        # plural payment nouns must be excluded too (live probe L9i: bare "deposit" missed "Deposits")
+        "Deposits for PhD applicants are due 1 December 2026.",
+        "Payments for applicants are due by 1 December 2026.",
     ):
         assert _deadline(sentence) is None, sentence
 
