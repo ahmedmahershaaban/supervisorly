@@ -10,7 +10,12 @@
 # --- Scan output: generated per-run, contains personal data -----------------
 /output/
 /runs/
-*.profscout-run/
+*.supervisorly-run/
+# SQLite is the source of truth but is per-run and holds personal data — never commit (D-005)
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+.cache_tmp/
 
 # --- HTTP + API response cache ----------------------------------------------
 # Cached pages make re-runs cheap, but they are large and reproducible.
