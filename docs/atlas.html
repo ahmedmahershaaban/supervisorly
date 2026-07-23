@@ -1,0 +1,826 @@
+<title>Supervisorly — Design Atlas</title>
+<style>
+  /* ============================================================
+     A committed NEUTRAL-DARK "technical atlas" identity.
+     Charcoal grounds (not navy), a warm gold accent (not blue),
+     and dark diagram panels with light text so the maps read
+     cleanly against the dark page. Deliberately single-theme.
+     ============================================================ */
+  :root {
+    --bg:            #0c0d10;
+    --bg-grid:       #17181e;
+    --surface:       #15161a;
+    --surface-2:     #1a1c21;
+    --sidebar:       #0f1014;
+    --ink:           #e9eaed;
+    --ink-soft:      #c3c5cc;
+    --muted:         #8a8d96;
+    --hairline:      #282a31;
+    --hairline-soft: #1d1f24;
+    --accent:        #d9a441;   /* warm gold — the "not blue" */
+    --accent-ink:    #ecc271;
+    --accent-wash:   #241d10;
+    --shadow:        0 1px 2px rgba(0,0,0,.5), 0 18px 44px -16px rgba(0,0,0,.7);
+    --shadow-panel:  0 1px 3px rgba(0,0,0,.55), 0 28px 66px -24px rgba(0,0,0,.8);
+    /* diagram panel — dark, with a defined edge */
+    --panel:        #16181d;
+    --panel-2:      #14161b;
+    --panel-border: #2c2f38;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", "Roboto Mono", Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: var(--sans); line-height: 1.6;
+    -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
+  }
+  a { color: var(--accent-ink); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .progress { position: fixed; top: 0; left: 0; height: 3px; width: 0%; background: var(--accent); z-index: 60; transition: width .1s linear; }
+
+  .shell { display: grid; grid-template-columns: 288px minmax(0,1fr); min-height: 100vh; }
+
+  /* ---------- sidebar ---------- */
+  .sidebar {
+    position: sticky; top: 0; align-self: start; height: 100vh; overflow-y: auto;
+    background: var(--sidebar); border-right: 1px solid var(--hairline);
+    padding: 26px 22px; display: flex; flex-direction: column; gap: 22px;
+  }
+  .brand { display: flex; align-items: center; gap: 11px; }
+  .brand .glyph {
+    width: 34px; height: 34px; border-radius: 9px; flex: none;
+    background: linear-gradient(150deg, var(--accent), #a9761f);
+    display: grid; place-items: center; color: #1a1204; font-weight: 850; font-size: 17px;
+    box-shadow: var(--shadow);
+  }
+  .brand .name { font-weight: 800; letter-spacing: -.02em; font-size: 15.5px; }
+  .brand .sub { font-family: var(--mono); font-size: 10.5px; color: var(--muted); letter-spacing: .08em; text-transform: uppercase; }
+
+  .nav-label { font-family: var(--mono); font-size: 10px; letter-spacing: .16em; text-transform: uppercase; color: var(--muted); padding: 0 8px; }
+  nav { display: flex; flex-direction: column; gap: 2px; }
+  nav a {
+    display: flex; align-items: baseline; gap: 10px; padding: 8px 10px; border-radius: 8px;
+    color: var(--ink-soft); font-size: 13.5px; font-weight: 500;
+    transition: background .15s, color .15s;
+  }
+  nav a .idx { font-family: var(--mono); font-size: 10.5px; color: var(--muted); min-width: 15px; }
+  nav a:hover { background: var(--surface-2); color: var(--ink); text-decoration: none; }
+  nav a.active { background: var(--accent-wash); color: var(--accent-ink); font-weight: 650; }
+  nav a.active .idx { color: var(--accent); }
+
+  .legend { border-top: 1px solid var(--hairline); padding-top: 16px; display: flex; flex-direction: column; gap: 9px; }
+  .legend .row { display: flex; align-items: center; gap: 9px; font-size: 12px; color: var(--ink-soft); }
+  .legend .sw { width: 13px; height: 13px; border-radius: 4px; flex: none; border: 1.5px solid; }
+  .sw.tool     { background:#182338; border-color:#5f8fd9; }
+  .sw.verified { background:#12281d; border-color:#4bbd7f; }
+  .sw.human    { background:#2c1620; border-color:#e06a83; }
+  .sw.store    { background:#2a2110; border-color:#d9a441; }
+  .sw.gate     { background:#0f2723; border-color:#3fbdad; }
+  .sw.skip     { background:#20222a; border-color:#8b8f9b; }
+
+  /* ---------- main ---------- */
+  main { min-width: 0; }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 0 40px 100px; }
+
+  .hero {
+    position: relative; padding: 92px 40px 48px; overflow: hidden;
+    border-bottom: 1px solid var(--hairline);
+    background:
+      linear-gradient(var(--bg-grid) 1px, transparent 1px) 0 0 / 34px 34px,
+      linear-gradient(90deg, var(--bg-grid) 1px, transparent 1px) 0 0 / 34px 34px,
+      var(--bg);
+  }
+  .hero::after {
+    content: ""; position: absolute; inset: 0;
+    background: radial-gradient(120% 100% at 20% -10%, transparent 38%, var(--bg) 76%);
+    pointer-events: none;
+  }
+  .hero-inner { position: relative; max-width: 980px; margin: 0 auto; }
+  .eyebrow { font-family: var(--mono); font-size: 11.5px; letter-spacing: .2em; text-transform: uppercase; color: var(--accent); }
+  .hero h1 { font-size: clamp(30px, 4.6vw, 50px); line-height: 1.04; letter-spacing: -.035em; font-weight: 820; margin: 14px 0 0; text-wrap: balance; max-width: 15ch; }
+  .hero p { color: var(--ink-soft); font-size: 17px; max-width: 62ch; margin: 18px 0 0; }
+  .meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 26px; }
+  .chip { font-family: var(--mono); font-size: 11px; letter-spacing: .02em; color: var(--ink-soft); background: var(--surface); border: 1px solid var(--hairline); border-radius: 999px; padding: 6px 12px; }
+  .chip b { color: var(--accent-ink); font-weight: 700; }
+
+  section.map { scroll-margin-top: 20px; padding-top: 62px; }
+  .map-head { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+  .map-code { font-family: var(--mono); font-size: 12px; letter-spacing: .14em; color: var(--accent); font-weight: 600; }
+  .map h2 { font-size: 25px; letter-spacing: -.025em; font-weight: 780; margin: 0; }
+  .map .purpose { color: var(--ink-soft); font-size: 15.5px; margin: 12px 0 22px; max-width: 68ch; }
+
+  .diagram {
+    position: relative; background: var(--panel); border: 1px solid var(--panel-border);
+    border-radius: 14px; padding: 26px 22px; box-shadow: var(--shadow-panel);
+    overflow-x: auto;
+  }
+  .diagram .expand {
+    position: absolute; top: 12px; right: 12px; z-index: 2; cursor: pointer;
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase;
+    color: var(--ink-soft); background: rgba(20,22,27,.86); border: 1px solid var(--panel-border);
+    border-radius: 7px; padding: 5px 9px; opacity: 0; transition: opacity .15s; pointer-events: auto;
+  }
+  .diagram:hover .expand { opacity: 1; }
+  .diagram .expand:hover { color: var(--accent-ink); border-color: var(--accent); }
+  .diagram .mermaid { display: flex; justify-content: center; min-height: 40px; }
+  .diagram .mermaid svg { max-width: 100%; height: auto; }
+  /* clickable nodes — feel like cards, not selectable text */
+  .diagram .mermaid, .lightbox .stage { -webkit-user-select: none; user-select: none; }
+  .diagram .mermaid svg, .lightbox .stage svg { cursor: default; }
+  .diagram .mermaid .node, .diagram .mermaid .node *,
+  .diagram .mermaid g[class*="cluster"], .diagram .mermaid g[class*="cluster"] *,
+  .lightbox .stage .node, .lightbox .stage .node *,
+  .lightbox .stage g[class*="cluster"], .lightbox .stage g[class*="cluster"] * { cursor: pointer; }
+  /* hover lift — signals "this is a card you can click" */
+  .diagram .mermaid .node:hover rect, .diagram .mermaid .node:hover polygon,
+  .diagram .mermaid .node:hover circle, .diagram .mermaid .node:hover path,
+  .lightbox .stage .node:hover rect, .lightbox .stage .node:hover polygon,
+  .lightbox .stage .node:hover circle, .lightbox .stage .node:hover path {
+    filter: brightness(1.16); transition: filter .12s;
+  }
+  /* selected node */
+  .diagram .mermaid .node.hot rect, .diagram .mermaid .node.hot polygon,
+  .diagram .mermaid .node.hot circle, .diagram .mermaid .node.hot path,
+  .lightbox .stage .node.hot rect, .lightbox .stage .node.hot polygon,
+  .lightbox .stage .node.hot circle, .lightbox .stage .node.hot path {
+    filter: drop-shadow(0 0 5px var(--accent));
+  }
+  .hint { margin-top: 11px; font-family: var(--mono); font-size: 10.5px; letter-spacing: .05em; color: var(--muted); text-transform: uppercase; }
+  .hint b { color: var(--accent); }
+
+  .caption { display: flex; align-items: flex-start; gap: 12px; margin-top: 16px; font-size: 13.5px; color: var(--muted); }
+  .caption .key { font-family: var(--mono); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--accent); flex: none; padding-top: 3px; }
+  .caption .refs { font-family: var(--mono); font-size: 11px; color: var(--ink-soft); }
+
+  footer { max-width: 980px; margin: 0 auto; padding: 60px 40px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--hairline); }
+
+  .lightbox { position: fixed; inset: 0; z-index: 80; display: none; background: rgba(0,0,0,.8); backdrop-filter: blur(3px); padding: 4vh 4vw; }
+  .lightbox.open { display: grid; place-items: center; }
+  .lightbox .stage { background: var(--panel); border: 1px solid var(--panel-border); border-radius: 14px; padding: 30px; max-width: 96vw; max-height: 92vh; overflow: auto; box-shadow: var(--shadow-panel); }
+  .lightbox .stage svg { width: 100%; height: auto; }
+  .lightbox .close { position: fixed; top: 20px; right: 24px; font-family: var(--mono); font-size: 12px; color: var(--ink); background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.22); border-radius: 8px; padding: 8px 13px; cursor: pointer; }
+  .lightbox .close:hover { background: rgba(255,255,255,.16); }
+
+  /* detail drawer */
+  .drawer {
+    position: fixed; top: 0; right: 0; height: 100vh; width: 420px; max-width: 92vw; z-index: 90;
+    background: var(--surface); border-left: 1px solid var(--hairline);
+    box-shadow: -24px 0 60px -24px rgba(0,0,0,.8);
+    transform: translateX(105%); transition: transform .28s cubic-bezier(.2,.7,.2,1);
+    display: flex; flex-direction: column;
+  }
+  @media (prefers-reduced-motion: reduce) { .drawer { transition: none; } }
+  .drawer.open { transform: none; }
+  .drawer .dhead { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 24px 24px 16px; border-bottom: 1px solid var(--hairline); }
+  .drawer .kicker { font-family: var(--mono); font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--accent); }
+  .drawer h3 { margin: 8px 0 0; font-size: 19px; letter-spacing: -.02em; font-weight: 780; }
+  .drawer .dclose { flex: none; cursor: pointer; background: var(--surface-2); color: var(--ink-soft); border: 1px solid var(--hairline); border-radius: 8px; width: 32px; height: 32px; font-size: 15px; }
+  .drawer .dclose:hover { color: var(--accent-ink); border-color: var(--accent); }
+  .drawer .dbody { padding: 20px 24px 32px; overflow-y: auto; }
+  .drawer .dbody p { margin: 0 0 16px; color: var(--ink-soft); font-size: 14.5px; }
+  .drawer .dsub { font-family: var(--mono); font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin: 6px 0 10px; }
+  .drawer .dlist { display: flex; flex-direction: column; gap: 8px; }
+
+  .dchip {
+    display: inline-flex; align-items: center; gap: 7px; cursor: pointer; text-align: left;
+    font-family: var(--mono); font-size: 12px; color: var(--ink-soft);
+    background: var(--surface-2); border: 1px solid var(--hairline); border-radius: 8px;
+    padding: 8px 11px; transition: border-color .14s, color .14s;
+  }
+  .dchip:hover { border-color: var(--accent); color: var(--accent-ink); }
+  .dchip .code { color: var(--accent); font-weight: 600; flex: none; }
+  .dchip .txt { color: var(--ink-soft); font-family: var(--sans); font-size: 12.5px; }
+  .refs .dchip { padding: 3px 8px; margin: 0 2px; }
+  .scrim { position: fixed; inset: 0; z-index: 85; background: rgba(0,0,0,.4); opacity: 0; pointer-events: none; transition: opacity .28s; }
+  .scrim.on { opacity: 1; pointer-events: auto; }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .hero-inner > * { animation: rise .6s cubic-bezier(.2,.7,.2,1) both; }
+    .hero-inner > *:nth-child(2){ animation-delay:.05s } .hero-inner > *:nth-child(3){ animation-delay:.1s } .hero-inner > *:nth-child(4){ animation-delay:.15s }
+    @keyframes rise { from { opacity:0; transform: translateY(12px);} to { opacity:1; transform:none; } }
+  }
+
+  @media (max-width: 900px) {
+    .shell { grid-template-columns: 1fr; }
+    .sidebar { position: static; height: auto; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 14px 18px; }
+    .sidebar nav { flex-direction: row; flex-wrap: wrap; }
+    .nav-label, .legend { display: none; }
+    .hero, .wrap, footer { padding-left: 22px; padding-right: 22px; }
+  }
+</style>
+
+<div class="progress" id="progress"></div>
+
+<div class="shell">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="glyph">S</div>
+      <div>
+        <div class="name">Supervisorly</div>
+        <div class="sub">Design Atlas</div>
+      </div>
+    </div>
+
+    <div>
+      <div class="nav-label">Nine maps</div>
+      <nav id="nav">
+        <a href="#context"><span class="idx">01</span> Context</a>
+        <a href="#components"><span class="idx">02</span> Components</a>
+        <a href="#pipeline"><span class="idx">03</span> Pipeline</a>
+        <a href="#fetch"><span class="idx">04</span> Fetch &amp; human rung</a>
+        <a href="#sources"><span class="idx">05</span> Sources</a>
+        <a href="#data"><span class="idx">06</span> Data model</a>
+        <a href="#provenance"><span class="idx">07</span> Provenance</a>
+        <a href="#rules"><span class="idx">08</span> Rules</a>
+        <a href="#decisions"><span class="idx">09</span> Decisions</a>
+      </nav>
+    </div>
+
+    <div class="legend">
+      <div class="row"><span class="sw tool"></span> Tool does it automatically</div>
+      <div class="row"><span class="sw verified"></span> Verified / reliable</div>
+      <div class="row"><span class="sw human"></span> Human rung — your browser</div>
+      <div class="row"><span class="sw store"></span> Data store / orchestrator</div>
+      <div class="row"><span class="sw gate"></span> Rule / enforcement gate</div>
+      <div class="row"><span class="sw skip"></span> Skipped on purpose</div>
+    </div>
+  </aside>
+
+  <main>
+    <header class="hero">
+      <div class="hero-inner">
+        <div class="eyebrow">Architecture bible · 56 decisions · 31 entities</div>
+        <h1>Everything, connected.</h1>
+        <p>One place that ties together the skill, its agents and tools, the pipeline, the three-phase fetch with its human rung, the data model, how a value becomes a trusted claim, and where every rule bites. Click any diagram to open it full-size.</p>
+        <div class="meta">
+          <span class="chip"><b>Skill-first</b> · runs in Claude Code</span>
+          <span class="chip"><b>Any country</b> · generated, not looked up</span>
+          <span class="chip"><b>Evidence</b> · every field is a cited claim</span>
+        </div>
+        <div class="hint">Interactive · <b>click any node</b> in a diagram for its role and governing decisions · <b>Expand ⤢</b> to open full-size</div>
+      </div>
+    </header>
+
+    <div class="wrap">
+
+      <section class="map" id="context">
+        <div class="map-head"><span class="map-code">MAP 01</span><h2>Context — the boundary of the tool</h2></div>
+        <p class="purpose">What Supervisorly is, and where the line runs between what the tool does and what your own browser does.</p>
+        <div class="diagram"><span class="expand">Expand ⤢</span>
+<pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif,system-ui,sans-serif','fontSize':'14px','background':'#16181d','primaryColor':'#20232b','primaryTextColor':'#e9eaed','primaryBorderColor':'#d9a441','lineColor':'#858994','secondaryColor':'#1b1e25','tertiaryColor':'#181a20','clusterBkg':'#131519','clusterBorder':'#31353f','edgeLabelBackground':'#16181d','textColor':'#d0d2d8'}}}%%
+flowchart LR
+  S["Student"]
+  subgraph CC["Claude Code"]
+    SK["Supervisorly skill<br/>SKILL.md + agents + tools"]
+  end
+  S -->|"country · field · subfield<br/>need · universities"| SK
+  subgraph TR["Tool fetches directly"]
+    API["Structured sources<br/>OpenAlex · ROR · CRIS<br/>sitemaps · JSON-LD"]
+    PUB["Professor's own pages<br/>homepage · openings · lab News"]
+    SOC["Open-API social<br/>Bluesky · Mastodon · GitHub"]
+  end
+  subgraph HR["Human rung — your own browser"]
+    CFC["Claude for Chrome"]
+    GATED["Walled<br/>X/Twitter · LinkedIn · Scholar"]
+    CFC --> GATED
+  end
+  SK --> API
+  SK --> PUB
+  SK --> SOC
+  SK -.->|"generates MD prompt"| CFC
+  CFC -.->|"returns MD files"| SK
+  subgraph OUT["Outputs — local, never committed"]
+    DB["SQLite<br/>source of truth"]
+    JSON["JSON export"]
+    DASH["Dashboard<br/>HTML + JSX"]
+  end
+  SK --> DB --> JSON --> DASH
+  DASH <-->|"ask · edit UI"| SKQ["Your Claude session"]
+  classDef tool fill:#182338,stroke:#5f8fd9,color:#cfe0ff;
+  classDef human fill:#2c1620,stroke:#e06a83,color:#ffd0da;
+  classDef store fill:#2a2110,stroke:#d9a441,color:#f4dfa8;
+  class API,PUB,SOC tool
+  class CFC,GATED human
+  class DB,JSON,DASH store
+</pre>
+        </div>
+        <div class="caption"><span class="key">Governs</span><span class="refs">architecture.md · D-039 · D-042 · D-044 — the tool reads public sources; the human reads everything walled.</span></div>
+      </section>
+
+      <section class="map" id="components">
+        <div class="map-head"><span class="map-code">MAP 02</span><h2>Components — skill, tools, and agents</h2></div>
+        <p class="purpose">The orchestrator (Claude) interprets intent and generates queries inline, producing a SearchPlan the deterministic tools consume. Agents run only where judgement is genuinely needed.</p>
+        <div class="diagram"><span class="expand">Expand ⤢</span>
+<pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif,system-ui,sans-serif','fontSize':'14px','background':'#16181d','primaryColor':'#20232b','primaryTextColor':'#e9eaed','primaryBorderColor':'#d9a441','lineColor':'#858994','secondaryColor':'#1b1e25','tertiaryColor':'#181a20','clusterBkg':'#131519','clusterBorder':'#31353f','edgeLabelBackground':'#16181d','textColor':'#d0d2d8'}}}%%
+flowchart TD
+  subgraph ORCH["Orchestrator — Claude, inline (SKILL.md)"]
+    SK["run state · budget · tier gating"]
+    INT["interpret intent<br/>+ generate queries"]
+    PLAN["SearchPlan"]
+    INT --> PLAN
+  end
+  subgraph TOOLS["Tools — deterministic, no LLM"]
+    D["discovery-ladder"]
+    FE["fetcher — 3 phases"]
+    DD["deep-dive collector"]
+    GQ["gap-queue"]
+    CP["chrome-prompt-generator"]
+    MI["md-ingester"]
+    SCR["scorer — gates + weights"]
+    EXP["exporter — JSON + HTML"]
+  end
+  subgraph AGENTS["Agents — LLM judgement only"]
+    A1["recruiting-analyst"]
+    A2["eligibility-analyst"]
+    A3["profile-synthesist"]
+    A4["evidence-auditor"]
+    A5["adapter-author"]
+  end
+  SK --> INT
+  PLAN --> D --> FE --> DD --> GQ --> CP --> MI
+  MI -.->|"resume"| DD
+  SK --> SCR --> EXP
+  DD -->|"classify state"| A1
+  DD -->|"admissions/funding"| A2
+  DD -->|"narrative"| A3
+  D -.->|"on failed fetch"| A5
+  SCR -->|"sample claims"| A4
+  classDef tool fill:#182338,stroke:#5f8fd9,color:#cfe0ff;
+  classDef agent fill:#12281d,stroke:#4bbd7f,color:#c5f0d6;
+  classDef orch fill:#2a2110,stroke:#d9a441,color:#f4dfa8;
+  class D,FE,DD,GQ,CP,MI,SCR,EXP tool
+  class A1,A2,A3,A4,A5 agent
+  class SK,INT,PLAN orch
+</pre>
+        </div>
+        <div class="caption"><span class="key">Governs</span><span class="refs">architecture.md §4 · D-042 · D-045 · D-055 — workers return a task id and status, never prose.</span></div>
+      </section>
+
+      <section class="map" id="pipeline">
+        <div class="map-head"><span class="map-code">MAP 03</span><h2>Pipeline — the student's journey</h2></div>
+        <p class="purpose">Intent is understood before anything is searched. The shortlist forms on research fit — cheaply available — not on recruiting status, which only exists after the deep dive.</p>
+        <div class="diagram"><span class="expand">Expand ⤢</span>
+<pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif,system-ui,sans-serif','fontSize':'14px','background':'#16181d','primaryColor':'#20232b','primaryTextColor':'#e9eaed','primaryBorderColor':'#d9a441','lineColor':'#858994','secondaryColor':'#1b1e25','tertiaryColor':'#181a20','clusterBkg':'#131519','clusterBorder':'#31353f','edgeLabelBackground':'#16181d','textColor':'#d0d2d8'}}}%%
+flowchart TD
+  ST0["Stage 0 — interpret intent<br/>understand the purpose, build a plan"]
+  CONF{"student confirms<br/>the plan?"}
+  ST1["Stage 1 — full roster (all ~400)<br/>find dept page · else search for it<br/>links to everything"]
+  T1["signal tier (all)<br/>1 cached page · regex · no LLM"]
+  SHORT["shortlist gate<br/>~40 on research fit"]
+  ST2["Stage 2 — deep dive (shortlist)<br/>papers · availability · contact · people"]
+  ST3["Stage 3 — gap-fill<br/>3-phase fetch ladder"]
+  ST4["Stage 4 — people around the professor<br/>public links · sortable"]
+  SC["score — gates + weights"]
+  DASH["dashboard + JSON"]
+  ST0 --> CONF
+  CONF -->|"yes"| ST1
+  CONF -->|"refine"| ST0
+  ST1 --> T1 --> SHORT --> ST2 --> ST3 --> ST4 --> SC --> DASH
+  classDef tool fill:#182338,stroke:#5f8fd9,color:#cfe0ff;
+  classDef store fill:#2a2110,stroke:#d9a441,color:#f4dfa8;
+  class ST0,ST1,T1,SHORT,ST2,ST3,ST4,SC tool
+  class DASH store
+</pre>
+        </div>
+        <div class="caption"><span class="key">Governs</span><span class="refs">product-flow.md · D-021 · D-022 · D-037 · D-056 — "never dropped" is display; "deep-dive" is the shortlist.</span></div>
+      </section>
+
+      <section class="map" id="fetch">
+        <div class="map-head"><span class="map-code">MAP 04</span><h2>Fetch — three phases and the human rung</h2></div>
+        <p class="purpose">Each phase runs across the target set, marks its failures, and hands only the residual to the next. Phase 3 is your original Chrome-extension method, turned into the tool's escape hatch.</p>
+        <div class="diagram"><span class="expand">Expand ⤢</span>
+<pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif,system-ui,sans-serif','fontSize':'14px','background':'#16181d','primaryColor':'#20232b','primaryTextColor':'#e9eaed','primaryBorderColor':'#d9a441','lineColor':'#858994','secondaryColor':'#1b1e25','tertiaryColor':'#181a20','clusterBkg':'#131519','clusterBorder':'#31353f','edgeLabelBackground':'#16181d','textColor':'#d0d2d8'}}}%%
+flowchart TD
+  G["gap: an entity + field to fill"]
+  P1["Phase 1 — structured sources<br/>API · CRIS · sitemap · JSON-LD"]
+  P1OK{"resolved?"}
+  P2["Phase 2 — automated browse<br/>the marked pages"]
+  P2OK{"resolved?"}
+  P3["Phase 3 — generate MD prompt<br/>for the residual gaps"]
+  HUMAN["You run it in Claude for Chrome<br/>own logged-in session"]
+  MD["returns MD files<br/>value · source · date · quote"]
+  INGEST["md-ingester → Claim<br/>extractor = human-assisted"]
+  P3OK{"found?"}
+  CLAIM["Claim stored, run resumes"]
+  NONE["'we looked, found nothing'<br/>professor still shown"]
+  G --> P1 --> P1OK
+  P1OK -->|"yes"| CLAIM
+  P1OK -->|"404 / error → mark"| P2 --> P2OK
+  P2OK -->|"yes"| CLAIM
+  P2OK -->|"still blocked → mark"| P3 --> HUMAN --> MD --> INGEST --> P3OK
+  P3OK -->|"yes"| CLAIM
+  P3OK -->|"no"| NONE
+  classDef tool fill:#182338,stroke:#5f8fd9,color:#cfe0ff;
+  classDef human fill:#2c1620,stroke:#e06a83,color:#ffd0da;
+  classDef store fill:#2a2110,stroke:#d9a441,color:#f4dfa8;
+  classDef skip fill:#20222a,stroke:#8b8f9b,color:#c3c6cd;
+  class P1,P2,P3,INGEST tool
+  class HUMAN,MD human
+  class CLAIM store
+  class NONE skip
+</pre>
+        </div>
+        <div class="caption"><span class="key">Governs</span><span class="refs">architecture.md §2 · D-039 · D-043 · D-049 — the dashboard is generated after Phase 2; it never waits on the human.</span></div>
+      </section>
+
+      <section class="map" id="sources">
+        <div class="map-head"><span class="map-code">MAP 05</span><h2>Sources — where recruiting signal comes from</h2></div>
+        <p class="purpose">Verified 2026-07-23. Recruiting status lives in prose on the professor's own channels. Everything reachable feeds one generated recruiting-signal read.</p>
+        <div class="diagram"><span class="expand">Expand ⤢</span>
+<pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif,system-ui,sans-serif','fontSize':'14px','background':'#16181d','primaryColor':'#20232b','primaryTextColor':'#e9eaed','primaryBorderColor':'#d9a441','lineColor':'#858994','secondaryColor':'#1b1e25','tertiaryColor':'#181a20','clusterBkg':'#131519','clusterBorder':'#31353f','edgeLabelBackground':'#16181d','textColor':'#d0d2d8'}}}%%
+flowchart LR
+  OWN["Own pages · openings · News<br/>#1 signal density"]
+  BSKY["Bluesky<br/>public API — verified"]
+  MASTO["Mastodon<br/>public API — verified"]
+  GH["GitHub READMEs"]
+  X["X / Twitter<br/>no 2026 public path"]
+  LI["LinkedIn<br/>ToS + login wall"]
+  GS["Google Scholar<br/>robots Disallow"]
+  RS["recruiting-signal read<br/>buckets generated per field + intent"]
+  HUMAN["human rung"]
+  OWN --> RS
+  BSKY --> RS
+  MASTO --> RS
+  GH --> RS
+  X --> HUMAN --> RS
+  LI --> HUMAN
+  GS -.->|"skip"| RS
+  classDef tool fill:#182338,stroke:#5f8fd9,color:#cfe0ff;
+  classDef verified fill:#12281d,stroke:#4bbd7f,color:#c5f0d6;
+  classDef human fill:#2c1620,stroke:#e06a83,color:#ffd0da;
+  classDef skip fill:#20222a,stroke:#8b8f9b,color:#c3c6cd;
+  class OWN,GH tool
+  class BSKY,MASTO verified
+  class X,LI,HUMAN human
+  class GS skip
+</pre>
+        </div>
+        <div class="caption"><span class="key">Governs</span><span class="refs">research/social-sources.md · D-038 · D-044 — the reading method is generated, never a hardcoded keyword list.</span></div>
+      </section>
+
+      <section class="map" id="data">
+        <div class="map-head"><span class="map-code">MAP 06</span><h2>Data — the core of the model</h2></div>
+        <p class="purpose">The spine that lets facts join, dedupe and diff — the thing the corpus's prose files could not do. 31 entities in total; the core is shown.</p>
+        <div class="diagram"><span class="expand">Expand ⤢</span>
+<pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif,system-ui,sans-serif','fontSize':'13px','background':'#16181d','primaryColor':'#20232b','primaryTextColor':'#e9eaed','primaryBorderColor':'#d9a441','lineColor':'#858994','secondaryColor':'#1b1e25','tertiaryColor':'#181a20','clusterBkg':'#131519','clusterBorder':'#31353f','edgeLabelBackground':'#16181d','textColor':'#d0d2d8'}}}%%
+flowchart TD
+  subgraph SPINE["Institutional spine"]
+    INST["Institution"] --> UNIT["Unit"] --> PERSON["Person — the hub"]
+  end
+  subgraph PPL["People &amp; work"]
+    APP["Appointment"] --> ORG["Organization"]
+    LAB["Lab"] --> LM["LabMember"]
+    BIB["BibliometricProfile<br/>one row per source"]
+    RS["RecruitingSignal"]
+    CE["CollaboratorEdge"]
+  end
+  subgraph PROV["Provenance"]
+    CLAIM["Claim<br/>every field is one"]
+    WS["WebSource"]
+    CONF["Conflict"]
+    CLAIM --> WS
+    CLAIM --> CONF
+  end
+  subgraph ADM["Admissions &amp; funding"]
+    GP["GraduateProgram"] --> AC["ApplicationCycle"] --> FI["FundingItem"]
+  end
+  subgraph USER["Your own actions"]
+    AP["ApplicantProfile"] --> OUT["Outreach"]
+    AP --> APL["Application"]
+  end
+  subgraph RUNS["Pipeline state"]
+    RUN["Run"] --> TASK["Task"] --> EC["ExtractionCache"]
+  end
+  PERSON --> APP
+  PERSON --> LAB
+  PERSON --> BIB
+  PERSON --> RS
+  PERSON --> CE
+  PERSON --> CLAIM
+  PERSON --> GP
+  OUT --> PERSON
+  APL --> GP
+  TASK --> WS
+  classDef spine fill:#182338,stroke:#5f8fd9,color:#cfe0ff;
+  classDef prov fill:#2a2110,stroke:#d9a441,color:#f4dfa8;
+  classDef user fill:#2c1620,stroke:#e06a83,color:#ffd0da;
+  classDef runs fill:#20222a,stroke:#8b8f9b,color:#c3c6cd;
+  class INST,UNIT,PERSON spine
+  class CLAIM,WS,CONF prov
+  class AP,OUT,APL user
+  class RUN,TASK,EC runs
+</pre>
+        </div>
+        <div class="caption"><span class="key">Governs</span><span class="refs">domain-model.md · D-026 · D-030 — nothing is keyed on a display name; bibliometrics is one row per source, never blended.</span></div>
+      </section>
+
+      <section class="map" id="provenance">
+        <div class="map-head"><span class="map-code">MAP 07</span><h2>Provenance — how a value becomes a trusted claim</h2></div>
+        <p class="purpose">Every fact carries its source, its quote, and its confidence. Verification is structural — the model's quote must be found in the stored snapshot — not a prose promise.</p>
+        <div class="diagram"><span class="expand">Expand ⤢</span>
+<pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif,system-ui,sans-serif','fontSize':'14px','background':'#16181d','primaryColor':'#20232b','primaryTextColor':'#e9eaed','primaryBorderColor':'#d9a441','lineColor':'#858994','secondaryColor':'#1b1e25','tertiaryColor':'#181a20','edgeLabelBackground':'#16181d','textColor':'#d0d2d8'}}}%%
+flowchart LR
+  F["fetch"] --> SNAP["snapshot<br/>content-hashed"]
+  SNAP --> EX{"extract"}
+  EX -->|"deterministic"| VAL["value + quote"]
+  EX -->|"LLM — may answer NOT_FOUND"| VAL
+  VAL --> VER{"quote found<br/>in snapshot?"}
+  VER -->|"no"| REJ["reject — hallucination"]
+  VER -->|"yes"| CL["Claim<br/>value · quote · source · confidence"]
+  CL --> CF{"disagrees with<br/>an existing claim?"}
+  CF -->|"yes"| CONFL["Conflict recorded<br/>both kept"]
+  CF -->|"no"| STORE["SQLite"]
+  CONFL --> STORE
+  classDef tool fill:#182338,stroke:#5f8fd9,color:#cfe0ff;
+  classDef store fill:#2a2110,stroke:#d9a441,color:#f4dfa8;
+  classDef skip fill:#20222a,stroke:#8b8f9b,color:#c3c6cd;
+  class F,SNAP,EX,VAL,VER,CF tool
+  class CL,STORE,CONFL store
+  class REJ skip
+</pre>
+        </div>
+        <div class="caption"><span class="key">Governs</span><span class="refs">architecture.md §3 · D-010 · D-047 — verification proves fidelity, not truth; the page itself can still be wrong.</span></div>
+      </section>
+
+      <section class="map" id="rules">
+        <div class="map-head"><span class="map-code">MAP 08</span><h2>Rules — where each rule actually bites</h2></div>
+        <p class="purpose">Rules are enforced in code at specific points, not asserted in a preamble. This is the map of enforcement gates.</p>
+        <div class="diagram"><span class="expand">Expand ⤢</span>
+<pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif,system-ui,sans-serif','fontSize':'14px','background':'#16181d','primaryColor':'#20232b','primaryTextColor':'#e9eaed','primaryBorderColor':'#d9a441','lineColor':'#858994','secondaryColor':'#1b1e25','tertiaryColor':'#181a20','clusterBkg':'#131519','clusterBorder':'#31353f','textColor':'#d0d2d8'}}}%%
+flowchart TD
+  subgraph FETCH["at fetch"]
+    R1["robots.txt checked — fail closed"]
+    R2["public vs walled routing"]
+    R3["no login, no bot-wall defeat"]
+  end
+  subgraph BUILD["at build"]
+    R4["optout.txt filter — with a test"]
+  end
+  subgraph RANK["at ranking"]
+    R5["hard gates use reliable claims only"]
+    R6["unreliable fields sort + warn,<br/>never filter rows out"]
+  end
+  subgraph EXPORT["at export"]
+    R7["exclude LLM judgements about people"]
+    R8["no bare email lists"]
+  end
+  subgraph OUTREACH["at outreach"]
+    R9["one professor at a time — no bulk path"]
+  end
+  CORPUS["corpus = methodology only<br/>never a runtime data input"]
+  classDef gate fill:#0f2723,stroke:#3fbdad,color:#bff0e6;
+  class R1,R2,R3,R4,R5,R6,R7,R8,R9,CORPUS gate
+</pre>
+        </div>
+        <div class="caption"><span class="key">Governs</span><span class="refs">ethics-and-compliance.md · D-005 · D-023 · D-032 · D-035 · D-053 — nationality never gates visibility.</span></div>
+      </section>
+
+      <section class="map" id="decisions">
+        <div class="map-head"><span class="map-code">MAP 09</span><h2>Decisions — how the 56 cluster</h2></div>
+        <p class="purpose">Every decision belongs to one of seven themes. This shows the shape of the design space, and the one cluster that still carries accepted risk.</p>
+        <div class="diagram"><span class="expand">Expand ⤢</span>
+<pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif,system-ui,sans-serif','fontSize':'14px','background':'#16181d','primaryColor':'#20232b','primaryTextColor':'#e9eaed','primaryBorderColor':'#d9a441','lineColor':'#858994','secondaryColor':'#1b1e25','tertiaryColor':'#181a20','clusterBkg':'#131519','clusterBorder':'#31353f','textColor':'#d0d2d8'}}}%%
+flowchart TD
+  ROOT["56 decisions"]
+  ROOT --> SCOPE["Scope &amp; identity"]
+  ROOT --> SRC["Data sources"]
+  ROOT --> DATA["Data model"]
+  ROOT --> PROD["Product &amp; flow"]
+  ROOT --> DASH["Dashboard"]
+  ROOT --> ETH["Ethics"]
+  ROOT --> COST["Cost &amp; perf"]
+  SCOPE --> RISK["accepted risk:<br/>generic v1, no golden fixture<br/>D-34 + D-11 + D-35"]
+  classDef tool fill:#182338,stroke:#5f8fd9,color:#cfe0ff;
+  classDef human fill:#2c1620,stroke:#e06a83,color:#ffd0da;
+  class SCOPE,SRC,DATA,PROD,DASH,ETH,COST tool
+  class RISK human
+</pre>
+        </div>
+        <div class="caption"><span class="key">Governs</span><span class="refs">DECISIONS.md — managed by fail-loud coverage, per-value confidence, and cassette + synthetic tests.</span></div>
+      </section>
+
+    </div>
+
+    <footer>
+      This atlas is a view over the design documents, not a replacement for them. When a diagram and a document disagree, the document wins. · Supervisorly design phase — 56 decisions, 31 entities, none open.
+    </footer>
+  </main>
+</div>
+
+<div class="lightbox" id="lightbox">
+  <button class="close" id="lbClose">Close ✕</button>
+  <div class="stage" id="lbStage"></div>
+</div>
+
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" aria-hidden="true">
+  <div class="dhead">
+    <div>
+      <div class="kicker" id="dwKicker">Node</div>
+      <h3 id="dwTitle">—</h3>
+    </div>
+    <button class="dclose" id="dwClose" aria-label="Close panel">✕</button>
+  </div>
+  <div class="dbody" id="dwBody"></div>
+</aside>
+
+<script>
+  (function () {
+    /* ---------- dynamic data ---------- */
+    // Decisions referenced across the maps (id -> one-line summary).
+    var DECISIONS = {
+      "005":"Scan output is never committed — it holds personal data about real people.",
+      "008":"Curation is first-class; a spreadsheet beat every automated competitor.",
+      "010":"Every field carries provenance and confidence — no bare values.",
+      "011":"No golden fixture from the corpus; validate with cassettes + synthetic data.",
+      "021":"Three-tier pipeline; the shortlist forms on research fit, not recruiting status.",
+      "022":"The recruiting field is ~20% populated — 'no signal' is the designed-for default.",
+      "023":"Nationality/export-control never gates visibility; unreliable fields sort, not filter.",
+      "026":"SQLite is the source of truth; JSON is the export.",
+      "030":"Identity is an internal id first; external ids attach as evidence.",
+      "032":"Scale is an ethical constraint — no bulk outreach path.",
+      "034":"v1 is fully generic across countries; risk accepted, managed by fail-loud coverage.",
+      "035":"The corpus is a methodology reference only — never a runtime data input.",
+      "037":"Per-professor capture is dynamic; a professor is never dropped for missing data.",
+      "038":"Queries and keywords are generated per search, never looked up.",
+      "039":"Three-phase fetch: structured → automated browse → human rung.",
+      "042":"The deliverable is the skill/agent/tool package; the README is the interface.",
+      "043":"Human-assisted retrieval: generated MD prompt in, parsed Markdown out, run resumes.",
+      "044":"The professor's own channels are a first-class recruiting-signal source.",
+      "045":"Intent + query generation are orchestrator-inline, producing a SearchPlan.",
+      "047":"One canonical confidence model; hard gates fire only on quoted/derived facts.",
+      "049":"Terminal states: the dashboard is generated after Phase 2, never blocked on the human.",
+      "053":"opt-out matches on homepage URL, ORCID, or institutional email.",
+      "055":"One orchestration vocabulary: Stages 0–4, Phases 1–3, tools by name.",
+      "056":"The shortlist gate — 'never dropped' is display; 'deep-dive' is the ~40 shortlist.",
+      "028":"Generic discovery (CRIS, sitemaps, JSON-LD, CT logs) before per-site adapters.",
+      "036":"Intent interpretation is Stage 0 — understand the purpose before searching.",
+      "051":"One shared Markdown grammar for the human rung — the prompt-generator emits it, the ingester parses it.",
+      "046":"The JSON export contract — a four-state value envelope (value / searched-absent / never-attempted / blocked).",
+      "048":"Dashboard = pre-transpiled JSX + vendored React inline; no build toolchain, works offline.",
+      "050":"Recruiting classification is normalised against the student's target cycle, per-country intake calendar.",
+      "052":"The human rung also enumerates login-walled faculty directories, not just single fields.",
+      "054":"The community overlay is structural and local — never a shared personal-data set.",
+      "057":"Fragmented works lists (non-Western names) are reconciled before scoring, not just flagged — or the shortlist wrongly drops the names the project serves.",
+      "058":"Research-fit matches on OpenAlex topic IDs resolved in the SearchPlan — deterministic ID-overlap, not brittle text match.",
+      "059":"Hard eligibility gates are intent-aware — a pre-PhD/RA seeker isn't gated on PhD-admission rules.",
+      "060":"A country-source preflight tells the student up front what will be thin, before the expensive run.",
+      "061":"A deadline / urgency view — cross-professor 'what closes soon', domestic vs international split.",
+      "062":"former_doctoral_students is per-registry, advisor-verified — France works, most registries lack advisors, Canada unverified.",
+      "063":"The eval set is hand-labelled cassettes (≥3 shapes / ≥3 countries) — a named deliverable, not raw recordings."
+    };
+
+    // Node meaning, keyed by a distinctive substring of the node's label.
+    var NODE_INFO = {
+      "supervisorly skill":{t:"The skill package",b:"The whole deliverable: SKILL.md plus its agents and tools, run inside Claude Code. A student points Claude at the repo and it installs and drives everything.",d:["042"]},
+      "searchplan":{t:"SearchPlan",b:"The interpreted intent — country, field, need, generated topic terms and venues, university mode — that every downstream tool consumes. Nothing expensive runs until the student confirms it.",d:["045","036"]},
+      "interpret intent":{t:"Intent + query generation",b:"Done by the orchestrator (Claude) inline, not a deterministic tool: understand the purpose behind the input, then generate the search vocabulary for this field. Produces the SearchPlan.",d:["045","038"]},
+      "discovery-ladder":{t:"discovery-ladder",b:"Finds professors without per-site scraping: CRIS portals → sitemaps → JSON-LD → certificate-transparency → OpenAlex/ROR → a per-institution adapter only as a last resort.",d:["028","039"]},
+      "fetcher":{t:"fetcher — 3 phases",b:"Runs the escalation ladder: structured sources, then automated browsing of what failed, then the human rung for what's still walled.",d:["039","043"]},
+      "deep-dive":{t:"deep-dive collector",b:"For each shortlisted professor: papers, recency, availability, contact, people around them — dynamically, filling 'no data found' rather than dropping anyone.",d:["037","056"]},
+      "gap-queue":{t:"gap-queue",b:"Tracks the exact (entity, field) pairs still missing after automated phases, so the human is asked for the minimum.",d:["043"]},
+      "chrome-prompt-generator":{t:"chrome-prompt-generator",b:"Generates the ready-to-paste prompt you run in Claude for Chrome, embedding the one shared Markdown output contract.",d:["043","051"]},
+      "md-ingester":{t:"md-ingester",b:"Parses the Markdown you return into Claims (extractor = human-assisted) and resumes the run from where it paused.",d:["043"]},
+      "scorer":{t:"scorer — gates + weights",b:"Hard eligibility gates first — and which gates apply depends on your intent (a pre-PhD/RA seeker isn't gated on PhD-admission rules). Then a transparent weighted score you can re-weight; research-fit matches on OpenAlex topic IDs, and author-disambiguation risk lowers score confidence, never activity.",d:["059","047","058","057","023"]},
+      "exporter":{t:"exporter — JSON + HTML",b:"Writes the four-state JSON interchange and the self-contained dashboard (pre-transpiled JSX, vendored inline). Judgements about people and bare emails are excluded from exports.",d:["046","048","049"]},
+      "recruiting-analyst":{t:"recruiting-analyst",b:"Classifies recruiting state from verbatim quotes in the original language, normalised against your target cycle via a per-country intake calendar. Negation and cycle-dating handled before translation.",d:["044","050","022"]},
+      "eligibility-analyst":{t:"eligibility-analyst",b:"Extracts admissions rules, degree routes, language bands and funding conditions into structured fields, with quote verification.",d:["047","023"]},
+      "profile-synthesist":{t:"profile-synthesist",b:"Writes the per-professor narrative for the shortlist — from verified claims only, never invented facts.",d:["037","010"]},
+      "evidence-auditor":{t:"evidence-auditor",b:"Adversarially re-verifies claims; risk-weighted sampling (100% only for facts that flip an eligibility gate or a deadline), not everything.",d:["010"]},
+      "adapter-author":{t:"adapter-author",b:"Proposes a DirectoryAdapter YAML when the generic discovery paths fail for an institution.",d:["039"]},
+      "phase 1":{t:"Phase 1 — structured",b:"APIs, CRIS portals, sitemaps, JSON-LD. Fast, cheap, reliable. Anything that 404s or errors is marked and handed to Phase 2.",d:["039"]},
+      "phase 2":{t:"Phase 2 — automated browse",b:"The tool navigates the marked pages directly. Whatever it still can't resolve is marked for the human rung.",d:["039"]},
+      "phase 3":{t:"Phase 3 — human rung",b:"The tool generates a prompt you run in Claude for Chrome; your own session reaches walled pages the tool can't — including whole login-walled faculty directories, not just single fields. You return Markdown; the tool ingests it.",d:["043","044","052"]},
+      "we looked":{t:"'We looked, found nothing'",b:"An honest terminal state, distinct from a never-attempted blank. The professor is still shown.",d:["037","049"]},
+      "own pages":{t:"The professor's own pages",b:"Homepage, an openings/'joining my lab' page, lab News, a pinned banner — the #1 place recruiting status appears in plain text. Fully tool-fetchable.",d:["044"]},
+      "bluesky":{t:"Bluesky",b:"AT Protocol has a genuinely public API — verified reachable with no login. Academics who left X often post recruiting calls here.",d:["044"]},
+      "mastodon":{t:"Mastodon",b:"Public per-instance REST API — verified reachable. Tool-fetchable.",d:["044"]},
+      "x / twitter":{t:"X / Twitter",b:"No public path exists in 2026 (syndication dead, Nitter dead, API ~$10k/mo, ToS forbids scraping). Delivered by the human rung only.",d:["044","043"]},
+      "linkedin":{t:"LinkedIn",b:"Login-walled and ToS-restricted (hiQ took a $500k judgment). The tool never touches it.",d:["044"]},
+      "google scholar":{t:"Google Scholar",b:"robots.txt Disallow: /scholar. Skipped — and it rarely carries recruiting signal anyway.",d:["044"]},
+      "sqlite":{t:"SQLite — source of truth",b:"Real joins, full-text search, an append-only claim history in one zero-install file. JSON is the export; snapshots live on disk, addressed by content hash.",d:["026"]},
+      "claim":{t:"Claim",b:"Every field is a Claim: value, verbatim quote, source URL, snapshot hash, timestamp, confidence. The quote must be found in the stored snapshot or the claim is rejected.",d:["010","047"]},
+      "snapshot":{t:"Snapshot",b:"A content-hashed capture of the fetched page. Verification re-opens the snapshot, not the live page — which is how quotes stay checkable after a page changes.",d:["010"]},
+      "conflict":{t:"Conflict",b:"When two sources disagree, both claims are kept and the disagreement is recorded with a resolution state — not silently overwritten.",d:["010"]},
+      "shortlist gate":{t:"The shortlist gate",b:"Promotes ~40 professors to the deep dive on research-fit signal (topic-ID overlap), available cheaply before the deep dive. Works are reconciled first so non-Western names aren't wrongly dropped. 'Never dropped' is about display; 'deep-dive' is about this shortlist.",d:["056","021","058","057"]},
+      "signal tier":{t:"Signal tier",b:"One polite, cached fetch of each professor's own homepage over the full roster — regex, no LLM — so the shortlist decision is informed.",d:["021","056"]},
+      "robots":{t:"robots.txt gate",b:"Checked in the fetch layer and obeyed, failing closed. A promise in code, not in a README.",d:["039"]},
+      "optout":{t:"opt-out filter",b:"A build-time filter that drops any record matching an opted-out homepage URL, ORCID or institutional email — with a test that fails if one survives.",d:["053","005"]},
+      "corpus":{t:"Corpus = methodology only",b:"The research files teach the method — filters, keywords, layout — but supply no content about real people. Never a runtime input.",d:["035","005"]},
+      "accepted risk":{t:"The one accepted risk",b:"Fully-generic v1 with no corpus-sourced fixture. Managed by fail-loud per-country coverage, per-value confidence, and cassette + synthetic tests.",d:["034","011","035"]},
+      "scope":{t:"Scope & identity",b:"Decisions about what the project is and is named.",d:["042","035","034"]},
+      "data sources":{t:"Data sources",b:"How the tool finds and fetches data across the world.",d:["039","044","038"]},
+      "data model":{t:"Data model",b:"How facts are stored so they join, dedupe and diff.",d:["026","010","030"]},
+      "product":{t:"Product & flow",b:"The student's journey and the actions the tool models.",d:["021","036","056"]},
+      "ethics":{t:"Ethics",b:"The compliance posture and the enforcement gates.",d:["005","023","032","035"]}
+    };
+
+    /* ---------- helpers ---------- */
+    function norm(s){ return (s||"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim(); }
+    function nodeLabel(g){
+      var el = g.querySelector('.nodeLabel, .label, foreignObject, text');
+      return norm(el ? el.textContent : g.textContent);
+    }
+    function lookup(label){
+      for (var k in NODE_INFO){ if (label.indexOf(norm(k)) !== -1) return NODE_INFO[k]; }
+      return null;
+    }
+
+    /* ---------- drawer ---------- */
+    var drawer = document.getElementById('drawer'), scrim = document.getElementById('scrim');
+    var dwK = document.getElementById('dwKicker'), dwT = document.getElementById('dwTitle'), dwB = document.getElementById('dwBody');
+    function decChip(id){
+      var s = DECISIONS[id]; if(!s) return '';
+      return '<button class="dchip" data-d="'+id+'"><span class="code">D-'+id+'</span> <span class="txt">'+s+'</span></button>';
+    }
+    function openDecision(id){
+      dwK.textContent = 'Decision'; dwT.textContent = 'D-'+id;
+      dwB.innerHTML = '<p>'+(DECISIONS[id]||'—')+'</p><div class="dsub">See</div><p style="color:var(--muted);font-size:13px">Full rationale and reversal conditions in <b>DECISIONS.md → D-'+id+'</b>.</p>';
+      show();
+    }
+    function openNode(info, rawLabel){
+      dwK.textContent = 'Node';
+      dwT.textContent = info ? info.t : (rawLabel || 'Node');
+      var html = '<p>'+(info ? info.b : 'Part of this map. No extra detail recorded for this node.')+'</p>';
+      if (info && info.d && info.d.length){
+        html += '<div class="dsub">Governed by</div><div class="dlist">';
+        info.d.forEach(function(id){ html += decChip(id); });
+        html += '</div>';
+      }
+      dwB.innerHTML = html; show();
+    }
+    function show(){ drawer.classList.add('open'); drawer.setAttribute('aria-hidden','false'); scrim.classList.add('on'); }
+    function hide(){ drawer.classList.remove('open'); drawer.setAttribute('aria-hidden','true'); scrim.classList.remove('on'); }
+    document.getElementById('dwClose').addEventListener('click', hide);
+    scrim.addEventListener('click', hide);
+    dwB.addEventListener('click', function(e){ var c = e.target.closest('.dchip'); if(c) openDecision(c.getAttribute('data-d')); });
+
+    /* ---------- lightbox ---------- */
+    var lb = document.getElementById('lightbox'), stage = document.getElementById('lbStage');
+    function lbOpen(svg){ stage.innerHTML=''; var c=svg.cloneNode(true); stage.appendChild(c); stage.querySelectorAll('.node.hot').forEach(function(n){n.classList.remove('hot');}); lb.classList.add('open'); }
+    function lbClose(){ lb.classList.remove('open'); stage.innerHTML=''; }
+    document.getElementById('lbClose').addEventListener('click', lbClose);
+    lb.addEventListener('click', function(e){ if(e.target===lb) lbClose(); });
+
+    /* ---------- node clicks (shared by inline diagrams AND the expanded lightbox) ---------- */
+    function onDiagramClick(container, e){
+      var g = e.target.closest('g.node, g[class*="node"]');
+      if (!g){ // clicking a cluster title
+        var cl = e.target.closest('g[class*="cluster"]');
+        if (cl){ var info = lookup(norm(cl.textContent)); if (info) openNode(info, cl.textContent); }
+        return;
+      }
+      container.querySelectorAll('.node.hot').forEach(function(n){ n.classList.remove('hot'); });
+      g.classList.add('hot');
+      openNode(lookup(nodeLabel(g)), (g.textContent||'').trim());
+    }
+    document.querySelectorAll('.diagram').forEach(function(d){
+      var exp = d.querySelector('.expand');
+      if (exp) exp.addEventListener('click', function(e){ e.stopPropagation(); var svg=d.querySelector('svg'); if(svg) lbOpen(svg); });
+      d.addEventListener('click', function(e){ if (exp && exp.contains(e.target)) return; onDiagramClick(d, e); });
+    });
+    // the expanded diagram stays clickable, and opens the same side drawer
+    stage.addEventListener('click', function(e){ onDiagramClick(stage, e); });
+
+    /* ---------- make D-0xx in captions clickable ---------- */
+    document.querySelectorAll('.caption .refs').forEach(function(r){
+      r.innerHTML = r.innerHTML.replace(/D-(\d{3})/g, function(m, id){
+        return DECISIONS[id] ? '<button class="dchip" data-d="'+id+'"><span class="code">'+m+'</span></button>' : m;
+      });
+      r.addEventListener('click', function(e){ var c=e.target.closest('.dchip'); if(c) openDecision(c.getAttribute('data-d')); });
+    });
+
+    // Esc closes the topmost layer first: drawer, then the expanded diagram
+    document.addEventListener('keydown', function(e){
+      if(e.key!=='Escape') return;
+      if(drawer.classList.contains('open')) hide();
+      else lbClose();
+    });
+
+    /* ---------- scroll progress + scrollspy ---------- */
+    var bar = document.getElementById('progress');
+    function onScroll(){ var h=document.documentElement, max=h.scrollHeight-h.clientHeight; bar.style.width=(max>0?(h.scrollTop/max)*100:0)+'%'; }
+    window.addEventListener('scroll', onScroll, {passive:true}); onScroll();
+
+    var links = Array.prototype.slice.call(document.querySelectorAll('#nav a'));
+    var byId = {}; links.forEach(function(a){ byId[a.getAttribute('href').slice(1)]=a; });
+    var obs = new IntersectionObserver(function(entries){
+      entries.forEach(function(e){ if(e.isIntersecting){ links.forEach(function(a){a.classList.remove('active');}); var a=byId[e.target.id]; if(a) a.classList.add('active'); } });
+    }, { rootMargin:'-30% 0px -60% 0px', threshold:0 });
+    document.querySelectorAll('section.map').forEach(function(s){ obs.observe(s); });
+  })();
+</script>

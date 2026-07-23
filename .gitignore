@@ -1,0 +1,69 @@
+# ---------------------------------------------------------------------------
+# ProfScout .gitignore
+#
+# Guiding rule: SOURCE and CONFIG are committed; anything a run PRODUCES is not.
+# Scan output contains personal data about real academics (names, emails,
+# affiliations), so it must never be committed to a public repository.
+# See docs/ethics-and-compliance.md for why this matters.
+# ---------------------------------------------------------------------------
+
+# --- Scan output: generated per-run, contains personal data -----------------
+/output/
+/runs/
+*.profscout-run/
+
+# --- HTTP + API response cache ----------------------------------------------
+# Cached pages make re-runs cheap, but they are large and reproducible.
+/.cache/
+/cache/
+*.cache.sqlite
+*.cache.sqlite-journal
+
+# --- Secrets ----------------------------------------------------------------
+# API keys, the polite-pool contact email, and any provider credentials.
+.env
+.env.*
+!.env.example
+secrets.json
+credentials.json
+
+# --- Python ------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+
+# --- Node / dashboard build --------------------------------------------------
+node_modules/
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.vite/
+
+# --- Editors and OS ----------------------------------------------------------
+.idea/
+.vscode/
+!.vscode/extensions.json
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Local Claude Code state -------------------------------------------------
+# Shared skill/agent definitions ARE committed (that is the point of the repo);
+# only machine-local settings are ignored.
+.claude/settings.local.json
