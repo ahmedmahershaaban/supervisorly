@@ -26,35 +26,45 @@ LOGIN_WALL = "LOGIN_WALL"
 NOT_FOUND = "NOT_FOUND"
 
 # Strong, near-unambiguous login / bot-wall phrases: a match anywhere means the real content is
-# behind the wall, so we never extract it (D-039/044) and we don't mislabel a real roster.
+# behind the wall, so we never extract it (D-039/044) and we don't mislabel a real roster. Includes
+# anti-DDoS/JS-challenge interstitials (Cloudflare & co.), which are walls regardless of chrome
+# length — their challenge text is longer than any character floor (live audit-3 finding 5).
 _WALL_MARKERS = re.compile(
     r"(sign\s*in\s+to\s+(?:continue|view|access)|log\s*in\s+to\s+(?:continue|view|access)|"
     r"create\s+an?\s+account\s+to\s+(?:view|continue)|"
-    r"access\s+denied|you\s+must\s+be\s+logged\s+in|captcha)",
+    r"access\s+denied|you\s+must\s+be\s+logged\s+in|captcha|"
+    r"checking\s+your\s+browser|checking\s+(?:if|the)\s+(?:the\s+)?site\s+connection|"
+    r"attention\s+required|enable\s+javascript\s+and\s+cookies|\bray\s+id\b)",
     re.IGNORECASE,
 )
-# "Please enable JavaScript" is AMBIGUOUS: a genuinely JS-only page shows only this, but
-# content-rich pages (WordPress, embedded maps, Disqus) ship the same <noscript> fallback
-# ALONGSIDE their real, extractable text. So it signals a wall ONLY when the server rendered
-# essentially no content — otherwise the real signals must still be extracted (D-022/037/046).
+# "Please enable JavaScript" (and the CRA "you need to enable JavaScript to run this app") is
+# AMBIGUOUS: a genuinely JS-only page shows only this, but content-rich pages (WordPress, embedded
+# maps, Disqus) ship the same <noscript> fallback ALONGSIDE their real text. So it signals a wall
+# ONLY when nothing substantive remains once the banner itself is removed (D-022/037/046).
 _JS_WALL = re.compile(
-    r"(please\s+enable\s+javascript|enable\s+javascript\s+to\s+(?:run|use|view))",
+    r"(please\s+enable\s+javascript|(?:you\s+need\s+to\s+)?enable\s+javascript\s+to\s+(?:run|use|view))",
     re.IGNORECASE,
 )
-# A JS banner is a wall only when the page has essentially NO extractable text of its own — a
-# content-free JS shell (main_text ≈ empty). The floor sits well below the smallest real content
-# page (a lone recruiting sentence ≈ 40 chars) so we never drop extractable content; a shell
-# (`<div id="root"></div>` + a stripped <noscript>) yields ~0 chars and is correctly a wall.
-_JS_CONTENT_FLOOR = 30
+# The JS-enable banner is chrome, not the professor's content — strip the whole sentence carrying it
+# before measuring, so a page whose ONLY text is the banner is a wall while a page that also has real
+# content is not (live audit-3 findings 3/4: the banner text must never be counted as content, nor
+# extracted as a professor fact).
+_JS_BANNER_SENTENCE = re.compile(
+    r"[^.!?]*\b(?:please\s+enable\s+javascript|enable\s+javascript\s+to\s+(?:run|use|view)|"
+    r"you\s+need\s+to\s+enable\s+javascript)\b[^.!?]*[.!?]?",
+    re.IGNORECASE,
+)
+# below this many characters of REAL content (banner removed), the page is a content-free JS shell
+_JS_RESIDUE_FLOOR = 20
 
 
 def detect_login_wall(html: str | None) -> bool:
     """True if the page looks like a login / bot / JS wall rather than a real content page.
 
-    Strong login markers fire on their own. The ubiquitous "please enable JavaScript" fallback is
-    a wall ONLY when the page rendered essentially no content (``main_text`` — which strips
-    ``<noscript>`` — is near-empty); a content-rich page that merely ships a ``<noscript>`` banner
-    is NOT a wall, so its real signals are still extracted (live audit-2).
+    Strong login / bot-challenge markers fire on their own. The ubiquitous "please enable
+    JavaScript" fallback is a wall ONLY when, after removing the banner sentence itself (it is
+    chrome), essentially no content remains — a genuine JS shell. A content-rich page that merely
+    ships a ``<noscript>`` banner keeps its real, extractable signals (live audit-3).
     """
     if not html:
         return False
@@ -62,7 +72,8 @@ def detect_login_wall(html: str | None) -> bool:
         return True
     if _JS_WALL.search(html):
         from ..fetch.normalize import main_text
-        return len(main_text(html)) < _JS_CONTENT_FLOOR
+        residue = _JS_BANNER_SENTENCE.sub(" ", main_text(html)).strip()
+        return len(residue) < _JS_RESIDUE_FLOOR
     return False
 
 

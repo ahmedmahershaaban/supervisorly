@@ -51,6 +51,31 @@ def test_content_free_js_shell_is_still_a_wall():
     assert roster.detect_login_wall(shell) is True
 
 
+def test_visible_js_banner_that_matches_an_extractor_is_a_wall_not_a_fact():
+    # live audit-3 finding 3: a JS banner whose text happens to contain "recruiting" must be a wall,
+    # not extracted as a professor's recruiting claim (the banner is chrome, D-039/044/D-010).
+    page = ("<html><body><p>Please enable JavaScript to view current lab openings and recruiting "
+            "details.</p><div id=root></div></body></html>")
+    assert roster.detect_login_wall(page) is True
+
+
+def test_terse_real_page_with_cra_noscript_banner_is_not_a_wall():
+    # live audit-3 finding 4: a terse but REAL page carrying the CRA noscript banner keeps its signal.
+    page = ("<head><noscript>You need to enable JavaScript to run this app.</noscript></head>"
+            "<body><div id='root'><p>Now hiring PhD students.</p></div></body>")
+    assert roster.detect_login_wall(page) is False
+
+
+def test_bot_challenge_interstitial_is_a_wall_regardless_of_length():
+    # live audit-3 finding 5: a Cloudflare/JS bot-wall (chrome longer than any char floor) is a wall.
+    cf = ("<html><body><div>Please enable JavaScript and cookies to continue. Checking if the site "
+          "connection is secure. example.edu needs to review the security of your connection before "
+          "proceeding. Ray ID: 7a1b. Performance and security by Cloudflare.</div></body></html>")
+    assert roster.detect_login_wall(cf) is True
+    assert roster.detect_login_wall(
+        "<html><body><p>Checking your browser before accessing example.edu.</p></body></html>") is True
+
+
 def test_classify_directory_three_ways():
     assert roster.classify_directory(_blocked()) == roster.LOGIN_WALL
     assert roster.classify_directory(_not_found()) == roster.NOT_FOUND
