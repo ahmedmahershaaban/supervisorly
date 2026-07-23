@@ -186,6 +186,22 @@ def test_domain_context_deadline_phrasings_are_recognised():
         assert iso == "2026-12-01", sentence
 
 
+# ── audit round 6: a domain word in a MODIFIER (not the cue's subject) is not an
+#    application deadline — tuition/registration/event deadlines that merely mention
+#    "PhD"/"program" must not be fabricated as firm application deadlines. ───────
+def test_domain_word_in_a_modifier_is_not_an_application_deadline():
+    for sentence in (
+        "Tuition and fees for the PhD program are due by 1 December 2026.",
+        "Course registration for PhD students is due by 1 December 2026.",
+        "Health insurance enrollment for PhD students is due by 1 December 2026.",
+        "The security deposit for PhD student housing is due by 1 December 2026.",
+        "Registration for the PhD orientation closes on 1 December 2026.",
+        "Registration for the postdoc symposium closes on 1 December 2026.",
+        "Advisor selection for first-year PhD students is due by 1 December 2026.",
+    ):
+        assert _deadline(sentence) is None, sentence
+
+
 # ── audit round 5: no quadratic blow-up on long unpunctuated text ──────────────
 def test_long_unpunctuated_text_does_not_blow_up():
     # a large boilerplate/nav dump with no sentence punctuation must stay fast (no O(n^2))

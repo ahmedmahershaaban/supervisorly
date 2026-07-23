@@ -56,14 +56,30 @@ _RECRUIT = re.compile(
 _DEADLINE_CUE = (r"deadline|apply\s+by|closes?\b|closing\s+date|due\s+by|"
                  r"(?:are|is)\s+due|(?:applications?|submissions?)\s+due|submit(?:ted)?\s+by")
 _CUE_RE = re.compile(rf"\b(?:{_DEADLINE_CUE})\b", re.IGNORECASE)
-# Domain context for a deadline — the deterministic signal tier, like the recruiting regex, is a
-# fixed heuristic (NOT a generated per-query search dictionary, so D-038 stands). These are the
-# subjects a supervisor-seeker's deadline actually attaches to.
-_APP_CONTEXT = re.compile(
-    r"\b(?:applications?|applicants?|apply|admissions?|submissions?|enrol\w*|"
-    r"phd|dphil|doctoral|postdoc\w*|fellowships?|studentships?|scholarships?|"
-    r"assistantships?|positions?|vacanc(?:y|ies)|programmes?|programs?)\b",
+
+# Deciding a dated deadline clause is an APPLICATION deadline (not a tuition/registration/event
+# one that merely mentions a domain word). Like the recruiting regex this is a fixed signal-tier
+# heuristic, not a generated per-query dictionary (D-038 stands). A clause qualifies if:
+#   (A) a strong application noun is present (applications/applicants/apply/admissions/submissions),
+#   (B) a "<domain> deadline" phrase appears (application/PhD/fellowship/… deadline), or
+#   (C) a domain word is the SUBJECT of the cue verb — directly before close/due/submitted — so
+#       "PhD studentship closes 1 Dec" counts but "…for the PhD program are due by 1 Dec" (subject
+#       = tuition/fees) does not. Tying context to the cue's subject is what stops the fabrication.
+_DOMAIN = r"phd|dphil|doctoral|postdocs?|postdoctoral|fellowships?|studentships?|scholarships?|positions?|vacanc(?:y|ies)"
+_STRONG_APP = re.compile(r"\b(?:applications?|applicants?|apply|admissions?|submissions?)\b", re.IGNORECASE)
+_DOMAIN_DEADLINE = re.compile(
+    rf"\b(?:{_DOMAIN}|applications?|submissions?|admissions?|entry|programmes?|programs?|courses?|intake)"
+    r"\s+deadline\b", re.IGNORECASE)
+_DOMAIN_SUBJECT = re.compile(
+    rf"\b(?:{_DOMAIN})\s+(?:closes?\b|closing\b|(?:are|is)\s+due|due\s+by|submit(?:ted)?\s+by)",
     re.IGNORECASE)
+
+
+def _is_application_deadline(clause: str) -> bool:
+    """True if the clause's deadline plausibly attaches to an application (not a tuition/event one)."""
+    return bool(_STRONG_APP.search(clause)
+                or _DOMAIN_DEADLINE.search(clause)
+                or _DOMAIN_SUBJECT.search(clause))
 # cue words that make a date *projected*, not a published/firm deadline (→ watch date)
 _PROJECTED = re.compile(
     r"\b(typically|usually|generally|normally|around|about|each\s+year|every\s+year|"
@@ -202,12 +218,11 @@ def extract_deadline(html: str):
     clause the date nearest the cue is chosen (so "…and close on 1 Dec" binds the close date).
     """
     for sentence in _sentences(main_text(html)):
-        # cheap sentence-level prefilter before the per-clause work
-        if not (_CUE_RE.search(sentence) and _APP_CONTEXT.search(sentence)):
+        if not _CUE_RE.search(sentence):        # cheap prefilter before the per-clause work
             continue
         for clause in _clauses(sentence):
             cue = _CUE_RE.search(clause)
-            if not cue or not _APP_CONTEXT.search(clause):
+            if not cue or not _is_application_deadline(clause):
                 continue
             dates = _dates_in(clause)
             if not dates:

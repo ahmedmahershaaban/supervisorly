@@ -566,6 +566,31 @@ Sentences whose only date is a semester/academic-year start (a different event) 
 **Ran:** `test_deadline_parse.py` (+ compound-sentence binds the application clause; phd/position
 phrasings; long-unpunctuated perf; semester-start dates → miss) + full suite → **139 passed** (exit 0).
 
+## round DD — refine⁷: subject-aware application-deadline gate
+
+The clause-level verifier found the `_APP_CONTEXT` bag-of-words check accepted any clause where a
+domain word appeared *anywhere*, so *"Tuition and fees for the PhD program are due by 1 Dec"* (and
+course-registration / insurance / deposit / orientation / symposium variants) fabricated firm
+application deadlines — the domain word sat in a modifier, not the cue's subject.
+
+**Fixed (correctness/honesty, high):** replaced the presence check with `_is_application_deadline`
+tying context to the cue's subject — a clause qualifies only via (A) a **strong application noun**
+(applications/applicants/apply/admissions/submissions), (B) a **`<domain> deadline`** phrase, or
+(C) a **domain word directly before the cue verb** ("PhD studentship closes"). *"…for the PhD
+program are due by…"* (subject = tuition/fees) no longer qualifies.
+**Ran:** `test_deadline_parse.py` (+ 7 tuition/registration/insurance/… → none; phd/position/
+studentship phrasings still firm) + full suite → **140 passed** (exit 0).
+
+**Deadline tier — stopping point & known limitation.** Across rounds I/Q/V/Y/Z/BB/CC/DD the
+deterministic deadline tier was hardened until it no longer fabricates a firm deadline from the
+realistic non-application patterns adversarial verification could find (rent/tax/office-hours/
+tuition/registration/…), parses in linear time, and binds compound sentences to the application
+clause. It remains a **best-effort signal tier**: perfect grammatical subject-attribution is beyond
+a regex, so a rare construction (e.g. "RSVP for the admissions open house closes …", via the strong
+noun "admissions") can still surface. Per the design (D-009/D-021) the **LLM recruiting/eligibility
+analyst does the real classification in Stage 2**; the deterministic tier only surfaces a
+quote-verified candidate. Further refinement is delegated to that layer rather than chased in regex.
+
 ## COMPLETION — goal met
 
 All phases (A–J) met their DoD; 18/18 edge-case rows have passing tests; the offline self-run is
