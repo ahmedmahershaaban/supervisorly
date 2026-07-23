@@ -28,14 +28,18 @@ _SKIP_TAGS = {
     "aside", "form", "svg", "button", "template",
 }
 
-# Volatile tokens masked for the HASH ONLY (kept in main_text): ISO/'/'-dates,
-# clock times, "1,234 views/visitors/comments", and "Last updated: …" tails.
+# Volatile *chrome* tokens masked for the HASH ONLY (kept in main_text).
+# IMPORTANT: standalone content dates are deliberately NOT masked — a changed
+# application deadline must change the hash and invalidate the cache (D-061).
+# Only mask timestamps tied to a chrome keyword, copyright years, clock times, and
+# view/visitor counters.
 _VOLATILE = re.compile(
     r"""(
-        \b20\d{2}[-/]\d{1,2}[-/]\d{1,2}\b        # 2026-07-23 / 2026/7/23
-      | \b\d{1,2}:\d{2}(?::\d{2})?\b             # 12:30, 12:30:05
-      | \b\d{1,3}(?:,\d{3})+\s+(?:views?|visitors?|comments?)\b
-      | \b(?:last\s+updated|updated)\s*:?\s*[^\n]{0,40}
+        \b(?:last\s+updated|updated|generated|accessed|retrieved)\s*:?\s*[^\n]{0,40}
+      | ©\s*20\d{2}[^\n]{0,30}
+      | \bcopyright\s+20\d{2}[^\n]{0,30}
+      | \b\d{1,3}(?:,\d{3})+\s+(?:views?|visitors?|comments?|reads?)\b
+      | \b\d{1,2}:\d{2}(?::\d{2})?\b             # clock times (page-render, not deadlines)
     )""",
     re.IGNORECASE | re.VERBOSE,
 )

@@ -65,7 +65,21 @@ fail-closed (D-019/D-039), honest User-Agent. Pure stdlib (no HTML-parser dep) �
 **Ran:** pytest → **29 passed**, incl. the edge-case-matrix rows: *content hash stable across
 volatile chrome* and *quote-in-snapshot rejects a fabricated quote*.
 
-**Remaining phases:** C2 (transport/cassettes + fetcher 3-phase + snapshot store + HTTP cache),
-D (LLM agents + wiring quote-verification into extraction), E (scoring: intent gates, topic-ID
-match, works reconciliation), F (dashboard), G (human-rung wiring + roster-enumeration), H (eval
-set), I (self-run), J (refine), then clean-room verify. SKILL.md + agent definition files still to write.
+## round C2 — fetcher + cassette transport + snapshot store (commit pending)
+
+**Built:** `fetch/transport.py` (Transport seam; `CassetteTransport` for offline determinism +
+lazy httpx live transport), `fetch/snapshot.py` (content-addressed store, never in DB/committed —
+D-026/D-005), `fetch/ratelimit.py` (per-host min-interval, injectable clock/sleep), `fetch/fetcher.py`
+(robots-gated → rate-limited → snapshot-storing; blocked/404 marked, never a harder retry — D-039).
+**Also fixed (self-review caught):** `content_hash` masked *all* ISO dates, so a changed application
+deadline wouldn't invalidate the cache (would go stale, breaking D-061). Now masks only chrome
+timestamps (last-updated/counters/copyright/clock); regression test added.
+**Ran:** pytest → **35 passed**, incl. edge-case rows *404 marked not crashed*, *robots-blocked not
+fetched*, *missing robots fails closed*, *deadline change invalidates cache*.
+**DoD (Phase C):** substantially met — the fetch layer runs offline on cassettes with robots + rate
+limit + snapshots. Remaining C work (the discovery ladder rungs) folds into Phase D wiring.
+
+**Remaining phases:** D (LLM agents + wiring quote-verification into extraction), E (scoring:
+intent gates, topic-ID match, works reconciliation), F (dashboard), G (human-rung wiring +
+roster-enumeration), H (eval set), I (self-run), J (refine), then clean-room verify. SKILL.md +
+agent definition files still to write.

@@ -43,6 +43,13 @@ def test_content_hash_changes_on_real_content_change():
     assert nz.content_hash(PAGE_A) != nz.content_hash(PAGE_C)
 
 
+def test_deadline_change_invalidates_cache():
+    """Regression: a changed application deadline is a REAL content change and must
+    change the hash — content dates are not masked (D-061)."""
+    changed = PAGE_A.replace("2027-12-15", "2028-06-30")
+    assert nz.content_hash(PAGE_A) != nz.content_hash(changed)
+
+
 def test_main_text_keeps_dates_but_drops_boilerplate():
     t = nz.main_text(PAGE_A)
     assert "Fall 2027" in t
