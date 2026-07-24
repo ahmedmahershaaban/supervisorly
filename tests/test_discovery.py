@@ -76,6 +76,35 @@ def test_bot_challenge_interstitial_is_a_wall_regardless_of_length():
         "<html><body><p>Checking your browser before accessing example.edu.</p></body></html>") is True
 
 
+def test_recaptcha_bearing_faculty_page_is_not_a_wall():
+    # live audit-4 finding 3 (HIGH): a real faculty page carrying a reCAPTCHA-protected contact form
+    # (Google's mandated "protected by reCAPTCHA" notice, or the g-recaptcha/api.js markup) is OPEN,
+    # not a wall — the bare `captcha` substring must not match inside reCAPTCHA (D-022/037/046).
+    visible = ("<html><body><main><h1>Dr. Jane Doe</h1>"
+               "<p>I am recruiting PhD students in quantum optics for Fall 2027. "
+               "Applications close on 15 January 2027.</p>"
+               "<p>Contact me using the form below. This site is protected by reCAPTCHA.</p>"
+               "</main></body></html>")
+    assert roster.detect_login_wall(visible) is False
+    markup = ('<html><head><script src="https://www.google.com/recaptcha/api.js"></script></head>'
+              '<body><main><div class="g-recaptcha"></div>'
+              "<p>Now hiring PhD students in AI.</p></main></body></html>")
+    assert roster.detect_login_wall(markup) is False
+    # a genuine CAPTCHA CHALLENGE (not a mere embed) is still a wall
+    assert roster.detect_login_wall(
+        "<html><body><p>Please complete the captcha to continue.</p></body></html>") is True
+
+
+def test_punctuation_free_directory_with_a_js_banner_is_not_a_wall():
+    # live audit-4 finding 6 (MED): a card-grid People page with a visible JS notice but NO sentence
+    # punctuation must keep its roster as residue — the banner strip must not greedily swallow all the
+    # preceding real content and collapse it to a false LOGIN_WALL.
+    page = ("<html><body><main>Faculty Directory Jane Smith Professor of Robotics recruiting PhD "
+            "students John Doe Professor of AI Please enable JavaScript for the live search box"
+            "</main></body></html>")
+    assert roster.detect_login_wall(page) is False
+
+
 def test_classify_directory_three_ways():
     assert roster.classify_directory(_blocked()) == roster.LOGIN_WALL
     assert roster.classify_directory(_not_found()) == roster.NOT_FOUND

@@ -32,7 +32,13 @@ NOT_FOUND = "NOT_FOUND"
 _WALL_MARKERS = re.compile(
     r"(sign\s*in\s+to\s+(?:continue|view|access)|log\s*in\s+to\s+(?:continue|view|access)|"
     r"create\s+an?\s+account\s+to\s+(?:view|continue)|"
-    r"access\s+denied|you\s+must\s+be\s+logged\s+in|captcha|"
+    r"access\s+denied|you\s+must\s+be\s+logged\s+in|"
+    # a CAPTCHA CHALLENGE — not a bare "captcha" substring, which matched inside reCAPTCHA /
+    # g-recaptcha / recaptcha/api.js on ordinary faculty contact pages and dropped their real
+    # facts as "blocked" (live audit-4 finding 3, D-022/037/046).
+    r"(?:complete|solve|enter|pass)\s+(?:the\s+|a\s+)?captcha|"
+    r"\bcaptcha\s+(?:verification|challenge|check|required)\b|"
+    r"verify\s+you(?:'re|\s+are)\s+(?:a\s+)?human|are\s+you\s+a\s+(?:human|robot)|"
     r"checking\s+your\s+browser|checking\s+(?:if|the)\s+(?:the\s+)?site\s+connection|"
     r"attention\s+required|enable\s+javascript\s+and\s+cookies|\bray\s+id\b)",
     re.IGNORECASE,
@@ -45,13 +51,16 @@ _JS_WALL = re.compile(
     r"(please\s+enable\s+javascript|(?:you\s+need\s+to\s+)?enable\s+javascript\s+to\s+(?:run|use|view))",
     re.IGNORECASE,
 )
-# The JS-enable banner is chrome, not the professor's content — strip the whole sentence carrying it
-# before measuring, so a page whose ONLY text is the banner is a wall while a page that also has real
-# content is not (live audit-3 findings 3/4: the banner text must never be counted as content, nor
-# extracted as a professor fact).
+# The JS-enable banner is chrome, not the professor's content — strip the banner PHRASE itself (with
+# a short, bounded tail up to the next terminator or the text end) before measuring residue. The tail
+# is bounded and only reaches text-end, so it can NEVER swallow preceding real content: a punctuation-
+# free directory page ("… John Doe Professor of AI Please enable JavaScript for the live search box")
+# keeps its roster as residue instead of collapsing to a false wall (live audit-4 finding 6). The old
+# greedy ``[^.!?]*`` around the phrase ate the whole text when no sentence terminator was present.
 _JS_BANNER_SENTENCE = re.compile(
-    r"[^.!?]*\b(?:please\s+enable\s+javascript|enable\s+javascript\s+to\s+(?:run|use|view)|"
-    r"you\s+need\s+to\s+enable\s+javascript)\b[^.!?]*[.!?]?",
+    r"(?:please\s+)?(?:you\s+(?:need|have)\s+to\s+)?enable\s+javascript"
+    r"(?:\s+and\s+cookies)?"
+    r"(?:\s+(?:to|for|in\s+order\s+to)\s+[^.!?]{0,60}?(?=[.!?]|$))?",
     re.IGNORECASE,
 )
 # below this many characters of REAL content (banner removed), the page is a content-free JS shell

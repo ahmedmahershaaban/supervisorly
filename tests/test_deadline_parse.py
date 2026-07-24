@@ -317,3 +317,67 @@ def test_projected_keyword_in_the_clause_makes_it_a_watch_date():
     # a projection word sharing the deadline clause → the date is a watch date, not firm (D-061)
     iso, _, conf = _deadline("Applications typically close 1 December 2026.")
     assert iso == "2026-12-01" and conf == "inferred"
+
+
+# ── live audit-4: the subject-head model must not leak on participles or unlisted money nouns ──
+def test_participial_postmodifier_over_a_money_head_is_not_a_deadline():
+    # finding 1 (HIGH): a participle ("securing"/"reserving"/"covering") heads an OBJECT phrase; the
+    # subject head is the money noun before it, so the due-date is NOT a firm application deadline.
+    for sentence in (
+        "The deposit securing your PhD position is due by 1 December 2026.",
+        "The deposit reserving your studentship is due by 1 December 2026.",
+        "Payment securing your PhD position is due by 1 December 2026.",
+        "The balance covering your fellowship is due by 1 December 2026.",
+        "The tuition covering your PhD is due by 1 December 2026.",
+    ):
+        assert _deadline(sentence) is None, sentence
+
+
+def test_unlisted_payment_head_is_not_fabricated_as_a_deadline():
+    # finding 4 (HIGH): the classifier must NOT lean on a closed payment-noun list (D-038). A money
+    # head absent from any list (surcharge/levy/bond/repayment/contribution) after an application
+    # modifier must never surface as a firm application deadline (D-010/D-061).
+    for sentence in (
+        "The late application surcharge is due by 1 December 2026.",
+        "The application levy is due by 1 December 2026.",
+        "The PhD studentship bond is due by 1 December 2026.",
+        "Your scholarship repayment is due by 1 December 2026.",
+        "The enrolment contribution for admissions is due by 1 December 2026.",
+    ):
+        assert _deadline(sentence) is None, sentence
+
+
+def test_coordinated_noun_subject_deadline_survives():
+    # finding 2 (MED): "Applications and supporting documents are due by X" coordinates two SUBJECTS
+    # of one cue — the 'and' must not orphan "Applications" and drop the real deadline.
+    for sentence in (
+        "Applications and supporting documents are due by 15 January 2027.",
+        "Applications and references must be submitted by 15 January 2027.",
+    ):
+        iso, _, conf = _deadline(sentence)
+        assert iso == "2027-01-15" and conf == "quoted_official", sentence
+
+
+def test_imperative_submit_your_application_by_a_date_is_a_deadline():
+    # finding 5 (MED): the ubiquitous imperative "submit your application by <date>" must be caught,
+    # not only the passive "applications must be submitted by".
+    for sentence in (
+        "Please submit your application by 10 January 2027.",
+        "Submit your application by 10 January 2027.",
+        "Applicants must submit their application by 10 January 2027.",
+        "You should submit your PhD application by 10 January 2027.",
+    ):
+        iso, _, conf = _deadline(sentence)
+        assert iso == "2027-01-10" and conf == "quoted_official", sentence
+
+
+def test_field_names_ending_in_ing_or_ed_do_not_over_drop_a_real_deadline():
+    # the participle guard is object-only (Ving/Ved + determiner), so a field name whose token ends
+    # in -ing/-ed ("machine learning", "engineering", "data mining") never truncates the subject.
+    for sentence in (
+        "Machine learning PhD applications close on 15 January 2027.",
+        "The engineering PhD applications close on 15 January 2027.",
+        "Data mining PhD applications close on 15 January 2027.",
+    ):
+        iso, _, conf = _deadline(sentence)
+        assert iso == "2027-01-15" and conf == "quoted_official", sentence

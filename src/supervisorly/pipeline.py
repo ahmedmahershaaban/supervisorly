@@ -61,81 +61,126 @@ _RECRUIT = re.compile(
 # fabricating a firm application deadline at all. A clause that doesn't satisfy all three is an
 # honest miss (searched_absent), never a guessed firm date (D-010/D-061).
 _DEADLINE_CUE = (r"deadline|apply\s+by|closes?\b|closing\s+date|due\s+by|"
-                 r"(?:are|is)\s+due|(?:applications?|submissions?)\s+due|submit(?:ted)?\s+by")
+                 r"(?:are|is)\s+due|(?:applications?|submissions?)\s+due|submit(?:s|ted|ting)?\b")
 _CUE_RE = re.compile(rf"\b(?:{_DEADLINE_CUE})\b", re.IGNORECASE)
+# A cue that is itself an application verb ("apply by", "applications/submissions due") is an
+# application deadline by construction — no subject test needed. "submitted"/"submit" is NOT here:
+# "Tax returns must be submitted by …" must stay non-application (decided by the subject test below).
+_CUE_IS_APP = re.compile(r"appl|submiss", re.IGNORECASE)
 
 # Deciding a dated deadline clause is an APPLICATION deadline (not a tuition/registration/event one
-# that merely mentions a domain word). Fixed signal-tier heuristic, not a generated per-query
-# dictionary (D-038 stands). A clause qualifies if a "<domain> deadline" noun-phrase appears, or the
-# SUBJECT of the deadline cue is an application/domain word (not a payment noun). The subject is the
-# HEAD of the leading noun-phrase, and English noun compounds are head-FINAL — so "application FEE is
-# due" has subject-head "fee" (a payment date, not a deadline) while "PhD studentship applications
-# close" has subject-head "applications". Testing the cue's *subject* (not merely a nearby domain
-# word) is what stops fee/deposit due-dates from being fabricated as firm deadlines (D-010/D-061)
-# without over-dropping a real "Applications close" (live audit-3 replaced the fragile window scheme).
+# that merely mentions a domain word). Fixed signal-tier grammar, NOT a generated per-query
+# dictionary and NOT a closed list of a field's search terms (D-038 stands). A clause qualifies iff
+# a "<domain> deadline" noun-phrase appears, OR the deadline cue's SUBJECT HEAD is an application
+# word. The subject head is the last surviving token of the leading noun-phrase run — the run stops
+# at the first grammatical boundary (a preposition/relative, a coordinator, an auxiliary/modal, an
+# intransitive coordination verb, or a participle heading an object phrase). This is what stops a
+# fee/deposit/surcharge due-date from being fabricated as a firm deadline (D-010/D-061) — crucially
+# WITHOUT enumerating payment nouns: the harm is asymmetric, so a head that is not a *recognised*
+# application word never yields a firm deadline (a genuine deadline may over-drop; a money date must
+# never surface as one). Live audit-4 replaced the payment-list scheme, which leaked on any money
+# noun outside the list ("application surcharge/bond/repayment is due") and on participial
+# post-modifiers ("the deposit securing your PhD position is due").
 _DOMAIN = r"phd|dphil|doctoral|postdocs?|postdoctoral|fellowships?|studentships?|scholarships?|positions?|vacanc(?:y|ies)"
-_STRONG_APP = re.compile(r"\b(?:applications?|applicants?|apply|admissions?|submissions?)\b", re.IGNORECASE)
-_APP_WORD = re.compile(rf"\b(?:{_DOMAIN}|applications?|submissions?|admissions?)\b", re.IGNORECASE)
+_STRONG_APP = re.compile(r"^(?:applications?|applicants?|apply|admissions?|submissions?)$", re.IGNORECASE)
+# The set of tokens that, as a subject/predicate HEAD, mark an application deadline.
+_APP_HEAD = re.compile(rf"^(?:{_DOMAIN}|applications?|applicants?|apply|submissions?|admissions?)$",
+                       re.IGNORECASE)
 _DOMAIN_DEADLINE = re.compile(
     rf"\b(?:{_DOMAIN}|applications?|submissions?|admissions?|entry|programmes?|programs?|courses?|intake)"
     r"\s+deadline\b", re.IGNORECASE)
 
-# A clause about money (a fee / tuition / fine / deposit due date) is NOT an application deadline even
-# when it mentions "application(s)" as a modifier ("the application FEE is due by…"). Plural-tolerant
-# (``deposits``/``payments``/…) so "Deposits … are due" is caught too (live probe, L9i).
-_PAYMENT_NOUNS = (r"fees?|tuitions?|payments?|deposits?|fines?|rents?|invoices?|balances?|dues|"
-                  r"charges?|instal?ments?")
-_PAYMENT = re.compile(rf"\b(?:{_PAYMENT_NOUNS})\b", re.IGNORECASE)
-# The subject noun-phrase ends at the first post-modifier (a preposition / relative / infinitive):
-# "the deposit FOR studentships…", "a deposit TO secure your position…", "the fee THAT applies to…".
-# Everything after it modifies the head, so the subject head is found only in the span before it.
-_POSTMOD = re.compile(
-    r"\b(?:for|of|to|that|which|who|whom|whose|including|holding|with|from|in|on|at|by)\b",
-    re.IGNORECASE)
+# Grammatical words that END the leading subject noun-phrase run: prepositions / relatives / the
+# infinitive marker, coordinators, auxiliaries + modals + forms of be/have/do, and a few intransitive
+# verbs that pair with a deadline cue ("applications OPEN … and close …"). This is English grammar,
+# not a field-search dictionary (D-038). Anything after the head modifies it, so the head lies at the
+# end of the run before the first of these.
+_STOP_WORDS = frozenset("""
+    for of to that which who whom whose including with from in on at by
+    and but or nor
+    is are was were be been being am has have had do does did
+    must should shall will would can could may might
+    open opens opened begin begins began start starts started
+""".split())
+# Leading tokens that are NOT a nominal head — determiners, possessives and personal pronouns. A run
+# ending in one of these has no nominal subject (an imperative "Submit … by …" / "The deadline to …"),
+# routed to the predicate/object test instead.
+_NON_HEAD = frozenset("""
+    the a an this that these those our your my his her its their
+    no any all each every some you we they i he she it one
+""".split())
+# Adverbs / politeness words skipped between a subject and its verb ("applications TYPICALLY close",
+# "PLEASE submit …") so they are never mistaken for the head. (``-ly`` adverbs are skipped by rule.)
+_SKIP_WORDS = frozenset("please kindly also now then still already soon again once only".split())
+# A participle heading an object phrase ("the deposit SECURING your place", "the fee CHARGED to your
+# account") ends the subject — the head is the noun before it, not the domain word inside the object.
+# Detected as an -ing/-ed token immediately followed by an object marker (determiner/possessive/prep).
+_PARTICIPLE_OBJECT = frozenset("your our my his her its their the a an to for of with".split())
+_WORD_RE = re.compile(r"[A-Za-z]+")
 
 
-def _subject_kind(clause: str, cue_start: int) -> str | None:
-    """Classify the SUBJECT of the deadline cue as ``'app'``, ``'payment'``, or ``None``.
+def _subject_head(clause: str, cue_start: int) -> str | None:
+    """The head token (lower-cased) of the leading subject noun-phrase before the cue, or ``None``.
 
-    The subject is the head of the leading noun-phrase — the text from the clause start to the first
-    post-modifier or the cue, whichever comes first. Its head is the RIGHTMOST application/domain or
-    payment word in that span (compounds are head-final: "application fee" -> payment; "PhD
-    studentship applications" -> app). ``None`` means no classifiable subject (e.g. "apply by …").
+    ``None`` means the subject is empty or only determiners/pronouns (an imperative or a
+    "The deadline to …" frame) — the caller then tests the predicate/object.
     """
-    end = cue_start
-    pm = _POSTMOD.search(clause)
-    if pm and pm.start() < end:
-        end = pm.start()
-    head = clause[:end]
-    app = pay = -1
-    for m in _APP_WORD.finditer(head):
-        app = m.start()
-    for m in _PAYMENT.finditer(head):
-        pay = m.start()
-    if app < 0 and pay < 0:
+    words = _WORD_RE.findall(clause[:cue_start])
+    run: list[str] = []
+    for i, w in enumerate(words):
+        low = w.lower()
+        if low in _STOP_WORDS:
+            break
+        if (low.endswith("ing") or low.endswith("ed")) and i + 1 < len(words) \
+                and words[i + 1].lower() in _PARTICIPLE_OBJECT:
+            break                                   # participle + object → subject ends before it
+        if low.endswith("ly") or low in _SKIP_WORDS:
+            continue                                # adverb / politeness word, not the head
+        run.append(low)
+    if not run or run[-1] in _NON_HEAD:
         return None
-    return "app" if app > pay else "payment"
+    return run[-1]
+
+
+def _strong_app_in_head_position(text: str) -> bool:
+    """True if a strong application word in ``text`` is a phrase HEAD — followed by a grammatical
+    stop / another determiner / punctuation / end, not by a content noun it merely modifies.
+
+    This qualifies the imperative object ("submit your APPLICATION by …") while refusing a
+    pre-modifier of a money/other head ("submit your application FEE by …") — never a fabricated
+    firm deadline from a fee due-date (D-010/D-061).
+    """
+    words = _WORD_RE.findall(text)
+    for i, w in enumerate(words):
+        if _STRONG_APP.match(w):
+            nxt = words[i + 1].lower() if i + 1 < len(words) else None
+            if nxt is None or nxt in _STOP_WORDS or nxt in _NON_HEAD:
+                return True
+    return False
 
 
 def _is_application_deadline(clause: str) -> bool:
     """True if the clause's deadline attaches to an application, not a fee/tuition/event date.
 
-    A "<application/domain> deadline" noun-phrase always qualifies. Otherwise the SUBJECT of the
-    deadline cue (head-final) must be an application/domain word, not a payment word — so "the deposit
-    for PhD studentships is due" / "the registration fee … is due" (subject = money) do not qualify,
-    while "Applications … close" / "PhD studentship closes" do. A bare application verb ("apply
-    by …") with no payment word present also qualifies (D-010/D-061).
+    A "<application/domain> deadline" noun-phrase always qualifies, as does an application cue
+    ("apply by …", "applications due …"). Otherwise the deadline cue's SUBJECT HEAD must be a
+    recognised application word — so "the application fee/surcharge is due", "the deposit securing
+    your PhD position is due" and "course registration for PhD students is due" (heads: fee /
+    surcharge / deposit / registration) do NOT qualify, while "Applications close" / "PhD
+    studentship closes" do. With no nominal subject (an imperative "Submit your application by …")
+    a strong application word standing as a predicate head qualifies it.
     """
     if _DOMAIN_DEADLINE.search(clause):
         return True
     cue = _CUE_RE.search(clause)
-    if cue:
-        kind = _subject_kind(clause, cue.start())
-        if kind == "app":
-            return True
-        if kind == "payment":
-            return False
-    return bool(_STRONG_APP.search(clause)) and not _PAYMENT.search(clause)
+    if not cue:
+        return False
+    if _CUE_IS_APP.search(cue.group(0)):
+        return True
+    head = _subject_head(clause, cue.start())
+    if head is not None:
+        return bool(_APP_HEAD.match(head))
+    return _strong_app_in_head_position(clause[cue.end():])
 # cue words that make a date *projected*, not a published/firm deadline (→ watch date)
 _PROJECTED = re.compile(
     r"\b(typically|usually|generally|normally|around|about|each\s+year|every\s+year|"
@@ -238,23 +283,47 @@ def _sentences(text: str):
     return re.split(r"(?<=[.!?])\s+", text)
 
 
-# Split a sentence into subject-bearing clauses: on ``;`` and on a coordinating conjunction
-# (and/but/or, optionally comma-led) — UNLESS a deadline cue verb follows it, which marks a
-# coordinated verb sharing the prior subject ("applications open on X and close on Y") that must stay
-# in one clause. Appositive commas ("…, including the studentship, …") are NOT split, so the subject
-# stays attached to its cue (live audit-3: bare-comma splitting orphaned real deadlines).
-_CLAUSE_SPLIT = re.compile(
-    r"\s*;\s*|\s*,?\s+(?:and|but|or)\s+"
-    r"(?!(?:closes?|closing|due|deadline|submits?|submitted|apply|opens?)\b)",
-    re.IGNORECASE)
+# Split a sentence into subject-bearing clauses on ``;`` and on a coordinating conjunction
+# (and/but/or). A conjunction is NOT a clause break when either (a) a deadline cue verb follows it —
+# a coordinated VERB sharing the prior subject ("applications open on X and close on Y") — or (b) the
+# left coordinand is a short bare noun-phrase with no cue/date of its own — coordinated SUBJECTS
+# sharing one downstream cue ("Applications and supporting documents are due by X"), live audit-4
+# finding 2. Appositive commas ("…, including the studentship, …") are not split either.
+_CONJ_SPLIT = re.compile(r"(;|\s+(?:and|but|or)\s+)", re.IGNORECASE)
+_COORD_VERB_AFTER = re.compile(
+    r"^(?:closes?|closing|due|deadline|submits?|submitted|apply|opens?)\b", re.IGNORECASE)
+
+
+def _is_bare_subject(text: str) -> bool:
+    """A left coordinand that is a short subject noun-phrase with no cue/date of its own — so its
+    coordinating conjunction joins two SUBJECTS of one downstream cue, not two clauses."""
+    t = text.strip()
+    if _CUE_RE.search(t) or _dates_in(t):
+        return False
+    return len(_WORD_RE.findall(t)) <= 4
 
 
 def _clauses(sentence: str):
     """Yield the clauses of a sentence (split on ``;`` and clause-level conjunctions), dates whole."""
     masked = _DATE_COMMA.sub(lambda m: m.group(1) + "\x00" + m.group(2), sentence)
-    for part in _CLAUSE_SPLIT.split(masked):
-        if part and part.strip():
-            yield part.replace("\x00", ",")
+    parts = _CONJ_SPLIT.split(masked)
+    current = parts[0]
+    for i in range(1, len(parts), 2):
+        delim = parts[i]
+        nxt = parts[i + 1] if i + 1 < len(parts) else ""
+        break_here = True
+        if delim.strip() != ";":                       # a coordinating conjunction, not a semicolon
+            after = nxt.lstrip()
+            if _COORD_VERB_AFTER.match(after) or _is_bare_subject(current):
+                break_here = False                     # coordinated verb / coordinated subject
+        if break_here:
+            if current.strip():
+                yield current.replace("\x00", ",")
+            current = nxt
+        else:
+            current = current + delim + nxt
+    if current.strip():
+        yield current.replace("\x00", ",")
 
 
 def _dates_in(text: str) -> list[tuple[str, bool, int]]:
