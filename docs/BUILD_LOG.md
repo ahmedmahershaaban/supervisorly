@@ -774,7 +774,42 @@ collectors (`extract_students_signal`/`extract_industry_signal`/`extract_social`
   the plural "Deposits" and "Deposits for PhD applicants are due 1 Dec" fabricated a firm deadline;
   made every payment noun plural-tolerant. Regression cases added. -> probe 0 failures; **202 passed**.
 
-**State:** suite green at **202 passed** (exit 0), commits `cc587b2`->`272ed0c` on `build/live`.
-**Pending before DoD:** clean-room fresh-install verification (section 4 step 6); a final independent
-multi-agent audit pass returning zero (to formally close section 5 -- blocked pending the session-limit
-reset; the in-loop probe is currently clean); `docs/LIVE_COMPLETION_REPORT.md` finalization.
+**Pass 3 (rerun, after the usage-limit reset) -- 10 confirmed findings.** The full three-finder
+multi-agent audit ran and reproduced 10 defects, all in the L9h areas -- my L9h fixes were
+architecturally fragile (a 64-char payment window; a length-based JS-wall floor). Fixed by
+principled redesigns across three rounds, each a per-round commit leaving the suite green:
+- **Round L9j (commit `2ebc21d`)** -- redesigned the deadline subject-detection: replaced the
+  fragile fixed-width payment window with a subject-HEAD model (the cue's subject = head of the
+  leading noun-phrase; English compounds are head-final). Also: abbreviated months
+  (`15 Jan 2027`, `1 Dec. 2026`) via an `_ABBR_MONTH_DOT` pre-strip; appositive commas no longer
+  sever subject from cue; conjunction-aware clause split. Closes findings 1,2,6,8,9,10. -> 206.
+- **Round L9k (commit `514acb8`)** -- robust wall detection: bot-challenge interstitials
+  (Cloudflare "checking your browser"/"ray id") added to strong markers; the `please enable
+  javascript` banner is a wall only when the residue after removing the banner sentence is
+  near-empty. Closes findings 3,4,5. -> 209.
+- **Round L9l (commit `a46781a`)** -- truncation markers now persist across the human-rung
+  re-export resume boundary (`runs.get_counts`/`update_counts` + `counts_json`), so a re-export
+  cannot silently claim completeness (D-037). Closes finding 7. -> 210.
+
+**Pass 4 (commit-L9m target, task `wh0r8qlbe`) -- 6 confirmed findings (2 HIGH),** each
+adversarially verified on the real venv. The L9j/L9k redesigns still leaked:
+- **Round L9m (commit `a0fe080`)** -- (F1 HIGH) a participial post-modifier put a domain word in
+  the subject span ("the deposit SECURING your PhD position is due") -> firm deadline; the leading
+  noun-phrase run now stops at a participle heading an object phrase (Ving/Ved + determiner). (F4
+  HIGH) classification leaned on a CLOSED payment-noun list (D-038 leak) so an unlisted money head
+  ("application surcharge/bond/repayment is due") won by absence; removed the list entirely -- a
+  clause is an application deadline ONLY when the cue's subject HEAD is a recognised application
+  word, else it fails safe (D-061 asymmetry). (F2 MED) a coordinated NOUN subject ("Applications
+  and supporting documents are due") was split on `and`, orphaning the subject; `_clauses` keeps a
+  short bare-NP left coordinand attached to its shared cue. (F5 MED) the imperative "submit your
+  application by <date>" was missed; broadened the submit cue + an object-head test. (F3 HIGH) bare
+  `captcha` matched inside reCAPTCHA/g-recaptcha/api.js, dropping real pages to `blocked`; now
+  requires a genuine CAPTCHA-challenge phrase. (F6 MED) the greedy `[^.!?]*` banner strip swallowed
+  all content on a punctuation-free page -> false LOGIN_WALL; the strip is now a bounded phrase whose
+  tail only reaches a terminator or text-end. +7 regression tests. -> **217 passed**.
+
+**State:** suite green at **217 passed** (exit 0), commits `cc587b2`->`a0fe080` on `build/live`.
+Clean-room fresh-install verification PASSED earlier at 202 (to be re-run after section 5 closes).
+**Pending before DoD:** the pass-5 independent multi-agent audit (task `wh9gmgzqd`) must return
+**zero** to formally close section 5; then re-run clean-room and finalize
+`docs/LIVE_COMPLETION_REPORT.md`.
