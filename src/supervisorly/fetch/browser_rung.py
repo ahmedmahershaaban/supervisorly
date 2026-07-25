@@ -51,6 +51,7 @@ def ingest_page(
     """
     if not final_url or not final_url.strip():
         raise ValueError("final_url is required (provenance cites the FINAL url)")
+    text = text.lstrip("\ufeff") if text else text   # a leading BOM is not content
     if not text or not text.strip():
         raise ValueError("empty page text — nothing to ingest")
 

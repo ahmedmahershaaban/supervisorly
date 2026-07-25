@@ -52,9 +52,20 @@ def cmd_ingest_page(args: argparse.Namespace) -> int:
     if not file.is_file():
         print(f"staging file not found: {file}")
         return 2
-    text = file.read_text(encoding="utf-8")
+    raw = file.read_bytes()
+    if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
+        # UTF-16 with BOM — the PowerShell 5.1 `>` / Out-File default on Windows
+        text = raw.decode("utf-16")
+    else:
+        try:
+            text = raw.decode("utf-8-sig")     # utf-8-sig also strips a leading BOM
+        except UnicodeDecodeError:
+            print(f"staging file {file} is not UTF-8 text - re-save it as UTF-8 "
+                  f"(e.g. Out-File -Encoding utf8) and retry.")
+            return 2
+    text = text.lstrip("\ufeff")   # a leading BOM is not content
     if not text.strip():
-        print(f"staging file {file} is empty — nothing to ingest.")
+        print(f"staging file {file} is empty - nothing to ingest.")
         return 2
 
     db = Path(args.db)
@@ -504,7 +515,7 @@ def build_parser() -> argparse.ArgumentParser:
     pp.add_argument("--reset", nargs="?", const="all", default=None, metavar="HOST",
                     help="clear pacing state for HOST, or all hosts when omitted")
     pp.add_argument("--state", default=None,
-                    help="pacing state path (default: ./pacing_state.json)")
+                    help="pacing state path (default: ~/.supervisorly/pacing_state.json)")
     pp.set_defaults(func=cmd_pace)
 
     return p

@@ -156,6 +156,94 @@ def test_v1_db_is_rebuilt_so_agent_browser_inserts_and_data_survives(tmp_path):
     open_db(db).close()   # and a second migrate is a clean no-op
 
 
+# ── F1: claim-bearing v1 DBs migrate atomically, and a crashed rebuild recovers ─
+def _v1_db_with_claim(db_path):
+    """A v1 (pre-'agent_browser') DB with a web_source row AND a claim referencing
+    it — the shape that crashed the pre-fix rebuild (FK constraint failed)."""
+    from supervisorly.model import db as db_module
+
+    conn = connect(db_path)
+    conn.executescript(db_module._load_schema())   # every other table, incl. claim
+    conn.execute("DROP TABLE web_source")          # ... then swap in the v1 table
+    conn.executescript(V1_WEB_SOURCE_DDL)
+    conn.execute("INSERT INTO web_source(source_id, url, source_tier) "
+                 "VALUES('src_a', 'https://u.edu/a', 'official_institutional')")
+    conn.execute("INSERT INTO claim(claim_id, entity_kind, entity_id, field, state, "
+                 "value, quote, source_id, created_at) VALUES('c1', 'person', 'p1', "
+                 "'recruiting_signal', 'value', '\"recruiting\"', 'I am recruiting', "
+                 "'src_a', '2026-01-01T00:00:00+00:00')")
+    conn.commit()
+    conn.close()
+
+
+def test_v1_db_with_claims_migrates_and_provenance_survives(tmp_path):
+    from supervisorly.model.claims import claims_for
+
+    db = tmp_path / "old.sqlite"
+    _v1_db_with_claim(db_path=db)
+
+    conn = open_db(db)        # must not raise; both rows must survive
+    rows = {r["source_id"]: r["url"] for r in
+            conn.execute("SELECT source_id, url FROM web_source")}
+    assert rows == {"src_a": "https://u.edu/a"}
+    # the claim's provenance still resolves through claims_for (D-010)
+    claim = claims_for(conn, "person", "p1")[0]
+    assert claim["source_url"] == "https://u.edu/a"
+    # nothing stranded in a temp table
+    tables = {r["name"] for r in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'")}
+    assert "web_source_old" not in tables
+    # FK enforcement is ON after migrate (open_db/connect set it; the rebuild must
+    # restore it after its foreign_keys=OFF phase)
+    assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("INSERT INTO claim(claim_id, entity_kind, entity_id, field, "
+                     "source_id, created_at) VALUES('c2', 'person', 'p1', 'f', "
+                     "'no_such_source', '2026-01-01T00:00:00+00:00')")
+    conn.close()
+
+    conn = open_db(db)        # double migration is a no-op — rows still intact
+    assert conn.execute("SELECT COUNT(*) FROM web_source").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM claim").fetchone()[0] == 1
+    conn.close()
+
+
+def test_leftover_web_source_old_from_a_crashed_rebuild_is_recovered(tmp_path):
+    """The half-applied state a pre-fix crash left behind: an empty v2 web_source,
+    the original rows stranded in web_source_old, and claim's stored FK clause
+    rewritten to the temp name (the old code renamed with FK enforcement ON).
+    migrate must complete the rebuild — rows merged back, temp table dropped, the
+    dangling FK clause repaired — instead of skipping it as already-migrated."""
+    from supervisorly.model import db as db_module
+    from supervisorly.model.claims import claims_for
+
+    db = tmp_path / "crashed.sqlite"
+    _v1_db_with_claim(db_path=db)
+    conn = connect(db)                          # FK ON, like the pre-fix code path
+    conn.execute("DROP INDEX IF EXISTS idx_web_source_hash")
+    conn.execute("ALTER TABLE web_source RENAME TO web_source_old")
+    conn.executescript(db_module._load_schema())   # empty v2 web_source recreated
+    conn.commit()                               # ... then the old code crashed here
+    assert "web_source_old" in conn.execute(
+        "SELECT sql FROM sqlite_master WHERE name='claim'").fetchone()["sql"]
+    conn.close()
+
+    conn = open_db(db)        # recovery, not a skip
+    rows = {r["source_id"]: r["url"] for r in
+            conn.execute("SELECT source_id, url FROM web_source")}
+    assert rows == {"src_a": "https://u.edu/a"}
+    assert claims_for(conn, "person", "p1")[0]["source_url"] == "https://u.edu/a"
+    tables = {r["name"] for r in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'")}
+    assert "web_source_old" not in tables
+    # claim's FK clause points back at web_source — new claims insert cleanly
+    conn.execute("INSERT INTO claim(claim_id, entity_kind, entity_id, field, "
+                 "source_id, created_at) VALUES('c2', 'person', 'p1', 'f2', "
+                 "'src_a', '2026-01-02T00:00:00+00:00')")
+    assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+    conn.close()
+
+
 # ── CLI: ingest-page ──────────────────────────────────────────────────────────
 def _staging(tmp_path, text=PAGE_TEXT):
     f = tmp_path / "browser_staging" / "page.txt"
@@ -199,3 +287,66 @@ def test_cli_ingest_page_invalid_url_exits_2(tmp_path, capsys):
                "--db", str(tmp_path / "r.sqlite")])
     assert rc == 2
     assert "invalid --url" in capsys.readouterr().out
+
+
+# ── F2: non-UTF-8 staging files — a loud exit 2, never a traceback ────────────
+def test_cli_ingest_page_cp1252_exits_2_with_an_actionable_message(tmp_path, capsys):
+    f = tmp_path / "page.txt"
+    f.write_bytes("Café naïve — recruits".encode("cp1252"))
+    rc = main(["ingest-page", "--url", FINAL_URL, "--file", str(f),
+               "--db", str(tmp_path / "r.sqlite")])
+    assert rc == 2
+    out = capsys.readouterr()
+    assert "not UTF-8" in out.out and "UTF-8" in out.out
+    assert out.err == ""                        # no traceback
+    out.out.encode("ascii")                     # console contract: ASCII-safe
+
+
+def test_cli_ingest_page_utf16_with_bom_is_decoded(tmp_path, capsys):
+    """UTF-16 with a BOM is the PowerShell 5.1 `>` / Out-File default on Windows —
+    accept it rather than punish the platform's default."""
+    f = tmp_path / "page.txt"
+    f.write_text(PAGE_TEXT, encoding="utf-16")           # BOM + LE
+    db = tmp_path / "r.sqlite"
+    rc = main(["ingest-page", "--url", FINAL_URL, "--file", str(f), "--db", str(db)])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert out.startswith("ingested ")
+    out.encode("ascii")
+    conn = sqlite3.connect(db)
+    snap = conn.execute("SELECT snapshot_hash FROM web_source").fetchone()[0]
+    conn.close()
+    stored = SnapshotStore(db.parent / ".cache" / "snaps").load(snap)
+    assert quote_in_snapshot("I am recruiting PhD students for Fall 2027", stored)
+
+
+# ── F3: a BOM is framing, not content ──────────────────────────────────────────
+def test_cli_ingest_page_bom_only_file_is_empty(tmp_path, capsys):
+    f = tmp_path / "page.txt"
+    f.write_bytes(b"\xef\xbb\xbf")                       # UTF-8 BOM, nothing else
+    rc = main(["ingest-page", "--url", FINAL_URL, "--file", str(f),
+               "--db", str(tmp_path / "r.sqlite")])
+    assert rc == 2
+    assert "empty" in capsys.readouterr().out
+
+
+def test_cli_ingest_page_bom_plus_text_ingests_normally(tmp_path, capsys):
+    f = tmp_path / "page.txt"
+    f.write_bytes(b"\xef\xbb\xbf" + PAGE_TEXT.encode("utf-8"))
+    db = tmp_path / "r.sqlite"
+    rc = main(["ingest-page", "--url", FINAL_URL, "--file", str(f), "--db", str(db)])
+    assert rc == 0
+    conn = sqlite3.connect(db)
+    snap = conn.execute("SELECT snapshot_hash FROM web_source").fetchone()[0]
+    conn.close()
+    stored = SnapshotStore(db.parent / ".cache" / "snaps").load(snap)
+    assert quote_in_snapshot("I am recruiting PhD students for Fall 2027", stored)
+
+
+def test_ingest_page_strips_a_leading_bom_before_the_empty_check(tmp_path):
+    conn = open_db(tmp_path / "run.sqlite")
+    with pytest.raises(ValueError):
+        ingest_page(conn, tmp_path / "snaps", final_url=FINAL_URL, text="\ufeff")
+    res = ingest_page(conn, tmp_path / "snaps", final_url=FINAL_URL,
+                      text="\ufeff" + PAGE_TEXT)
+    assert res["bytes"] == len(PAGE_TEXT.encode("utf-8"))   # BOM not stored/counted

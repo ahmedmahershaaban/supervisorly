@@ -3,7 +3,11 @@ abort-latch, reset, fail-closed corruption handling, and the CLI exit-code contr
 No wall-clock sleeping — ``now`` and the jitter source are injected."""
 
 import json
+import math
 import random
+from pathlib import Path
+
+import pytest
 
 from supervisorly.cli import main
 from supervisorly.ethics import pacing
@@ -161,3 +165,171 @@ def test_cli_pace_abort_and_reset(tmp_path, capsys):
     assert main(["pace", "--reset", "x.com", "--state", state]) == 0
     assert "RESET host=x.com" in capsys.readouterr().out
     assert main(["pace", "--host", "x.com", "--state", state]) == 0   # fresh again
+
+
+# ── F4: classify() normalises framing syntax; hostile lookalikes stay None ────
+def test_classify_normalises_scheme_port_and_trailing_dot():
+    for host in ("x.com:443", "x.com.", "mobile.twitter.com.", "twitter.com:443",
+                 "linkedin.com:8080", "https://x.com/user", "HTTPS://X.COM/u",
+                 "http://user:pass@x.com/p"):
+        assert pacing.classify(host) == "social", host
+    assert pacing.classify("linkedin.com.cn") == "social"     # legit ccTLD variant
+    assert pacing.classify("scholar.google.com.") == "scholar"
+    assert pacing.classify("scholar.google.ca:443") == "scholar"
+
+
+def test_classify_hostile_lookalikes_stay_unpaced():
+    for host in ("evilx.com", "x.com.evil.com", "twitter.com.evil.co", "notx.com",
+                 "linkedin.com.evil.com", "scholar.google.com.evil.com"):
+        assert pacing.classify(host) is None, host
+
+
+def test_abort_latch_applies_to_formatted_host_forms_end_to_end(tmp_path):
+    state = str(_state_file(tmp_path))
+    pacing.abort("x.com", "captcha shown", state_path=state)
+    assert main(["pace", "--host", "x.com:443", "--state", state]) == 3
+    assert main(["pace", "--host", "https://x.com/u", "--state", state]) == 3
+
+
+# ── F5: the jittered interval is pinned at fetch-record time, never re-rolled ─
+def test_wait_is_pinned_at_fetch_time_and_identical_on_repoll(tmp_path):
+    state = _state_file(tmp_path)
+    interval = random.Random(7).uniform(*pacing.POLICY["social"]["interval"])
+    pacing.check("x.com", now=1000.0, state_path=state, rng=random.Random(7))
+    saved = json.loads(state.read_text(encoding="utf-8"))["hosts"]["x.com"]
+    assert saved["next_allowed_epoch"] == pytest.approx(1000.0 + interval)
+
+    # a re-poll with a DIFFERENT rng sees the stored target, not a fresh draw
+    res = pacing.check("x.com", now=1000.0, state_path=state, rng=random.Random(999))
+    assert res["allowed"] is False and res["reason"] == "min-interval"
+    assert res["wait_seconds"] == math.ceil(interval)     # stored target minus elapsed
+    again = pacing.check("x.com", now=1000.0, state_path=state, rng=random.Random(1))
+    assert again["wait_seconds"] == res["wait_seconds"]   # same instant, same wait
+
+
+def test_waits_decrease_monotonically_and_sleeping_the_printed_wait_allows(tmp_path):
+    state = _state_file(tmp_path)
+    pacing.check("x.com", now=1000.0, state_path=state, rng=random.Random(0))
+    waits, t = [], 1000.0
+    while True:
+        res = pacing.check("x.com", now=t, state_path=state, rng=random.Random(1))
+        if res["allowed"]:
+            break
+        waits.append(res["wait_seconds"])
+        t += 10.0
+    assert len(waits) > 2
+    assert all(b < a for a, b in zip(waits, waits[1:]))    # strictly decreasing
+
+    # the SKILL protocol: sleep exactly the printed wait, re-check → ALLOW
+    res = pacing.check("x.com", now=5000.0, state_path=state, rng=random.Random(2))
+    # (state was reset by the loop above ending in an ALLOW at time t — re-pin)
+    if not res["allowed"]:
+        follow = pacing.check("x.com", now=5000.0 + res["wait_seconds"],
+                              state_path=state, rng=random.Random(2))
+        assert follow["allowed"] is True
+
+
+def test_sleeping_exactly_the_first_printed_wait_allows(tmp_path):
+    state = _state_file(tmp_path)
+    pacing.check("x.com", now=0.0, state_path=state, rng=random.Random(3))
+    res = pacing.check("x.com", now=0.0, state_path=state, rng=random.Random(4))
+    assert res["allowed"] is False
+    follow = pacing.check("x.com", now=0.0 + res["wait_seconds"], state_path=state,
+                          rng=random.Random(5))
+    assert follow["allowed"] is True
+
+
+def test_legacy_entry_without_a_pinned_interval_still_paces(tmp_path):
+    """State files written before interval pinning lack next_allowed_epoch — they
+    fall back to a fresh draw from last_fetch_epoch (and are NOT 'state-corrupt')."""
+    state = _state_file(tmp_path)
+    state.write_text(json.dumps({"hosts": {"x.com": {
+        "count": 1, "last_fetch_epoch": 1000.0,
+        "aborted": False, "abort_reason": None}}}), encoding="utf-8")
+    res = pacing.check("x.com", now=1000.0, state_path=state, rng=random.Random(0))
+    assert res["allowed"] is False and res["reason"] == "min-interval"
+    assert 45 <= res["wait_seconds"] <= 120
+
+
+# ── F6: no lost updates — atomic saves, merge-on-save for abort and check ──────
+def test_abort_latch_survives_a_concurrent_stale_check_save(tmp_path):
+    """The audit interleave: B loads, A aborts + saves, B's fetch-record lands after.
+    check records via a fresh-load merge, so its save never carries a stale latch."""
+    state = _state_file(tmp_path)
+    pacing.check("x.com", now=100.0, state_path=state, rng=random.Random(0))
+    pacing.abort("x.com", "captcha shown", state_path=state)          # A lands first
+    # B (which had loaded before A's abort and decided ALLOW) records its fetch
+    assert pacing._record_fetch(state, "x.com", 200.0, 260.0) is True
+    saved = json.loads(state.read_text(encoding="utf-8"))["hosts"]["x.com"]
+    assert saved["aborted"] is True and saved["abort_reason"] == "captcha shown"
+    assert saved["count"] == 2                          # B's fetch still accounted
+    res = pacing.check("x.com", now=10 ** 9, state_path=state)
+    assert res["allowed"] is False and "captcha shown" in res["reason"]
+
+
+def test_concurrent_checks_on_different_hosts_both_land(tmp_path):
+    """B loaded before A's save; B's record merges only its own host entry, so A's
+    host is not clobbered."""
+    state = _state_file(tmp_path)
+    pacing._load(state)                                  # B loads (empty)
+    pacing.check("x.com", now=100.0, state_path=state, rng=random.Random(0))   # A
+    assert pacing._record_fetch(state, "www.linkedin.com", 100.0, 200.0) is True
+    saved = json.loads(state.read_text(encoding="utf-8"))["hosts"]
+    assert saved["x.com"]["count"] == 1
+    assert saved["www.linkedin.com"]["count"] == 1
+
+
+def test_atomic_save_leaves_no_temp_file(tmp_path):
+    state = _state_file(tmp_path)
+    pacing.check("x.com", now=100.0, state_path=state, rng=random.Random(0))
+    pacing.abort("www.linkedin.com", "soft-block", state_path=state)
+    assert state.exists()
+    assert list(tmp_path.glob("*.tmp")) == []
+
+
+# ── F7: the default state path is anchored to the user's home, not the CWD ────
+def test_default_state_path_lives_under_home(tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    res = pacing.check("x.com", now=1000.0, rng=random.Random(0))
+    assert res["allowed"] is True
+    assert (tmp_path / ".supervisorly" / "pacing_state.json").exists()
+
+
+def test_caps_and_latches_do_not_depend_on_the_cwd(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(Path, "home", lambda: home)
+    for d in ("cwd1", "cwd2"):
+        (tmp_path / d).mkdir()
+    monkeypatch.chdir(tmp_path / "cwd1")
+    pacing.check("x.com", now=1000.0, rng=random.Random(0))
+    monkeypatch.chdir(tmp_path / "cwd2")                 # same host, fresh CWD
+    res = pacing.check("x.com", now=1000.0, rng=random.Random(0))
+    assert res["allowed"] is False and res["reason"] == "min-interval"
+
+
+# ── F8: semantically broken state entries fail closed (DENY state-corrupt) ─────
+@pytest.mark.parametrize("entry", [
+    {"count": 1, "last_fetch_epoch": "yesterday", "aborted": False,
+     "abort_reason": None},                                          # string epoch
+    {"count": 1, "last_fetch_epoch": 0.0},                           # missing 'aborted'
+    {"count": "3", "last_fetch_epoch": 0.0, "aborted": False,
+     "abort_reason": None},                                          # string count
+])
+def test_broken_state_entry_fails_closed_without_a_traceback(tmp_path, entry):
+    state = _state_file(tmp_path)
+    state.write_text(json.dumps({"hosts": {"x.com": entry}}), encoding="utf-8")
+    res = pacing.check("x.com", state_path=state, rng=random.Random(0))
+    assert res["allowed"] is False and "state-corrupt" in res["reason"]
+
+
+def test_cli_pace_broken_state_entry_exits_3(tmp_path, capsys):
+    state = _state_file(tmp_path)
+    state.write_text(json.dumps({"hosts": {"x.com": {
+        "count": 1, "last_fetch_epoch": "yesterday", "aborted": False,
+        "abort_reason": None}}}), encoding="utf-8")
+    rc = main(["pace", "--host", "x.com", "--state", str(state)])
+    assert rc == 3
+    out = capsys.readouterr()
+    assert out.out.startswith("DENY host=x.com") and "state-corrupt" in out.out
+    assert out.err == ""                                # no traceback
