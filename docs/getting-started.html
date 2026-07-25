@@ -338,7 +338,7 @@ hr.soft{border:none;border-top:1px dashed var(--line-2);margin:26px 0}
       <div class="win"><div class="bar"><i></i><i></i><i></i><span class="name">terminal</span></div>
         <div class="term"><span class="p">$</span> python -m pytest<br>
         <span class="g">...................................................... [100%]</span><br>
-        <span class="g">140 passed</span> <span class="o">in 1.20s</span></div></div>
+        <span class="g">363 passed</span> <span class="o">in 1.20s</span></div></div>
     </div>
 
     <div class="step-card">
@@ -517,7 +517,9 @@ hr.soft{border:none;border-top:1px dashed var(--line-2);margin:26px 0}
         <span class="p">$</span> python -m supervisorly map-field --field "causal ML"<br><br>
         <span class="c"># 2. open the Scan Studio wizard, tick topics, click “Export plan”</span><br>
         <span class="p">$</span> python -m supervisorly studio --map output/subject_map.json<br><br>
-        <span class="c"># 3. scan from the exported plan</span><br>
+        <span class="c"># 3. the plan downloads to your browser's Downloads folder —</span><br>
+        <span class="c">#    move supervisorly_plan.json into your project folder, then:</span><br>
+        <span class="c"># 4. scan from the exported plan</span><br>
         <span class="p">$</span> python -m supervisorly scan --plan supervisorly_plan.json --out output/live-dashboard.html</div></div>
       <p style="margin-top:12px">It reads only <b>public</b> pages and open databases and obeys every
         site's <code>robots.txt</code>. When the agent drives it, its own browser reads pages for you —

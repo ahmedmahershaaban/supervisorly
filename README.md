@@ -115,6 +115,8 @@ Studio** wizard), and run from the exported plan — or skip discovery and name 
 ```bash
 python -m supervisorly map-field --field "causal ML"        # → output/subject_map.json
 python -m supervisorly studio --map output/subject_map.json # → output/studio.html (offline wizard)
+# the Studio exports the plan as a browser download — it lands in your browser's
+# Downloads folder; move supervisorly_plan.json into your project folder, then:
 python -m supervisorly scan --plan supervisorly_plan.json --out output/live.html
 python -m supervisorly scan --targets profs.json --email you@example.com --out output/live.html
 ```
@@ -137,9 +139,15 @@ The setup is host-portable: register the server once at user level, e.g. for Cla
 
 ```bash
 python -m supervisorly pace --host x.com            # gate before a browser page: exit 0 = go, 3 = wait/deny
-python -m supervisorly ingest-page --url <finalUrl> --file browser_staging/page.txt \
-    --db supervisorly.sqlite                        # store agent-extracted text as a snapshot
+python -m supervisorly ingest-page --url <finalUrl> --file browser_staging/page.txt
+    # store agent-extracted text as a snapshot; add --entity professor:<id> --run <run_id>
+    # to also fill that professor's fields and close their walled-social gap task
+python -m supervisorly reexport                     # rebuild the dashboard after a fill (no fetching)
 ```
+
+`ingest-page` and `reexport` default to `output/supervisorly.sqlite` — the same store the
+documented scan (`--out output/dashboard.html`) writes. If your scan used a custom
+`--out`, pass `--db <out-dir>/supervisorly.sqlite` so the pages land where the scan looks.
 
 ## Scheduled re-scans
 

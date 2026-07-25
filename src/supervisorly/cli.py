@@ -4,7 +4,8 @@ Every pipeline stage is independently runnable from here (architecture §7), so 
 tool is debuggable and portable. Shipped commands: ``init-db``, ``version``,
 ``scan`` (demo + live, plan-driven and named-target inputs, D-066), ``map-field``
 (the subject-map stage, D-066), ``studio`` (the Scan Studio plan wizard, D-067),
-``ingest-page`` (the browser seam, D-064) and ``pace`` (the social pacing gate, D-065).
+``ingest-page`` (the browser seam, D-064), ``reexport`` (dashboard rebuild from the
+persisted store, D-029) and ``pace`` (the social pacing gate, D-065).
 """
 
 from __future__ import annotations
@@ -38,7 +39,12 @@ def cmd_ingest_page(args: argparse.Namespace) -> int:
 
     The agent saves the in-page JS extractor's output to a staging file and calls
     this command; it handles only paths, byte counts, and the one-line result —
-    raw HTML/DOM never enters the agent's context."""
+    raw HTML/DOM never enters the agent's context.
+
+    Store-only by default; with ``--entity <kind:ref>`` + ``--run <run_id>`` it also runs
+    the consumer half (``fetch.browser_fill``): the pipeline's own extractors fill the
+    entity's signal fields from the snapshot, its awaiting_human gap tasks close, and the
+    run status is recomputed (D-049)."""
     from urllib.parse import urlparse
 
     from .fetch.browser_rung import ingest_page
@@ -68,19 +74,95 @@ def cmd_ingest_page(args: argparse.Namespace) -> int:
         print(f"staging file {file} is empty - nothing to ingest.")
         return 2
 
+    # ── optional fill mode: --entity <kind:ref> + --run <run_id>, always together ──
+    entity_kind = entity_ref = None
+    if (args.entity is None) != (args.run is None):
+        print("--entity and --run must be given together (fill mode), or neither "
+              "(store-only).")
+        return 2
+    if args.entity is not None:
+        kind, sep, ref = args.entity.partition(":")
+        kind = {"professor": "person"}.get(kind.strip(), kind.strip())
+        ref = ref.strip()
+        if not sep or not kind or not ref:
+            print(f"invalid --entity {args.entity!r}: expected <kind>:<ref> "
+                  f"(e.g. professor:a1234567890).")
+            return 2
+        if kind != "person":
+            print(f"invalid --entity {args.entity!r}: kind must be 'professor' (or "
+                  f"'person') - deep-dive targets are people.")
+            return 2
+        entity_kind, entity_ref = kind, ref
+
     db = Path(args.db)
     if db.parent != Path("") and not db.parent.exists():
         db.parent.mkdir(parents=True, exist_ok=True)   # same first-run rule as init-db
     snap_root = Path(args.snap_root) if args.snap_root else db.parent / ".cache" / "snaps"
     conn = open_db(db)
     try:
-        res = ingest_page(conn, snap_root, final_url=url, text=text)
+        if entity_kind is None:
+            res = ingest_page(conn, snap_root, final_url=url, text=text)
+            # ASCII-only console output (cp1252 consoles can't encode arrows - _write_result)
+            print(f"ingested {res['bytes']} bytes -> snap {res['snapshot_hash'][:12]} "
+                  f"source {res['source_id']}")
+            return 0
+
+        from . import pipeline
+        from .fetch.browser_fill import fill_from_browser_page
+        from .model import claims, runs
+
+        if runs.get_run(conn, args.run) is None:
+            print(f"unknown --run {args.run!r}: no such run in {db}.")
+            return 2
+        known = claims.claims_for(conn, entity_kind, entity_ref) or any(
+            t["target_ref"] == entity_ref for t in runs.tasks_for_run(conn, args.run))
+        if not known:
+            print(f"unknown --entity {args.entity!r}: {entity_ref} has no claims and is "
+                  f"not a target of run {args.run}.")
+            return 2
+        res = fill_from_browser_page(
+            conn, snap_root, run_id=args.run, entity_kind=entity_kind,
+            entity_id=entity_ref, final_url=url, text=text)
     finally:
         conn.close()
-    # ASCII-only console output (cp1252 consoles can't encode arrows — see _write_result)
-    print(f"ingested {res['bytes']} bytes -> snap {res['snapshot_hash'][:12]} "
-          f"source {res['source_id']}")
+    filled = " ".join(f"{f}={res['fields'][f]}" for f in pipeline.BROWSER_FILL_FIELDS)
+    line = (f"ingested {res['bytes']} bytes -> snap {res['snapshot_hash'][:12]} "
+            f"source {res['source_id']}; filled {filled}; "
+            f"{res['tasks_closed']} gap(s) closed; run {res['run_status']}")
+    if res["rejected"]:
+        why = "; ".join(f"{f}: {r}" for f, r in res["rejected"].items())
+        line += f"; REJECTED {why} - gap left open"
+    print(line)
     return 0
+
+
+def cmd_reexport(args: argparse.Namespace) -> int:
+    """Rebuild the dashboard from the persisted store — no fetching (D-029).
+
+    This is the post-fill step of the browser recipe: after ``ingest-page --entity ...``
+    closes a gap, regenerate the dashboard so it shows the filled values. Targets are
+    reconstructed from the persisted claims (the store keeps ids, not display names, so a
+    re-exported dashboard names professors by id — the full named view comes from a
+    ``scan --resume`` re-export)."""
+    from . import pipeline
+
+    db = Path(args.db)
+    if not db.is_file():
+        print(f"database not found: {db} - run a scan first.")
+        return 2
+    conn = open_db(db)
+    try:
+        pids = [r["entity_id"] for r in conn.execute(
+            "SELECT DISTINCT entity_id FROM claim WHERE entity_kind='person' "
+            "ORDER BY entity_id")]
+    finally:
+        conn.close()
+    if not pids:
+        print(f"no professor claims in {db} - nothing to re-export.")
+        return 2
+    result = pipeline.reexport(db, [{"id": pid} for pid in pids],
+                               optout_path=args.optout)
+    return _write_result(result, Path(args.out), "reexport")
 
 
 def cmd_pace(args: argparse.Namespace) -> int:
@@ -586,14 +668,36 @@ def build_parser() -> argparse.ArgumentParser:
     pt.set_defaults(func=cmd_studio)
 
     pb = sub.add_parser("ingest-page",
-                        help="store browser-extracted page TEXT as a snapshot (D-064)")
+                        help="store browser-extracted page TEXT as a snapshot (D-064); "
+                             "with --entity + --run it also fills that target's fields and "
+                             "closes its awaiting_human gap tasks")
     pb.add_argument("--url", required=True, help="the FINAL page url (after redirects)")
     pb.add_argument("--file", required=True,
                     help="staging file holding the in-page extractor's text output")
-    pb.add_argument("--db", default="supervisorly.sqlite", help="database path")
+    pb.add_argument("--db", default="output/supervisorly.sqlite",
+                    help="database path (default: output/supervisorly.sqlite - the store a "
+                         "default `scan --out output/...` writes; if your scan used a custom "
+                         "--out, pass --db <out-dir>/supervisorly.sqlite)")
     pb.add_argument("--snap-root", dest="snap_root", default=None,
                     help="snapshot store root (default: <db-dir>/.cache/snaps)")
+    pb.add_argument("--entity", default=None, metavar="KIND:REF",
+                    help="fill this target from the page (e.g. professor:a1234567890); "
+                         "requires --run")
+    pb.add_argument("--run", dest="run", default=None, metavar="RUN_ID",
+                    help="the run the entity belongs to; required with --entity")
     pb.set_defaults(func=cmd_ingest_page)
+
+    pr = sub.add_parser("reexport", help="rebuild the dashboard from the persisted store "
+                                         "(D-029) - e.g. after an ingest-page fill; "
+                                         "no fetching")
+    pr.add_argument("--db", default="output/supervisorly.sqlite",
+                    help="database path (default: output/supervisorly.sqlite - the store a "
+                         "default `scan --out output/...` writes)")
+    pr.add_argument("--out", default="output/dashboard.html",
+                    help="dashboard output path (default: output/dashboard.html)")
+    pr.add_argument("--optout", default=None,
+                    help="path to an optout.txt suppression list (D-023)")
+    pr.set_defaults(func=cmd_reexport)
 
     pp = sub.add_parser("pace", help="social pacing gate — run before every browser page "
                                      "(D-065); exit 0 = ALLOW, 3 = DENY")

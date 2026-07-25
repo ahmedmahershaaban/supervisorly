@@ -556,7 +556,8 @@ def build_studio(subject_map: dict, *, defaults: dict | None = None) -> str:
       it arrives as a browser download), then run the scan — yourself, or ask the agent to run it.</p>
     <button type="button" class="btn big" id="export">Export plan ↓</button>
     <div id="done" class="hidden">
-      <p class="why" style="margin-top:16px">Plan downloaded. Next command:</p>
+      <p class="why" style="margin-top:16px">Plan downloaded — it lands in your browser's
+        Downloads folder. Move it into your project folder, then run:</p>
       <div class="code"><span id="nextcmd">supervisorly scan --plan supervisorly_plan.json --out output/live.html</span><button type="button" class="copy" id="copybtn">copy</button></div>
       <div class="hint">The agent can run this for you — the plan already carries your email and targets.</div>
     </div>

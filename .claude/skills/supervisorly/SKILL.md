@@ -130,16 +130,29 @@ for live scans. The exact recipe for every page:
    as the function body (default for static pages; args `[{"scroll": true}]` for scroll mode on
    social pages). Write ONLY the returned `text` to a staging file (e.g. `browser_staging/`)
    WITHOUT reading it into context — you handle paths and byte counts, never raw page content.
-5. **Ingest.** `supervisorly ingest-page --url <finalUrl> --file <staging>` prints a one-line
-   result; the deterministic engine takes it from there — snapshot → the existing extractors →
-   D-010 quote-verified claims. A browser page is just another snapshot.
+5. **Ingest.** `supervisorly ingest-page --url <finalUrl> --file <staging>` stores the text
+   as a snapshot and prints a one-line result. To also close a target's gap, add
+   `--entity professor:<id> --run <run_id>`: the deterministic engine takes it from there —
+   the pipeline's own extractors run over the snapshot, D-010 quote-verified claims are
+   recorded (a human-assisted value is never clobbered), the target's `awaiting_human`
+   gap-fill tasks close, and the run flips to `finalized` when no open gaps remain. A
+   browser page is just another snapshot. Both this and `reexport` default to
+   `output/supervisorly.sqlite` — the store the documented scan (`--out output/...`) writes;
+   **if the scan used a custom `--out`, pass `--db <out-dir>/supervisorly.sqlite`**.
+6. **Re-export after a fill.** `supervisorly reexport --db <db> --out output/dashboard.html`
+   rebuilds the dashboard from the persisted store (no fetching) so the filled values show.
 
 ## Social rung (D-065)
 
 Walled-social gap tasks — the `awaiting_human` gap_fill tasks minted for a professor's
 **advertised** x.com / linkedin.com profiles — are executed by you through the logged-in profile,
 not parked for the student: per-target, read-only, scroll mode, `pace` enforced before every page.
-On ANY challenge, soft-block, or unexpected login redirect: `supervisorly pace --host <h> --abort
-"<reason>"` (the host latches aborted for the session), mark the field `blocked`, and route it to
-the classic human rung — never retry harder. Scholar is minimal-use: profile pages only, no search
-pagination. Only advertised profile URLs are ever visited — never people-search enumeration.
+Read the advertised profile, then return the page through the browser seam **with the target and
+run attached** — `supervisorly ingest-page --url <finalUrl> --file <staging> --entity
+professor:<id> --run <run_id>` — which fills the signal fields from the snapshot, closes the gap
+task, and recomputes the run status; finish with `supervisorly reexport` so the dashboard shows
+the filled values. On ANY challenge, soft-block, or unexpected login redirect: `supervisorly pace
+--host <h> --abort "<reason>"` (the host latches aborted for the session), mark the field
+`blocked`, and route it to the classic human rung — never retry harder. Scholar is minimal-use:
+profile pages only, no search pagination. Only advertised profile URLs are ever visited — never
+people-search enumeration.

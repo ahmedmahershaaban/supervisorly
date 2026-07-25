@@ -559,12 +559,69 @@ def _target_open_gap(conn, pid) -> bool:
     """True if the target still has an open gap for the human rung: any field ``blocked``
     (unreached), or an advertised **walled** social page the tool recorded but must not scrape —
     reading it is a human-rung task (D-039/044), so the run cannot claim ``finalized`` while a
-    known walled recruiting source went unchecked (Phase L3)."""
+    known walled recruiting source went unchecked (Phase L3).
+
+    The walled-social condition is discharged when its human-rung read task is no longer
+    incomplete — i.e. the browser-fill consumer (``fetch.browser_fill``, the D-064 consumer
+    half) ingested the walled page and closed the task. Until then the task is the durable
+    record that the check is still owed, so a walled link alone keeps the gap open exactly
+    as before."""
     cs = claims.claims_for(conn, "person", pid)
-    return any(c.get("state") == "blocked" for c in cs) or any(
+    if any(c.get("state") == "blocked" for c in cs):
+        return True
+    walled_advertised = any(
         c.get("field") == "social" and c.get("state") == "value"
         and isinstance(c.get("value"), str) and _WALLED_SOCIAL.search(c["value"])
         for c in cs)
+    if not walled_advertised:
+        return False
+    placeholders = ",".join("?" * len(runs.INCOMPLETE_TASK_STATUSES))
+    row = conn.execute(
+        f"SELECT 1 FROM task WHERE target_kind='person' AND target_ref=? AND stage='gap_fill' "
+        f"AND status IN ({placeholders}) LIMIT 1",
+        (pid, *sorted(runs.INCOMPLETE_TASK_STATUSES)),
+    ).fetchone()
+    return row is not None
+
+
+# ── the consumer half of the D-064 browser seam ───────────────────────────────
+# Minimal public wrappers over the deep-dive's private machinery, so the browser-fill
+# consumer (``fetch.browser_fill``) runs the SAME extractors / evidence path / gap
+# computation as ``_process_targets`` instead of duplicating them.
+
+#: The signal fields a browser-ingested page fills. ``social`` is deliberately absent:
+#: the advertised-profile link is a display value recorded from the professor's own page,
+#: not something re-extracted off the walled page itself.
+BROWSER_FILL_FIELDS = ("recruiting_signal", "deadline", "students_signal", "industry_signal")
+
+
+def run_signal_extractors(html: str) -> dict:
+    """The deep-dive's deterministic signal extractors over a page, field_id → result.
+
+    Each value is ``(value, quote, confidence)`` or ``None`` — the same functions and
+    semantics ``_process_targets`` uses (``_EXTRACTORS``), restricted to
+    ``BROWSER_FILL_FIELDS``."""
+    return {field: _EXTRACTORS[field](html) for field in BROWSER_FILL_FIELDS}
+
+
+def record_field_evidence(conn, pid, field, found, *, src_id, snapshot_hash, html):
+    """Public ``_record_evidence``: one field's deterministic result with the deep-dive's
+    precedence (a value supersedes; an absence never clobbers a human-assisted value)."""
+    return _record_evidence(conn, pid, field, found, src_id=src_id,
+                            snapshot_hash=snapshot_hash, html=html)
+
+
+def recompute_run_status(conn, run_id) -> str:
+    """``finalized`` vs ``finalized_with_open_gaps`` from current claim/task state (D-049).
+
+    The same computation ``run_offline``/``reexport`` derive their status from —
+    ``_target_open_gap`` over the run's person targets — so a gap closed by the browser
+    fill flips the run to ``finalized`` exactly the way a re-export would see it."""
+    rows = conn.execute(
+        "SELECT DISTINCT target_ref FROM task WHERE run_id=? AND target_kind='person'",
+        (run_id,)).fetchall()
+    gaps = sum(1 for r in rows if _target_open_gap(conn, r["target_ref"]))
+    return "finalized_with_open_gaps" if gaps else "finalized"
 
 
 def _process_targets(conn, run_id, targets, fetcher, snaps, *, stats, resume) -> int:
