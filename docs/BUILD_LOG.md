@@ -984,3 +984,45 @@ verified against the real `--help` output on the project venv first.
 **Verified:** `-m supervisorly {scan,map-field,studio,ingest-page,pace,init-db,version} --help`
 all match the documented flags; full suite re-run after the doc edits.
 -> **319 passed** (unchanged — docs only).
+
+## round B6 — eval + adversarial audit + clean-room (commits `4dc65ec`, `22a452c`, `797ed5d`, `96f4e7e`)
+
+Five independent finder agents (ingest seam, pacing, subject-map/plan/targets, Scan Studio,
+docs truthfulness), every finding reproduced in code with self-rebuttal: **23 confirmed
+(4 HIGH, 11 MEDIUM, 8 LOW)**, fixed in four green waves, each with regression tests:
+
+- **Wave A (`4dc65ec`)** — v1->v2 migration rebuilt per SQLite's documented procedure
+  (foreign_keys=OFF, one transaction, leftover-web_source_old recovery; claim-bearing v1 DBs
+  were the realistic unpinned case); ingest-page utf-8-sig + BOM + loud decode failures;
+  pacing classify() canonicalization (port/trailing-dot/scheme/ccTLD bypasses closed, hostile
+  lookalikes still unpaced); jittered interval pinned at fetch-record time
+  (next_allowed_epoch — printed waits binding, no re-roll); atomic save + abort merge (a
+  concurrent ALLOW can no longer erase the latch); state anchored at ~/.supervisorly/;
+  broken state entries fail closed (exit 3). -> **342 passed**.
+- **Wave B (`22a452c`)** — author-lookup truncation markers travel into the run and persist
+  across reexport (PARTIAL honesty for named targets); identity resolution
+  verified/unverified/unchecked reaches export + dashboard badge; plan/targets values
+  type-checked at load (fail loud by key+type); university_mode/intent_kind enums validated
+  (a typo can no longer widen "only" to a whole-country scan); select_institutions raises on
+  unknown mode; opt-out coverage line honest. -> **353 passed**.
+- **Wave C (`797ed5d`)** — Studio: reduced-motion gates the export scroll; focus ring on the
+  intent card; malformed map entries can't brick the wizard (Python sanitize + JS guards +
+  wiring order); hostile intent_kind falls back; parseProfs last-comma split; id-less topics
+  never enter resolved_topic_ids. -> **363 passed**.
+- **Wave D (`96f4e7e`)** — **the consumer half of the D-064 seam**: fetch/browser_fill.py runs
+  the pipeline's own extractors over an agent_browser snapshot, records through the D-010
+  evidence path, closes awaiting_human gap_fill tasks, recomputes run status — the
+  walled-social gap now closes via the browser tier (the docs-truthfulness audit's headline
+  finding). CLI ingest-page --entity/--run + reexport command; default db reconciled to
+  output/supervisorly.sqlite; plan-download move step documented; stale test count fixed.
+  -> **377 passed**.
+
+**Clean-room (goal §B6) — PASSED.** Wiped .venv/egg-info/__pycache__/.pytest_cache/output/
+.cache/snaps/browser_staging/*.sqlite/scratchpad; git status + git clean -ndx empty (no
+personal data, no profile data, no scan output). Fresh install -> **377 passed, first try**;
+post-install tree clean. Live Chrome smoke test recorded **skipped** (MCP tools load at
+session start; this build session has none) — procedure documented in
+docs/BROWSER_COMPLETION_REPORT.md §5.
+
+**State: GOAL 3 COMPLETE.** Suite green at **377 passed** on `build/browser`; audit closed
+with zero open findings; clean-room green; DoD checked in docs/BROWSER_COMPLETION_REPORT.md.
