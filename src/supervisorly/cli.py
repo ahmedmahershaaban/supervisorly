@@ -148,9 +148,14 @@ def _write_result(result: dict, out: Path, label: str) -> int:
     out.with_suffix(".json").write_text(
         json.dumps(result["export"], ensure_ascii=False, indent=2), encoding="utf-8")
     n = len(result["export"]["professors"])
+    # Surface the opt-out suppression count so a smaller professor list is never misread as
+    # a coverage gap (D-023/D-046).
+    opted = (result.get("stats") or {}).get("opted_out") or 0
+    opt_note = f", {opted} opted out" if opted else ""
     # ASCII-only console output — the default Windows console codec (cp1252) can't encode a
     # Unicode arrow, which would crash the command after the files were already written.
-    print(f"scanned {n} professors ({label}) -> {out} (+ {out.with_suffix('.json').name})")
+    print(f"scanned {n} professors ({label}{opt_note}) -> {out} "
+          f"(+ {out.with_suffix('.json').name})")
     return 0
 
 
@@ -226,6 +231,78 @@ def cmd_map_field(args: argparse.Namespace) -> int:
 PLAN_REQUIRED_KEYS = ("intent_kind", "country", "resolved_topic_ids", "field",
                       "university_mode", "universities")
 
+# Valid enum values a plan may carry — mirrors the argparse choices of the overriding flags.
+PLAN_UNIVERSITY_MODES = ("all", "prioritise", "only")
+PLAN_INTENT_KINDS = ("training", "pre_master", "pre_phd", "mentor", "master", "phd",
+                     "postdoc")
+
+
+def _target_spec_errors(specs, key: str = "targets") -> list[str]:
+    """Validation errors for a ``--targets`` / plan-carried targets list (D-002).
+
+    Every entry must be an OpenAlex author URL string or a ``{"name": non-empty str,
+    "affiliation": str?}`` object — a numeric name would be searched verbatim (confidently
+    resolving whoever OpenAlex's top hit for "42" is), and a non-string affiliation crashes
+    the author lookup with an AttributeError traceback instead of a clear message."""
+    if not isinstance(specs, list):
+        return [f"'{key}' must be a list, got {type(specs).__name__}"]
+    errors: list[str] = []
+    for i, e in enumerate(specs):
+        if isinstance(e, str):
+            continue
+        if isinstance(e, dict):
+            name = e.get("name")
+            if not isinstance(name, str) or not name.strip():
+                errors.append(f"{key}[{i}]: 'name' must be a non-empty string, got {name!r}")
+            affiliation = e.get("affiliation")
+            if affiliation is not None and not isinstance(affiliation, str):
+                errors.append(f"{key}[{i}]: 'affiliation' must be a string, got "
+                              f"{type(affiliation).__name__}")
+            continue
+        errors.append(f"{key}[{i}] must be an OpenAlex author URL string or a "
+                      f'{{"name": ..., "affiliation": ...}} object, got {e!r}')
+    return errors
+
+
+def _plan_value_errors(data: dict) -> list[str]:
+    """Type + enum checks on a plan's VALUES (key presence is checked separately, D-002).
+
+    A mangled value must fail loud, never silently mangle: ``list("Uni")`` would otherwise
+    become three one-letter "universities" (scanning nothing, misread as a coverage gap) and
+    ``list("T10001")`` a list of characters. Enum typos are worse — a plan's
+    ``university_mode: "onyl"`` would silently INVERT the asked-for scope ("only these" ->
+    the whole country). Case is significant: ``"ONLY"`` is rejected, never quietly
+    normalised — a scope decision is never silently rewritten."""
+    errors: list[str] = []
+
+    def check_str_list(key: str) -> None:
+        v = data.get(key)
+        if v is None:
+            return
+        if not isinstance(v, list) or not all(isinstance(x, str) for x in v):
+            errors.append(f"'{key}' must be a list of strings, got "
+                          f"{type(v).__name__}")
+
+    check_str_list("resolved_topic_ids")
+    check_str_list("universities")
+    for key in ("country", "university_mode", "intent_kind", "field", "email"):
+        v = data.get(key)
+        if v is not None and not isinstance(v, str):
+            errors.append(f"'{key}' must be a string, got {type(v).__name__}")
+    mode = data.get("university_mode")
+    if isinstance(mode, str) and mode not in PLAN_UNIVERSITY_MODES:
+        errors.append(f"'university_mode' must be one of {', '.join(PLAN_UNIVERSITY_MODES)}, "
+                      f"got {mode!r}")
+    intent = data.get("intent_kind")
+    if isinstance(intent, str) and intent not in PLAN_INTENT_KINDS:
+        errors.append(f"'intent_kind' must be one of {', '.join(PLAN_INTENT_KINDS)}, "
+                      f"got {intent!r}")
+    if "targets" in data:
+        target_errors = _target_spec_errors(data["targets"])
+        if target_errors:
+            errors.append("invalid 'targets': " + "; ".join(target_errors))
+    return errors
+
 
 def _load_plan(path: str) -> tuple[dict | None, str | None]:
     """Load + validate a ``--plan`` JSON file; returns ``(plan, None)`` or ``(None, error)``."""
@@ -245,6 +322,9 @@ def _load_plan(path: str) -> tuple[dict | None, str | None]:
     if missing:
         return None, (f"plan file {p} is missing required key(s): {', '.join(missing)}. "
                       f"Expected a Scan Studio plan with keys: {', '.join(PLAN_REQUIRED_KEYS)}.")
+    errors = _plan_value_errors(data)
+    if errors:
+        return None, f"plan file {p}: " + "; ".join(errors)
     return data, None
 
 
@@ -259,10 +339,11 @@ def _load_target_specs(path: str) -> tuple[list | None, str | None]:
         data = json.loads(p.read_text(encoding="utf-8"))
     except ValueError as exc:
         return None, f"invalid targets JSON in {p}: {exc}"
-    if not isinstance(data, list) or not all(
-            isinstance(e, str) or (isinstance(e, dict) and e.get("name")) for e in data):
-        return None, (f"targets file {p} must be a JSON list of "
-                      '{"name": ..., "affiliation": ...} objects or OpenAlex author URL strings.')
+    errors = _target_spec_errors(data)
+    if errors:
+        return None, (f"targets file {p}: " + "; ".join(errors) +
+                      ". Expected a list of {\"name\": ..., \"affiliation\": ...} objects "
+                      "or OpenAlex author URL strings.")
     return data, None
 
 
@@ -296,6 +377,7 @@ def _resolve_named_targets(oa, specs: list) -> tuple[list[dict], list[str], list
     skipped: list[str] = []
     notes: list[str] = []
     for spec in specs:
+        markers_before = len(oa.truncated_sources)
         if isinstance(spec, str):
             short_id = spec.rstrip("/").rsplit("/", 1)[-1]
             author = oa.author_by_id(short_id)
@@ -304,7 +386,13 @@ def _resolve_named_targets(oa, specs: list) -> tuple[list[dict], list[str], list
             author = oa.author_search(spec["name"], spec.get("affiliation"))
             label = spec["name"]
         if not author:
-            skipped.append(f"{label}: no OpenAlex author match (lookup failed or none exists)")
+            # Distinguish a lookup FAILURE (a truncation-class event — the run is marked
+            # PARTIAL, D-037) from a genuine absence (200, empty results — an honest skip).
+            if len(oa.truncated_sources) > markers_before:
+                skipped.append(f"{label}: OpenAlex lookup FAILED - the run is marked PARTIAL "
+                               "in the coverage (likely transient; retry later)")
+            else:
+                skipped.append(f"{label}: no OpenAlex author match")
             continue
         target = _author_to_target(author)
         targets.append(target)
@@ -359,13 +447,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
             print(err)
             return 2
     elif plan_file.get("targets"):
-        specs = plan_file["targets"]
-        if not isinstance(specs, list) or not all(
-                isinstance(e, str) or (isinstance(e, dict) and e.get("name")) for e in specs):
-            print(f"plan file {args.plan} has an invalid 'targets' entry — expected a list of "
-                  '{"name": ..., "affiliation": ...} objects or OpenAlex author URL strings.')
-            return 2
-        target_specs = specs
+        target_specs = plan_file["targets"]     # shape already validated by _load_plan
 
     country_in = args.country if args.country is not None else plan_file.get("country")
     field = args.field if args.field is not None else plan_file.get("field")
@@ -407,9 +489,15 @@ def cmd_scan(args: argparse.Namespace) -> int:
     transport = httpx_transport(user_agent=f"SupervisorlyBot/0.1 (mailto:{email})")
 
     targets_override = None
+    targets_truncated: list[str] = []
     if target_specs is not None:
         oa = OpenAlexClient(transport, email=email, key=openalex_key)
         targets_override, skipped, notes = _resolve_named_targets(oa, target_specs)
+        # The author lookups happened on THIS client, not run_live's own — hand its
+        # truncation markers (author-search@/author@) to run_live so a lookup FAILURE
+        # surfaces as PARTIAL coverage + persisted run counts, exactly like the ladder's
+        # own markers (D-037), instead of reading as "none were dropped".
+        targets_truncated = list(oa.truncated_sources)
         for line in notes:
             print(f"WARNING: {line}")
         for line in skipped:
@@ -423,7 +511,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
         plan, transport, snap_root, email=email,
         openalex_key=openalex_key,
         db_path=out.parent / "supervisorly.sqlite", optout_path=args.optout, resume=args.resume,
-        targets_override=targets_override,
+        targets_override=targets_override, targets_truncated=targets_truncated,
     )
     # sparse-coverage preflight + discovery warnings (D-060) — ASCII-safe by construction
     # (preflight/ladder messages are ASCII-only, like the rest of this console output).

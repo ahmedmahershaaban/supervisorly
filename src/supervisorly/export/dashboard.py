@@ -144,6 +144,14 @@ function dateKey(v){var t=Date.parse(v);return isNaN(t)?Infinity:t;}
 function dateFields(){return DATA.fields.filter(function(f){return f.datatype==="date";});}
 function isFirm(env){return !!(env && FIRM_CONF[env.confidence]);}
 function isWatch(env){return !isFirm(env);}
+function idBadge(p){
+  // named-target identity honesty label (D-010): verified needs no badge — a badge marks
+  // the two states where the OpenAlex match was NOT confirmed against an affiliation.
+  var r=p.identity_resolution;
+  if(r==="unverified") return ' <span class="badge watch" title="affiliation given but no OpenAlex hit matched it">identity unverified</span>';
+  if(r==="unchecked") return ' <span class="badge watch" title="no affiliation given — identity not checked">identity unchecked</span>';
+  return '';
+}
 function cell(env){
   if(!env) return '<span class="s-never_attempted">'+stateLabel.never_attempted+'</span>';
   if(env.state==="value") return '<span class="s-value">'+esc(env.value)+'</span>'+srcLink(env.source_url);
@@ -165,7 +173,7 @@ function renderTable(){
     cols.map(function(f){return '<th>'+esc(f.label)+'</th>';}).join('')+'</tr></thead><tbody>';
   profs.forEach(function(p){
     html+='<tr class="row" tabindex="0" role="button" data-id="'+esc(p.id)+'">'+
-      '<td class="name">'+esc(p.name||p.id)+'</td>'+
+      '<td class="name">'+esc(p.name||p.id)+idBadge(p)+'</td>'+
       cols.map(function(f){return '<td>'+cell(p.fields[f.id])+'</td>';}).join('')+'</tr>';
   });
   html+='</tbody></table></div>';
@@ -200,7 +208,7 @@ function openDetail(id){
   }).join('');
   document.getElementById("panel").innerHTML=
     '<div class="overlay" id="overlay"></div><aside class="detail"><button class="close" id="closeDetail">ESC ✕</button>'+
-    '<div class="eyebrow">Cell detail</div><h2>'+esc(p.name||p.id)+'</h2><div class="meta">'+esc(p.id)+'</div>'+body+'</aside>';
+    '<div class="eyebrow">Cell detail</div><h2>'+esc(p.name||p.id)+idBadge(p)+'</h2><div class="meta">'+esc(p.id)+'</div>'+body+'</aside>';
   document.getElementById("panel").classList.remove("hidden");
   document.getElementById("closeDetail").onclick=closeDetail;
   document.getElementById("overlay").onclick=closeDetail;

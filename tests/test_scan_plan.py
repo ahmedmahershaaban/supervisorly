@@ -217,3 +217,147 @@ def test_scan_targets_plus_country_unions_both_sets(tmp_path, monkeypatch, capsy
                    "--email", EMAIL, "--out", str(out)])
     assert rc == 0
     assert "scanned 2 professors (live)" in capsys.readouterr().out
+
+
+# ── Wave B audit fixes: plan/targets validation + honesty carry-over (S1–S5) ──
+
+def test_scan_plan_mangled_value_types_fail_loud(tmp_path, capsys):
+    # S3 (D-002): plan values are type-checked — never silently list()-mangled into
+    # char-lists or AttributeError tracebacks. Each message names the key + both types.
+    cases = [
+        ({"universities": "Uni"}, "'universities' must be a list of strings, got str"),
+        ({"resolved_topic_ids": "T10001"},
+         "'resolved_topic_ids' must be a list of strings, got str"),
+        ({"country": ["CA"]}, "'country' must be a string, got list"),
+        ({"universities": {"Uni": True}}, "'universities' must be a list of strings, got dict"),
+    ]
+    for over, expected in cases:
+        rc = cli.main(["scan", "--plan", str(_plan(tmp_path, **over)), "--email", EMAIL,
+                       "--out", str(tmp_path / "d.html")])
+        printed = capsys.readouterr().out
+        assert rc == 2, (over, printed)
+        assert expected in printed, (over, printed)
+
+
+def test_scan_plan_enum_typos_fail_loud(tmp_path, capsys):
+    # S4 (D-002/D-045): an unrecognized university_mode would otherwise silently scan the
+    # WHOLE country (scope inversion). Case is significant — "ONLY" is rejected, never
+    # quietly normalised: a scope decision is never silently rewritten.
+    cases = [
+        ({"university_mode": "onyl"}, "'university_mode' must be one of all, prioritise, only"),
+        ({"university_mode": "ONLY"}, "'university_mode' must be one of all, prioritise, only"),
+        ({"intent_kind": "take over the world"}, "'intent_kind' must be one of"),
+    ]
+    for over, expected in cases:
+        rc = cli.main(["scan", "--plan", str(_plan(tmp_path, **over)), "--email", EMAIL,
+                       "--out", str(tmp_path / "d.html")])
+        printed = capsys.readouterr().out
+        assert rc == 2, (over, printed)
+        assert expected in printed, (over, printed)
+
+
+def test_scan_targets_malformed_entries_fail_loud(tmp_path, capsys):
+    # S5 (D-002): non-string name/affiliation fails loud — a numeric name must NOT be
+    # searched verbatim, a numeric affiliation must NOT crash with AttributeError.
+    cases = [
+        ([{"name": 42}], "'name' must be a non-empty string"),
+        ([{"name": "Ada Maple", "affiliation": 123}], "'affiliation' must be a string"),
+        ([{"name": ["Ada Maple"]}], "'name' must be a non-empty string"),
+    ]
+    for entries, expected in cases:
+        spec = _spec(tmp_path, entries)
+        rc = cli.main(["scan", "--targets", str(spec), "--email", EMAIL,
+                       "--out", str(tmp_path / "d.html")])
+        printed = capsys.readouterr().out
+        assert rc == 2, (entries, printed)
+        assert expected in printed, (entries, printed)
+
+
+def test_scan_plan_carried_targets_are_validated_too(tmp_path, capsys):
+    # S5: the same entry validation applies to a plan-carried "targets" list.
+    rc = cli.main(["scan", "--plan", str(_plan(tmp_path, targets=[{"name": 42}])),
+                   "--email", EMAIL, "--out", str(tmp_path / "d.html")])
+    printed = capsys.readouterr().out
+    assert rc == 2 and "'name' must be a non-empty string" in printed
+
+
+def test_scan_targets_lookup_failure_marks_partial_and_persists(
+        tmp_path, monkeypatch, capsys):
+    # S1 (D-037): an HTTP 500 on one of two --targets lookups must surface as PARTIAL
+    # coverage + the author-search@ marker in the export AND the persisted run counts (so a
+    # human-rung reexport still discloses it), and the console must say "lookup FAILED" —
+    # a transient failure is never worded as "no match".
+    from supervisorly import pipeline
+    from supervisorly.model import runs
+    from supervisorly.model.db import open_db
+
+    tp = _targets_cassette()
+    tp.record(openalex.author_search_url("Ghost Prof", EMAIL), 500, "server error")
+    monkeypatch.setattr(transport_mod, "httpx_transport", lambda **kw: tp)
+    out = tmp_path / "out" / "live.html"
+    spec = _spec(tmp_path, [{"name": "Ghost Prof"}, {"name": "Ada Maple"}])
+    rc = cli.main(["scan", "--targets", str(spec), "--email", EMAIL, "--out", str(out)])
+    assert rc == 0                                    # the resolved target still deep-dives
+    printed = capsys.readouterr().out
+    assert "SKIPPED target Ghost Prof: OpenAlex lookup FAILED" in printed
+    assert "scanned 1 professors (live)" in printed
+    export = json.loads(out.with_suffix(".json").read_text(encoding="utf-8"))
+    assert "PARTIAL" in export["run"]["coverage"]
+    assert "author-search@Ghost Prof" in export["run"]["coverage"]
+    # persisted on the run (update_counts/get_counts pattern) so a reexport keeps it (D-037)
+    db = out.parent / "supervisorly.sqlite"
+    conn = open_db(db)
+    row = conn.execute(
+        "SELECT run_id FROM run ORDER BY started_at DESC, rowid DESC LIMIT 1").fetchone()
+    persisted = runs.get_counts(conn, row["run_id"])
+    conn.close()
+    assert "author-search@Ghost Prof" in persisted["truncated"]
+    r2 = pipeline.reexport(
+        str(db), [{"id": p["id"], "name": p.get("name")} for p in export["professors"]])
+    assert "PARTIAL" in r2["export"]["run"]["coverage"]
+    assert "author-search@Ghost Prof" in r2["export"]["run"]["coverage"]
+
+
+def test_scan_targets_genuine_absence_stays_unmarked(tmp_path, monkeypatch, capsys):
+    # S1 (other half): a 200 with empty results is a genuine "no such author" — an honest
+    # skip, NOT a truncation marker and NOT PARTIAL coverage.
+    tp = _targets_cassette()
+    tp.record(openalex.author_search_url("Nobody Here", EMAIL), 200,
+              json.dumps({"results": []}))
+    monkeypatch.setattr(transport_mod, "httpx_transport", lambda **kw: tp)
+    out = tmp_path / "out" / "live.html"
+    spec = _spec(tmp_path, [{"name": "Nobody Here"}, {"name": "Ada Maple"}])
+    rc = cli.main(["scan", "--targets", str(spec), "--email", EMAIL, "--out", str(out)])
+    assert rc == 0
+    printed = capsys.readouterr().out
+    assert "SKIPPED target Nobody Here: no OpenAlex author match" in printed
+    export = json.loads(out.with_suffix(".json").read_text(encoding="utf-8"))
+    assert "PARTIAL" not in export["run"]["coverage"]
+
+
+def test_scan_targets_resolution_travels_to_export_and_dashboard(
+        tmp_path, monkeypatch, capsys):
+    # S2 (D-010): the identity honesty label survives into the durable artifacts —
+    # unverified (affiliation given, no hit matched), unchecked (no affiliation given),
+    # verified (affiliation matched). validate_export stays clean either way.
+    from supervisorly.export import json_export as jx
+
+    cases = [
+        ([{"name": "Ada Maple", "affiliation": "Nowhere College"}], "unverified"),
+        ([{"name": "Ada Maple"}], "unchecked"),
+        ([{"name": "Ada Maple", "affiliation": "Other Institute"}], "verified"),
+    ]
+    for entries, expected in cases:
+        monkeypatch.setattr(transport_mod, "httpx_transport", lambda **kw: _targets_cassette())
+        out = tmp_path / f"out_{expected}" / "live.html"
+        rc = cli.main(["scan", "--targets", str(_spec(tmp_path, entries)), "--email", EMAIL,
+                       "--out", str(out)])
+        assert rc == 0
+        export = json.loads(out.with_suffix(".json").read_text(encoding="utf-8"))
+        assert jx.validate_export(export) == []
+        assert export["professors"][0]["identity_resolution"] == expected
+        # the dashboard is a VIEW over this JSON (D-046): the label must be in its inlined
+        # data, and the badge renderer must be present (badges render client-side).
+        html = out.read_text(encoding="utf-8")
+        assert f'"identity_resolution": "{expected}"' in html
+        assert "function idBadge(" in html

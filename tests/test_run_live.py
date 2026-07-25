@@ -181,3 +181,60 @@ def test_live_scan_marks_partial_when_institution_resolution_fails(tmp_path):
     assert "PARTIAL" in cov and "inst@00abc11" in cov
     assert r["stats"]["truncated"] == ["inst@00abc11"]
     assert {p["id"] for p in r["export"]["professors"]} == {"A202"}
+
+
+# ── Wave B audit fixes: marker hand-off, ladder fail-loud, honest opt-out (S1/S4/S6) ──
+
+def test_run_live_merges_cli_side_target_truncation_markers(tmp_path):
+    # S1 (pipeline half, D-037): markers recorded by the CLI-side client that resolved
+    # --targets merge into the run's truncated list like the ladder's own — the named
+    # target UNIONED with the ladder still discloses the failed lookup as PARTIAL.
+    target = {"id": "A200", "name": "Dr. Ada Maple", "url": "https://maple.example/~ada",
+              "openalex_id": "https://openalex.org/A200"}
+    r = pipeline.run_live(PLAN, _transport(), tmp_path / "snaps", email=EMAIL,
+                          targets_override=[target],
+                          targets_truncated=["author-search@Ghost Prof"], **_FAST)
+    assert "author-search@Ghost Prof" in r["stats"]["truncated"]
+    cov = r["export"]["run"]["coverage"]
+    assert "PARTIAL" in cov and "author-search@Ghost Prof" in cov
+
+
+def test_select_institutions_fails_loud_on_an_unknown_mode():
+    # S4 (defense in depth): the ladder itself raises on an unrecognized university_mode
+    # instead of falling through to "all" — silently widening "only these" to the whole
+    # country is the worst failure direction (D-002/D-045).
+    from supervisorly.discover import ladder
+
+    class _RorStub:
+        def institutions_in_country(self, country):
+            return []
+
+    with pytest.raises(ValueError, match="unrecognized university_mode 'onyl'"):
+        ladder.select_institutions({"country": "CA", "university_mode": "onyl",
+                                    "universities": ["Elsewhere U"]}, _RorStub())
+
+
+def test_opt_out_of_every_target_is_not_misreported_as_a_coverage_gap(tmp_path):
+    # S6 (D-023/D-046): when the opt-out list removed everyone, the coverage line says so
+    # honestly — an opt-out is a FILTERED result, never a "coverage gap".
+    f = tmp_path / "optout.txt"
+    f.write_text("A200\nA201\nA202\n", encoding="utf-8")
+    r = pipeline.run_live(PLAN, _transport(), tmp_path / "snaps", email=EMAIL,
+                          optout_path=str(f), **_FAST)
+    assert r["stats"]["opted_out"] == 3
+    cov = r["export"]["run"]["coverage"]
+    assert "3 professor(s) removed by the opt-out list; none remain to scan." in cov
+    assert "coverage gap" not in cov
+
+
+def test_partial_opt_out_keeps_the_normal_coverage_line(tmp_path):
+    # S6 (other half): with some targets remaining, the coverage line is the normal one —
+    # the opt-out count is not misreported as a removal of everyone.
+    f = tmp_path / "optout.txt"
+    f.write_text("A200\n", encoding="utf-8")
+    r = pipeline.run_live(PLAN, _transport(), tmp_path / "snaps", email=EMAIL,
+                          optout_path=str(f), **_FAST)
+    assert r["stats"]["opted_out"] == 1
+    cov = r["export"]["run"]["coverage"]
+    assert "2 professor(s) enumerated; none were dropped" in cov
+    assert "opt-out list" not in cov

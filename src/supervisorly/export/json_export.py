@@ -118,8 +118,14 @@ def build_export(
         fields = {}
         for d in exportable:
             fields[d["id"]] = _envelope(_best_claim(claims, d["id"]))
-        out_professors.append({"id": prof["id"], "name": _redact_pii(prof.get("name")),
-                               "fields": fields})
+        out_prof = {"id": prof["id"], "name": _redact_pii(prof.get("name")),
+                    "fields": fields}
+        if prof.get("resolution"):
+            # Named-target identity honesty label (verified / unverified / unchecked) —
+            # an optional per-professor field, so an unconfirmed OpenAlex match is never
+            # presented as confirmed identity in the durable artifacts (D-010).
+            out_prof["identity_resolution"] = prof["resolution"]
+        out_professors.append(out_prof)
 
     return {
         "schema_version": SCHEMA_VERSION,

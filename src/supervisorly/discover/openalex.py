@@ -161,9 +161,12 @@ class OpenAlexClient:
         Best match = the top search hit. When ``affiliation`` is given, a hit whose last-known
         institution display name contains it (casefold, substring) is preferred; if NO hit
         matches, the top hit is returned anyway with ``resolution="unverified"`` — an honest
-        flag, never a silent guess. A lookup FAILURE (transport / non-200 / bad JSON) records a
-        truncation marker and returns None, same failure class as the other enumerations (D-037);
-        a 200 with empty results is a genuine "no such author" — no marker, honest skip.
+        flag, never a silent guess. ``resolution`` is ALWAYS set on a returned hit:
+        ``verified`` (affiliation given and matched), ``unverified`` (affiliation given, no
+        hit matched it), ``unchecked`` (no affiliation given — nothing to check against).
+        A lookup FAILURE (transport / non-200 / bad JSON) records a truncation marker and
+        returns None, same failure class as the other enumerations (D-037); a 200 with empty
+        results is a genuine "no such author" — no marker, honest skip.
         """
         data = self._get_json(author_search_url(name, self._email, self._key))
         if data is None:
@@ -172,7 +175,7 @@ class OpenAlexClient:
         results = data.get("results") or []
         if not results:
             return None
-        pick, resolution = results[0], None
+        pick, resolution = results[0], "unchecked"      # no affiliation to check against
         if affiliation:
             want = affiliation.casefold()
             for a in results:
@@ -187,8 +190,7 @@ class OpenAlexClient:
         out["institution_names"] = [i.get("display_name") for i in
                                     (pick.get("last_known_institutions") or [])
                                     if i.get("display_name")]
-        if resolution:
-            out["resolution"] = resolution
+        out["resolution"] = resolution
         return out
 
     def author_by_id(self, short_id: str) -> dict | None:

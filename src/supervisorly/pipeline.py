@@ -671,7 +671,8 @@ def run_offline(plan: dict, targets: list[dict], transport: Transport, snap_root
 def run_live(plan: dict, transport: Transport, snap_root, *, email: str,
              openalex_key=None, db_path=None, optout_path=None, resume=False,
              rate_limit: float = 1.0, backoff_sleep=None,
-             targets_override: list[dict] | None = None) -> dict:
+             targets_override: list[dict] | None = None,
+             targets_truncated: list[str] | None = None) -> dict:
     """A **live** scan: preflight → discovery ladder (ROR + OpenAlex) → the *same* fetch → extract
     → claim → score → export → dashboard pipeline as ``run_offline`` (D-028), now from **discovered**
     targets rather than hand-fed ones.
@@ -686,17 +687,25 @@ def run_live(plan: dict, transport: Transport, snap_root, *, email: str,
     by OpenAlex id — nobody double-deep-dived); with NO plan country the country/discovery ladder
     is skipped entirely and the named targets are deep-dived directly through the same
     ``_process_targets`` path.
+
+    ``targets_truncated`` carries the truncation markers (``author-search@…`` / ``author@…``)
+    recorded by the CLI-side client that resolved ``targets_override`` — those lookups happened
+    before run_live existed, so without this hand-off a lookup FAILURE would vanish and the run
+    would read as complete (D-037).
     """
     preflight.require_credentials({preflight.CONTACT_EMAIL_ENV: email})
     ror_client = _ror.RorClient(transport, email=email)
     oa_client = _openalex.OpenAlexClient(transport, email=email, key=openalex_key)
     country = plan.get("country") or (plan.get("countries") or [None])[0]
+    targets_truncated = list(targets_truncated or [])
 
     if targets_override is not None and not country:
         # named-professor run: no country/field scope, so the discovery ladder is skipped —
-        # nothing to enumerate. Truncation markers from the author lookups still surface (D-037).
+        # nothing to enumerate. Truncation markers from the CLI-side author lookups still
+        # surface via ``targets_truncated`` (D-037).
         disc = {"plan": dict(plan), "institutions": [], "targets": list(targets_override),
-                "truncated": sorted(set(oa_client.truncated_sources)), "warnings": []}
+                "truncated": sorted(set(oa_client.truncated_sources) | set(targets_truncated)),
+                "warnings": []}
         warnings: list[str] = []
     else:
         disc = _ladder.build_targets(plan, ror_client, oa_client)
@@ -708,6 +717,11 @@ def run_live(plan: dict, transport: Transport, snap_root, *, email: str,
                     seen.add(key)
                     disc["targets"].append(t)
             disc["truncated"] = sorted(set(disc["truncated"]) | set(oa_client.truncated_sources))
+        if targets_truncated:
+            # CLI-side --targets lookup failures merge into the SAME PARTIAL coverage the
+            # ladder's own markers produce — even when every named target failed to resolve
+            # (targets_override empty), a vanished target must never read as "none dropped".
+            disc["truncated"] = sorted(set(disc["truncated"]) | set(targets_truncated))
         # D-060 (Phase L0 DoD): the sparse-country preflight warns and continues — never blocks.
         # Feed it the real discovery stats and surface its warnings (plus the ladder's) in the run
         # stats + coverage line; the CLI prints them.
@@ -777,15 +791,30 @@ def reexport(db_path, targets: list[dict], *, optout_path=None) -> dict:
 
 def _build_result(conn, run_id, status, targets, *, stats, gaps) -> dict:
     """Assemble the export + dashboard from the persisted claims (no fetching here)."""
-    professors = [{"id": t["id"], "name": t.get("name")} for t in targets]
+    professors = []
+    for t in targets:
+        p = {"id": t["id"], "name": t.get("name")}
+        if t.get("resolution"):
+            # named-target identity honesty label (verified/unverified/unchecked) — it must
+            # travel into the durable artifacts, not just the console (D-010).
+            p["resolution"] = t["resolution"]
+        professors.append(p)
     claims_by_entity = {t["id"]: claims.claims_for(conn, "person", t["id"]) for t in targets}
     enumerated = len(targets)
     # Honest coverage line so the empty-state can tell "sources returned nothing" apart
     # from "found people, none matched" (edge-case matrix / D-046). The deterministic
-    # pipeline never drops a professor, so zero here means discovery surfaced no one.
-    coverage = ("No sources returned any professors for this search — this is a coverage "
-                "gap, not a filtered result." if enumerated == 0
-                else f"{enumerated} professor(s) enumerated; none were dropped for missing data.")
+    # pipeline never drops a professor, so zero here means discovery surfaced no one —
+    # UNLESS the opt-out list removed them, which is a filtered result and must say so
+    # (an opt-out is never a "coverage gap").
+    opted_out = (stats or {}).get("opted_out") or 0
+    if enumerated == 0 and opted_out:
+        coverage = (f"{opted_out} professor(s) removed by the opt-out list; "
+                    "none remain to scan.")
+    elif enumerated == 0:
+        coverage = ("No sources returned any professors for this search — this is a coverage "
+                    "gap, not a filtered result.")
+    else:
+        coverage = f"{enumerated} professor(s) enumerated; none were dropped for missing data."
     if gaps:
         coverage += f" {gaps} target(s) have open gaps for the human rung."
     truncated = (stats or {}).get("truncated")

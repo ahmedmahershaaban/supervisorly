@@ -62,6 +62,12 @@ def select_institutions(plan: dict, ror, *, warnings: list[str] | None = None) -
     country = _country_of(plan)
     insts = ror.institutions_in_country(country) if country else []
     mode = plan.get("university_mode", "all")
+    if mode not in ("all", "prioritise", "only"):
+        # Fail loud (D-002): falling through to "all" would silently INVERT the scope a plan
+        # asked for ("only these universities" -> the whole country). The CLI validates plan
+        # values up front; this is the defense-in-depth net for direct callers.
+        raise ValueError(f"unrecognized university_mode {mode!r} - expected one of: "
+                         "all, prioritise, only")
     wanted = [_norm(u) for u in (plan.get("universities") or []) if _norm(u)]
 
     def matches(inst: dict) -> bool:
