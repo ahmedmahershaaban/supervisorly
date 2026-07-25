@@ -101,6 +101,9 @@ textarea{min-height:96px;resize:vertical}
 .rcard:has(input:checked){border-color:var(--accent);background:rgba(232,178,74,.07);
   box-shadow:0 0 22px rgba(232,178,74,.14)}
 .rcard input{position:absolute;opacity:0;pointer-events:none}
+/* the input is invisible, so the :focus-visible ring must be painted on the card itself
+   (WCAG 2.4.7 — Tab-ing into the intent group shows where focus landed) */
+.rcard:has(input:focus-visible){outline:2px solid var(--focus);outline-offset:2px}
 .rc-t{font-weight:650;font-size:14.5px}
 .rc-d{color:var(--muted);font-size:12.5px;margin-top:2px}
 /* university chips */
@@ -212,7 +215,10 @@ function buildTree(){
       byDom[d].fields[f].forEach(function(g){
         html += '<li><label class="trow"><input type="checkbox" class="tparent">'+
           '<span class="tname tsub">'+esc(g.subfield)+'</span></label><ul>';
-        (g.topics||[]).forEach(function(t){
+        /* belt and braces: a malformed entry is skipped, never allowed to brick the page */
+        var topics = Array.isArray(g.topics) ? g.topics : [];
+        topics.forEach(function(t){
+          if(!t || !t.topic_id) return;    /* no id -> no checkbox ("" would dilute topic_match) */
           html += '<li><label class="trow topic-row">'+
             '<input type="checkbox" class="topic" value="'+esc(t.topic_id)+'">'+
             '<span class="tname">'+esc(t.name)+'</span>'+
@@ -270,9 +276,11 @@ function parseProfs(text){
   String(text||"").split("\n").forEach(function(line){
     line = line.trim();
     if(!line) return;
-    var parts = line.split(","), name = parts.shift().trim();
+    /* affiliation = after the LAST comma, so "Name, Jr., MIT" and "Last, First, MIT" parse */
+    var i = line.lastIndexOf(",");
+    var name = (i<0 ? line : line.slice(0,i)).trim();
     if(!name) return;
-    var aff = parts.join(",").trim();
+    var aff = (i<0 ? "" : line.slice(i+1)).trim();
     out.push(aff ? {name:name, affiliation:aff} : {name:name});
   });
   return out;
@@ -280,7 +288,7 @@ function parseProfs(text){
 function checkedTopics(){
   var ids = [];
   document.querySelectorAll("#tree input.topic:checked").forEach(function(b){
-    ids.push(b.value); });
+    if(b.value) ids.push(b.value); });
   return ids;
 }
 function buildPlan(){
@@ -340,7 +348,9 @@ function exportPlan(){
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(function(){ URL.revokeObjectURL(a.href); }, 4000);
   document.getElementById("done").classList.remove("hidden");
-  document.getElementById("done").scrollIntoView({behavior:"smooth", block:"nearest"});
+  /* CSS can't cancel JS-driven motion — honour reduced-motion explicitly (D-048) */
+  var _rm = window.matchMedia && window.matchMedia("(prefers-reduced-motion:reduce)").matches;
+  document.getElementById("done").scrollIntoView({behavior:_rm?"auto":"smooth", block:"nearest"});
 }
 function copyCmd(){
   var cmd = document.getElementById("nextcmd").textContent;
@@ -363,13 +373,16 @@ function toast(msg){
 }
 
 document.addEventListener("DOMContentLoaded", function(){
-  buildTree();
-  /* apply optional defaults passed at build time */
+  /* wire every control FIRST — a bad tree below can then never take down the page */
   var d = (DATA && DATA.defaults) || {};
   if(d.country) document.getElementById("country").value = d.country;
   if(d.email) document.getElementById("email").value = d.email;
   if(d.intent_kind){
-    var r = document.querySelector('input[name="intent"][value="'+d.intent_kind+'"]');
+    /* intent_kind is validated against INTENTS at build time; the try/catch is belt and
+       braces so a hostile value can never escape init via a malformed selector */
+    var r = null;
+    try { r = document.querySelector('input[name="intent"][value="'+d.intent_kind+'"]'); }
+    catch(_){}
     if(r) r.checked = true;
   }
   if(Array.isArray(d.universities)){ universities = d.universities.slice(); }
@@ -391,6 +404,14 @@ document.addEventListener("DOMContentLoaded", function(){
       document.getElementById("done").classList.add("hidden");
     }
   });
+  /* build the tree LAST, inside a guard: a malformed map renders an honest note instead
+     of throwing before the wiring above exists */
+  try { buildTree(); }
+  catch(e){
+    document.getElementById("tree").innerHTML =
+      '<div class="empty">This subject map could not be rendered — its entries are '+
+      'malformed. You can still export a plan that names professors directly.</div>';
+  }
 });
 """
 
@@ -404,11 +425,22 @@ def build_studio(subject_map: dict, *, defaults: dict | None = None) -> str:
     """
     smap = subject_map if isinstance(subject_map, dict) else {}
     groups = smap.get("groups")
+    defaults = dict(defaults or {})
+    intent = defaults.get("intent_kind")
+    if intent is not None and intent not in {key for key, _, _ in INTENTS}:
+        intent = "pre_phd"      # unknown/hostile intent falls back, never reaches a selector
     data = {
         "query": str(smap.get("query") or ""),
-        "groups": [g for g in groups if isinstance(g, dict)] if isinstance(groups, list) else [],
+        # sanitize: only dict groups survive; topics is always a list of dicts whose
+        # topic_id is truthy (a missing id would export "" and dilute topic_match)
+        "groups": [
+            {**g, "topics": [t for t in g.get("topics") if isinstance(t, dict) and t.get("topic_id")]
+             if isinstance(g.get("topics"), list) else []}
+            for g in groups if isinstance(g, dict)
+        ] if isinstance(groups, list) else [],
         "truncated": bool(smap.get("truncated")),
-        "defaults": {k: v for k, v in (defaults or {}).items()
+        "defaults": {k: (intent if k == "intent_kind" else v)
+                     for k, v in defaults.items()
                      if k in ("country", "email", "universities", "intent_kind")},
     }
     payload = _inline_json(data)
@@ -505,7 +537,7 @@ def build_studio(subject_map: dict, *, defaults: dict | None = None) -> str:
 
   <section class="step" id="step-profs">
     <div class="step-head"><span class="step-code">STEP 05</span><h2>Named professors <span style="color:var(--faint);font-weight:400">(optional)</span></h2></div>
-    <p class="why">Deep-dive specific people directly, one per line: <span style="font-family:var(--mono)">Name, Affiliation (optional)</span></p>
+    <p class="why">Deep-dive specific people directly, one per line: <span style="font-family:var(--mono)">Name, Affiliation (optional)</span> — the affiliation is everything after the last comma, so <span style="font-family:var(--mono)">King, Jr., MIT</span> parses correctly.</p>
     <textarea id="profs" placeholder="Ada Maple, McGill University&#10;Grace Hopper"></textarea>
     <div class="err" id="err-profs" role="alert"></div>
   </section>

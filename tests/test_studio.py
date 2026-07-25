@@ -6,6 +6,7 @@ plus a node syntax check when node is on PATH), the honest truncation banner (D-
 honours a Studio plan's own email + named-professor targets. No live network — cassettes only."""
 
 import json
+import re
 import shutil
 import subprocess
 
@@ -243,3 +244,232 @@ def test_scan_plan_invalid_targets_entry_fails_loud(tmp_path, capsys):
                    "--out", str(tmp_path / "d.html")])
     assert rc == 2
     assert "invalid 'targets'" in capsys.readouterr().out
+
+
+# ── B6 audit (Wave C) regression tests ───────────────────────────────────────
+
+def _embedded_data(html):
+    """The plan-wizard DATA block, decoded back to a dict."""
+    m = re.search(r"const DATA = (\{.*?\});\r?\n", html, re.S)
+    assert m, "DATA block not found"
+    return json.loads(m.group(1))
+
+
+def test_scroll_into_view_honours_reduced_motion():              # U1
+    html = build_studio(_map())
+    assert 'matchMedia("(prefers-reduced-motion:reduce)")' in html
+    assert 'behavior:_rm?"auto":"smooth"' in html       # gated, never unconditional
+    assert '{behavior:"smooth"' not in html
+
+
+def test_focus_ring_painted_on_intent_card_not_hidden_input():   # U2
+    html = build_studio(_map())
+    # the intent radios are opacity:0 — the :focus-visible indicator must land on the card
+    assert ".rcard:has(input:focus-visible){outline:2px solid var(--focus)" in html
+
+
+def test_malformed_topics_sanitized_python_side():               # U3a + U6
+    html = build_studio(_map(groups=[
+        {"domain": "d", "field": "f", "subfield": "s", "topics": "nope"},
+        {"domain": "d", "field": "f", "subfield": "s", "topics": [
+            None, {"name": "no id"}, {"topic_id": "", "name": "empty id"},
+            {"topic_id": "T1", "name": "ok", "works_count": 3}]},
+    ]))
+    assert html.count("</script>") == 1                            # page still generated
+    groups = _embedded_data(html)["groups"]
+    assert groups[0]["topics"] == []                               # non-list coerced away
+    assert [t["topic_id"] for t in groups[1]["topics"]] == ["T1"]  # malformed entries skipped
+
+
+def test_hostile_intent_kind_default_falls_back_python_side():   # U4
+    html = build_studio(_map(), defaults={"intent_kind": 'x"]'})
+    assert _embedded_data(html)["defaults"]["intent_kind"] == "pre_phd"
+    ok = build_studio(_map(), defaults={"intent_kind": "phd"})
+    assert _embedded_data(ok)["defaults"]["intent_kind"] == "phd"  # valid values untouched
+
+
+# Node-executed init, extending the probe_tree.js technique: the REAL embedded JS runs
+# against a minimal DOM and reports whether the wiring survived and what the tree holds.
+_NODE_HARNESS = r"""
+"use strict";
+const fs = require("fs");
+const [htmlPath, scenPath] = process.argv.slice(2);
+const html = fs.readFileSync(htmlPath, "utf8");
+const scen = JSON.parse(fs.readFileSync(scenPath, "utf8"));
+const scriptSrc = html.split("<script>", 2)[1].split("</script>", 1)[0];
+
+class El {
+  constructor(tag) {
+    this.tag = tag; this.children = []; this.parent = null;
+    this.attrs = {}; this.listeners = {};
+    this.checked = false; this.indeterminate = false; this.value = "";
+    this.textContent = ""; this.style = {};
+    const self = this;
+    this.classList = {
+      contains: (c) => (self.attrs.class || "").split(/\s+/).includes(c),
+      add: (c) => { const s = new Set((self.attrs.class || "").split(/\s+/).filter(Boolean));
+        s.add(c); self.attrs.class = [...s].join(" "); },
+      remove: (c) => { const s = new Set((self.attrs.class || "").split(/\s+/).filter(Boolean));
+        s.delete(c); self.attrs.class = [...s].join(" "); },
+    };
+  }
+  getAttribute(n) { return this.attrs[n] ?? null; }
+  closest(tag) { let e = this.parent; while (e) { if (e.tag === tag) return e; e = e.parent; } return null; }
+  _walk(out) { for (const c of this.children) { out.push(c); c._walk(out); } return out; }
+  querySelectorAll(sel) {
+    const all = this._walk([]);
+    const m = sel.match(/^input\.(\w+)$/);
+    if (m) return all.filter(e => e.tag === "input" && e.classList.contains(m[1]));
+    const mc = sel.match(/^input\.(\w+):checked$/);
+    if (mc) return all.filter(e => e.tag === "input" && e.classList.contains(mc[1]) && e.checked);
+    if (sel === "button[data-uni]") return all.filter(e => e.tag === "button" && "data-uni" in e.attrs);
+    throw new Error("mini-DOM: unsupported selector " + sel);
+  }
+  addEventListener(type, fn) { (this.listeners[type] ||= []).push(fn); }
+  focus() { this.focused = true; }
+}
+
+function parseTree(markup) {
+  const root = new El("div");
+  const stack = [root];
+  const re = /<\/?(ul|li|label|input|span|div)(\s[^>]*)?\/?>|([^<]+)/g;
+  let m;
+  while ((m = re.exec(markup))) {
+    const [, tag, attrs, text] = m;
+    if (text !== undefined) continue;
+    if (m[0].startsWith("</")) { stack.pop(); continue; }
+    const el = new El(tag);
+    if (attrs) for (const am of attrs.matchAll(/([\w-]+)="([^"]*)"/g))
+      el.attrs[am[1]] = am[2].replace(/&quot;/g, '"').replace(/&amp;/g, "&")
+        .replace(/&lt;/g, "<").replace(/&gt;/g, ">");
+    if (tag === "input") { el.value = el.attrs.value ?? ""; el.indeterminate = false; }
+    stack[stack.length - 1].children.push(el); el.parent = stack[stack.length - 1];
+    if (tag !== "input") stack.push(el);
+  }
+  return root;
+}
+
+const treeHost = new El("div"); treeHost.attrs.id = "tree";
+let treeMarkup = "";
+Object.defineProperty(treeHost, "innerHTML", {
+  set(v) { treeMarkup = v; const parsed = parseTree(v); treeHost.children = parsed.children;
+    for (const c of treeHost.children) c.parent = treeHost; },
+  get() { return treeMarkup; },
+});
+const ids = {};
+for (const id of ["country", "email", "uniInput", "uniAdd", "export", "copybtn",
+                  "done", "toast", "progress", "nextcmd", "profs",
+                  "err-country", "err-topics", "err-profs", "err-email",
+                  "step-country", "step-topics", "step-profs", "step-email", "uniChips"])
+  ids[id] = new El("div");
+ids.country.value = ""; ids.email.value = ""; ids.profs.value = ""; ids.uniInput.value = "";
+const intentRadios = ["pre_phd", "pre_master", "master", "phd", "postdoc", "mentor"]
+  .map(v => { const r = new El("input"); r.attrs.name = "intent"; r.value = v;
+    r.checked = v === "pre_phd"; return r; });
+
+const document = {
+  documentElement: { scrollTop: 0, scrollHeight: 1, clientHeight: 1 },
+  getElementById: (id) => id === "tree" ? treeHost : (ids[id] ?? null),
+  querySelectorAll: (sel) => {
+    if (sel.startsWith("#tree ")) return treeHost.querySelectorAll(sel.slice(6));
+    if (sel === ".err" || sel === ".step.bad") return [];
+    throw new Error("mini-DOM doc: unsupported selector " + sel);
+  },
+  querySelector: (sel) => {
+    if (sel === 'input[name="uniMode"]:checked') { const r = new El("input"); r.value = "all"; return r; }
+    if (sel === 'input[name="intent"]:checked') return intentRadios.find(r => r.checked) ?? null;
+    const m = sel.match(/^input\[name="intent"\]\[value="((?:[^"\\]|\\.)*)"\](.*)$/);
+    if (!m || m[2] !== "") { // malformed selector — browsers throw SyntaxError
+      const err = new Error(`'${sel}' is not a valid selector`);
+      err.name = "SyntaxError"; throw err;
+    }
+    return intentRadios.find(r => r.value === m[1]) ?? null;
+  },
+  createElement: (t) => new El(t),
+  body: new El("body"),
+  addEventListener: (type, fn) => { document._domready = type === "DOMContentLoaded" ? fn : document._domready; },
+};
+const DATA = scen.DATA ?? JSON.parse(scriptSrc.match(/const DATA = (\{.*?\});\r?\n/s)[1]);
+const sandbox = { document, DATA, window: { addEventListener() {} },
+  navigator: {}, URL: { createObjectURL: () => "blob:x", revokeObjectURL() {} },
+  Blob: function () {}, setTimeout: (fn) => 0, clearTimeout: () => {}, console };
+sandbox.window.document = document;
+
+const vm = require("vm");
+vm.createContext(sandbox);
+const js = scriptSrc.replace(/const DATA = \{.*?\};\r?\n/s, "");
+vm.runInContext(js, sandbox);
+let threw = null;
+try { document._domready(); } catch (e) { threw = String(e && e.message || e); }
+const wired = (el, t) => (el.listeners[t] || []).length > 0;
+console.log(JSON.stringify({
+  threw,
+  exportWired: wired(ids.export, "click"),
+  uniAddWired: wired(ids.uniAdd, "click"),
+  copyWired: wired(ids.copybtn, "click"),
+  topicValues: treeHost.querySelectorAll("input.topic").map(b => b.value),
+  checkedIntent: (intentRadios.find(r => r.checked) || {}).value || null,
+  parseProfs: scen.profs == null ? null : sandbox.parseProfs(scen.profs),
+}));
+"""
+
+
+def _run_studio_js(tmp_path, html, scenario):
+    """Run the embedded studio JS through the node mini-DOM; returns the report dict."""
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node not on PATH")
+    (tmp_path / "page.html").write_text(html, encoding="utf-8")
+    (tmp_path / "scenario.json").write_text(json.dumps(scenario), encoding="utf-8")
+    (tmp_path / "harness.js").write_text(_NODE_HARNESS, encoding="utf-8")
+    r = subprocess.run([node, "harness.js", "page.html", "scenario.json"],
+                       cwd=tmp_path, capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    return json.loads(r.stdout.strip().splitlines()[-1])
+
+
+@pytest.mark.parametrize("topics", ["nope", [None], [{"name": "no id"}]])
+def test_malformed_map_never_bricks_the_wizard(tmp_path, topics):   # U3
+    groups = [{"domain": "d", "field": "f", "subfield": "s", "topics": topics}]
+    # (a) through build_studio: Python sanitizes, the page generates, init wires up
+    rep = _run_studio_js(tmp_path, build_studio(
+        {"query": "q", "truncated": False, "groups": groups}), {})
+    assert rep["threw"] is None
+    assert rep["exportWired"] and rep["uniAddWired"] and rep["copyWired"]
+    assert rep["topicValues"] == []                       # malformed entries skipped
+    # (b) raw malformed entries straight into the JS (bypassing the Python guard)
+    rep = _run_studio_js(tmp_path, build_studio(_map()), {"DATA": {
+        "query": "q", "truncated": False, "defaults": {}, "groups": groups}})
+    assert rep["threw"] is None
+    assert rep["exportWired"] and rep["uniAddWired"] and rep["copyWired"]
+    assert rep["topicValues"] == []
+
+
+def test_hostile_intent_default_leaves_the_page_wired(tmp_path):    # U4
+    html = build_studio(_map(), defaults={"intent_kind": 'x"]'})
+    rep = _run_studio_js(tmp_path, html, {})
+    assert rep["threw"] is None
+    assert rep["exportWired"] and rep["copyWired"]
+    assert rep["checkedIntent"] == "pre_phd"              # fell back to the CLI default
+
+
+def test_parse_profs_splits_on_the_last_comma(tmp_path):            # U5
+    rep = _run_studio_js(tmp_path, build_studio(_map()), {"profs":
+        "Ada Maple, McGill University\nMartin Luther King, Jr., MIT\n"
+        "Hopper, Grace, Yale\n  , MIT\nSolo Name"})
+    assert rep["parseProfs"] == [
+        {"name": "Ada Maple", "affiliation": "McGill University"},
+        {"name": "Martin Luther King, Jr.", "affiliation": "MIT"},
+        {"name": "Hopper, Grace", "affiliation": "Yale"},
+        {"name": "Solo Name"},
+    ]
+
+
+def test_topic_without_id_never_renders_a_checkbox(tmp_path):       # U6
+    rep = _run_studio_js(tmp_path, build_studio(_map()), {"DATA": {
+        "query": "q", "truncated": False, "defaults": {}, "groups": [
+            {"domain": "d", "field": "f", "subfield": "s", "topics": [
+                {"name": "no id"}, {"topic_id": "", "name": "empty id"},
+                {"topic_id": "T1", "name": "ok", "works_count": 3}]}]}})
+    assert rep["threw"] is None
+    assert rep["topicValues"] == ["T1"]                   # id-less topics never render
