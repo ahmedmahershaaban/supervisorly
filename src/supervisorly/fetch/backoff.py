@@ -27,9 +27,10 @@ class RetryPolicy:
     def delay(self, attempt: int, jitter: Callable[[], float]) -> float:
         """Seconds to wait before retry number ``attempt`` (0-based).
 
-        Exponential (``base * 2**attempt``) capped at ``cap``, plus a jitter fraction in
-        ``[0, cap_of_step)``. ``jitter()`` returns a value in ``[0, 1)``; with 0 the delay
-        is purely deterministic (used in tests).
+        Exponential (``base * 2**attempt``) plus a jitter fraction, then capped at
+        ``cap`` — the cap is applied LAST so it is a hard ceiling: we never wait
+        longer than ``cap``, however unlucky the jitter. ``jitter()`` returns a value
+        in ``[0, 1)``; with 0 the delay is purely deterministic (used in tests).
         """
-        step = min(self.cap, self.base * (2 ** max(0, attempt)))
-        return step * (1.0 + jitter())
+        step = self.base * (2 ** max(0, attempt))
+        return min(self.cap, step * (1.0 + jitter()))

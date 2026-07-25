@@ -29,10 +29,20 @@ NOT_FOUND = "NOT_FOUND"
 # behind the wall, so we never extract it (D-039/044) and we don't mislabel a real roster. Includes
 # anti-DDoS/JS-challenge interstitials (Cloudflare & co.), which are walls regardless of chrome
 # length — their challenge text is longer than any character floor (live audit-3 finding 5).
+# The non-English set (live audit-5) is deliberately SMALL and follows the same conservative shape
+# as the English markers — a login verb bound to a continue/access purpose, or an explicit
+# "must be logged in" — so the phrases can't appear in ordinary page prose (D-038: this is
+# page-classification structure, an enum of source types, not a field search-term dictionary).
 _WALL_MARKERS = re.compile(
     r"(sign\s*in\s+to\s+(?:continue|view|access)|log\s*in\s+to\s+(?:continue|view|access)|"
     r"create\s+an?\s+account\s+to\s+(?:view|continue)|"
     r"access\s+denied|you\s+must\s+be\s+logged\s+in|"
+    # German / French / Spanish login walls — same near-unambiguous "<login> to continue/access"
+    # and "must be logged in" shapes as the English markers (false-positive guards stay binding).
+    r"melden\s+sie\s+sich\s+an,\s*um\s+fortzufahren|sie\s+müssen\s+angemeldet\s+sein|"
+    r"veuillez\s+vous\s+connecter\s+pour\s+continuer|vous\s+devez\s+être\s+connecté|"
+    r"connexion\s+requise|"
+    r"inici\w*\s+sesi[oó]n\s+para\s+continuar|debe\s+iniciar\s+sesi[oó]n|"
     # a CAPTCHA CHALLENGE — not a bare "captcha" substring, which matched inside reCAPTCHA /
     # g-recaptcha / recaptcha/api.js on ordinary faculty contact pages and dropped their real
     # facts as "blocked" (live audit-4 finding 3, D-022/037/046).

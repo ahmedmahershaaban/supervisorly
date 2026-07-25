@@ -31,9 +31,44 @@ def cmd_init_db(args: argparse.Namespace) -> int:
     return 0
 
 
+def _warn_if_committable(out: Path) -> None:
+    """D-005 guard: scan output holds personal data and must never be committed.
+
+    When the resolved --out path sits inside a git work tree and neither it nor its
+    sibling .json is covered by git-ignore rules, warn loudly BEFORE writing. Warn only —
+    legitimate out-of-repo paths must keep working, and a missing git binary (or any git
+    failure) is a clean no-op."""
+    import subprocess
+
+    target = out.resolve()
+    cwd = target.parent
+    while not cwd.is_dir() and cwd != cwd.parent:
+        cwd = cwd.parent
+
+    def _ignored(p: Path) -> bool | None:
+        """True/False from git; None when git can't answer (absent, or not a work tree)."""
+        try:
+            r = subprocess.run(["git", "-C", str(cwd), "check-ignore", "-q", str(p)],
+                               capture_output=True, timeout=10)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        return {0: True, 1: False}.get(r.returncode)   # 128 = not a work tree → no opinion
+
+    ignored = [_ignored(target), _ignored(target.with_suffix(".json"))]
+    if not all(i is False for i in ignored):
+        return   # ignored, or git/repo unavailable → silent
+    # ASCII-only: the default Windows console codec (cp1252) can't encode an em-dash and
+    # would crash the command before the files are written (see _write_result).
+    print(f"WARNING (D-005): {target} is inside a git work tree and is NOT git-ignored. "
+          "Scan output contains personal data and must never be committed. "
+          "Write under an ignored directory (e.g. output/) or add the path to .gitignore.",
+          file=sys.stderr)
+
+
 def _write_result(result: dict, out: Path, label: str) -> int:
     """Write the dashboard + sibling JSON and print an ASCII-safe status line."""
     import json
+    _warn_if_committable(out)
     if out.parent != Path("") and not out.parent.exists():
         out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(result["html"], encoding="utf-8")
@@ -74,9 +109,19 @@ def cmd_scan(args: argparse.Namespace) -> int:
               "See --help.")
         return 2
 
+    from .discover.countries import to_country_code
+    # --country is documented as a country NAME ("Canada"); ROR's filter needs ISO alpha-2.
+    # Resolve here, where the plan is built, and fail loud on anything unrecognized (D-002) —
+    # never silently query ROR with a filter that matches 0 institutions.
+    country_code = to_country_code(args.country)
+    if not country_code:
+        print(f"unrecognized --country {args.country!r}: pass an ISO 3166-1 alpha-2 code "
+              "(e.g. CA) or an English country name (e.g. Canada).")
+        return 2
+
     from .fetch.transport import httpx_transport
     from .pipeline import run_live
-    plan = {"intent_kind": args.intent, "country": args.country, "field": args.field,
+    plan = {"intent_kind": args.intent, "country": country_code, "field": args.field,
             "university_mode": args.university_mode,
             "universities": [u.strip() for u in args.universities.split(",")]
                             if args.universities else []}
@@ -86,6 +131,10 @@ def cmd_scan(args: argparse.Namespace) -> int:
         openalex_key=(args.openalex_key or os.environ.get(preflight.OPENALEX_KEY_ENV)),
         db_path=out.parent / "supervisorly.sqlite", optout_path=args.optout, resume=args.resume,
     )
+    # sparse-coverage preflight + discovery warnings (D-060) — ASCII-safe by construction
+    # (preflight/ladder messages are ASCII-only, like the rest of this console output).
+    for w in result["stats"].get("warnings", []):
+        print(f"WARNING: {w}")
     return _write_result(result, out, "live")
 
 
@@ -106,7 +155,8 @@ def build_parser() -> argparse.ArgumentParser:
     ps.add_argument("--optout", default=None,
                     help="path to an optout.txt suppression list (D-023)")
     # live-scan flags
-    ps.add_argument("--country", help="country to scan (a live scan)")
+    ps.add_argument("--country", help="country to scan: ISO alpha-2 code or English name "
+                                      "(e.g. CA or Canada) (a live scan)")
     ps.add_argument("--field", help="research field / subfield (a live scan)")
     ps.add_argument("--intent", default="pre_phd",
                     choices=["training", "pre_master", "pre_phd", "mentor", "master", "phd",

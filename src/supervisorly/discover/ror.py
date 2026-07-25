@@ -7,6 +7,12 @@ request.
 
 Generate, don't look up (D-038): the country filter comes from the ``SearchPlan``, never a
 hardcoded institution list. Results are mapped to plain dicts the discovery ladder consumes.
+
+Schema note: the **v2** record shape is what the API serves (v1 was retired in Dec 2025 —
+the unversioned endpoint already returns v2 records). v2 moves the name to ``names[]`` (pick
+the entry typed ``ror_display``), links to ``{type, value}`` objects, and the country to
+``locations[].geonames_details``. The envelope (``number_of_results``/``items``) is unchanged,
+so the pagination/truncation logic below is schema-independent.
 """
 
 from __future__ import annotations
@@ -16,7 +22,7 @@ from urllib.parse import urlencode
 
 from ..fetch.transport import Transport, TransportError
 
-ROR_API = "https://api.ror.org/organizations"
+ROR_API = "https://api.ror.org/v2/organizations"
 
 
 def country_url(country_code: str, page: int = 1) -> str:
@@ -26,17 +32,37 @@ def country_url(country_code: str, page: int = 1) -> str:
     )
 
 
+def _name(item: dict) -> str | None:
+    """v2: the display name is the ``names[]`` entry typed ``ror_display`` (fallback: first)."""
+    names = item.get("names") or []
+    for n in names:
+        if "ror_display" in (n.get("types") or []):
+            return n.get("value")
+    return names[0].get("value") if names else None
+
+
 def _homepage(item: dict) -> str | None:
-    links = item.get("links") or []
-    return links[0] if links else None
+    """v2: ``links[]`` entries are ``{type, value}`` objects — take the ``website`` one."""
+    for link in item.get("links") or []:
+        if link.get("type") == "website":
+            return link.get("value")
+    return None
+
+
+def _country_code(item: dict) -> str | None:
+    """v2: the country sits at ``locations[0].geonames_details.country_code`` (null-safe)."""
+    locations = item.get("locations") or []
+    if not locations:
+        return None
+    return (locations[0].get("geonames_details") or {}).get("country_code")
 
 
 def _map_institution(item: dict) -> dict:
-    """Map one ROR item to ``{ror_id, name, country_code, homepage, types}``."""
+    """Map one ROR v2 item to ``{ror_id, name, country_code, homepage, types}``."""
     return {
         "ror_id": item.get("id"),
-        "name": item.get("name"),
-        "country_code": (item.get("country") or {}).get("country_code"),
+        "name": _name(item),
+        "country_code": _country_code(item),
         "homepage": _homepage(item),
         "types": list(item.get("types") or []),
     }

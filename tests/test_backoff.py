@@ -68,6 +68,14 @@ def test_jitter_spreads_but_stays_bounded(tmp_path):
     assert slept == [1.5]                           # base(1) * (1 + 0.5)
 
 
+def test_delay_never_exceeds_cap_even_with_max_jitter():
+    # audit: the cap was applied BEFORE jitter, so the worst-case wait was ~2x cap while
+    # the field comment promises "never wait longer than this". The cap is now a hard ceiling.
+    policy = RetryPolicy(max_retries=10, base=1.0, cap=30.0)
+    for attempt in range(10):
+        assert policy.delay(attempt, lambda: 0.999999) <= 30.0
+
+
 def test_404_is_not_retried(tmp_path):
     f, tp, slept = _fetcher(tmp_path, [(404, "nope")])
     res = f.fetch(PAGE)

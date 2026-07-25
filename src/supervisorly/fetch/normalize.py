@@ -32,13 +32,19 @@ _SKIP_TAGS = {
 # IMPORTANT: standalone content dates are deliberately NOT masked — a changed
 # application deadline must change the hash and invalidate the cache (D-061).
 # Only mask timestamps tied to a chrome keyword, copyright years, clock times, and
-# view/visitor counters.
+# view/visitor counters. The keyword tail masks ONLY timestamp-shaped tokens, never
+# arbitrary prose — a deadline sentence sitting right after "updated" is real content
+# and must still bust the cache (D-061).
 _VOLATILE = re.compile(
     r"""(
-        \b(?:last\s+updated|updated|generated|accessed|retrieved)\s*:?\s*[^\n]{0,40}
+        \b(?:last\s+updated|updated|generated|accessed|retrieved)\s*:?\s*
+            (?:\d{4}-\d{2}-\d{2}(?:[ T]\d{1,2}:\d{2}(?::\d{2})?)?   # ISO date / datetime
+             | \d{1,2}[\s/.-]\w+[\s/.-]\d{2,4}                      # 1 Dec 2026, 07/20/2026
+             | [A-Za-z]+\s+\d{1,2},?\s+\d{4}                        # July 20, 2026
+             | \d{1,2}:\d{2}(?::\d{2})?)?                           # bare clock time
       | ©\s*20\d{2}[^\n]{0,30}
       | \bcopyright\s+20\d{2}[^\n]{0,30}
-      | \b\d{1,3}(?:,\d{3})+\s+(?:views?|visitors?|comments?|reads?)\b
+      | \b\d{1,3}(?:,\d{3})*\s+(?:views?|visitors?|comments?|reads?)\b
       | \b\d{1,2}:\d{2}(?::\d{2})?\b             # clock times (page-render, not deadlines)
     )""",
     re.IGNORECASE | re.VERBOSE,

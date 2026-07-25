@@ -108,11 +108,19 @@ class OpenAlexClient:
             return None
 
     def institution_by_ror(self, ror_url: str | None) -> str | None:
-        """Resolve a ROR id to the OpenAlex institution id (``I…``) used to filter authors, or None."""
+        """Resolve a ROR id to the OpenAlex institution id (``I…``) used to filter authors.
+
+        None means OpenAlex GENUINELY has no institution for that ROR id (200, empty results) —
+        silent, honest absence. A lookup FAILURE (transport error / non-200 / bad JSON) is not
+        absence: the whole university's professors are unknown, so record a truncation marker
+        naming it — the coverage then reports PARTIAL instead of claiming none were dropped
+        (D-037; same failure class as the mid-pagination markers below).
+        """
         if not ror_url:
             return None
         data = self._get_json(institutions_url(ror_url, self._email, self._key))
-        if not data:
+        if data is None:
+            self.truncated_sources.append(f"inst@{_short_id(ror_url) or ror_url}")
             return None
         results = data.get("results") or []
         return _short_id(results[0].get("id")) if results else None

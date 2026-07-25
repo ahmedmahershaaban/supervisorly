@@ -31,6 +31,51 @@ def test_detect_login_wall_is_conservative():
     )
 
 
+def test_non_english_login_walls_are_detected():
+    # live audit-5: English-only markers read German/French/Spanish walls as OPEN — no
+    # roster_enumerate human-rung task, and wall chrome entered extraction (D-039/044/052).
+    assert roster.detect_login_wall(
+        "<html><body><h1>Fakultät für Informatik</h1>"
+        "<p>Bitte melden Sie sich an, um fortzufahren. Zugang nur für registrierte Benutzer.</p>"
+        "</body></html>")
+    assert roster.detect_login_wall(
+        "<html><body><p>Veuillez vous connecter pour continuer. Accès réservé.</p></body></html>")
+    assert roster.detect_login_wall(
+        "<html><body><p>Inicie sesión para continuar.</p></body></html>")
+
+
+def test_non_english_markers_do_not_fire_on_normal_prose():
+    # the conservative bias stands (false-positive guards are the binding constraint): ordinary
+    # German/French/Spanish academic prose — including a contact-by-email invitation — is NOT a wall.
+    assert not roster.detect_login_wall(
+        "<html><body><main><h1>Prof. Dr. Dana Beispiel</h1>"
+        "<p>Ich suche motivierte Doktorandinnen und Doktoranden. "
+        "Bitte melden Sie sich bei Interesse per E-Mail.</p></main></body></html>")
+    assert not roster.detect_login_wall(
+        "<html><body><main><h1>Faculté des sciences</h1>"
+        "<p>Liste des enseignants-chercheurs du département.</p></main></body></html>")
+    assert not roster.detect_login_wall(
+        "<html><body><main><h1>Facultad de Ciencias</h1>"
+        "<p>Lista del profesorado del departamento.</p></main></body></html>")
+
+
+def test_german_walled_directory_routes_to_human_rung():
+    # a German-walled directory classifies LOGIN_WALL and mints the roster_enumerate task (D-052)
+    conn = open_db()
+    run_id = runs.create_run(conn)
+    de_wall = ("<html><body><h1>Fakultät für Informatik</h1>"
+               "<p>Bitte melden Sie sich an, um fortzufahren.</p></body></html>")
+    out = roster.route_directory(conn, run_id, directory_url=DIR_URL,
+                                 fetch_result=_open(), html=de_wall)
+    assert out["decision"] == roster.LOGIN_WALL
+    assert units.get_unit(conn, out["unit_id"])["coverage_note"] == "LOGIN_WALL"
+    tasks = runs.tasks_for_run(conn, run_id)
+    assert len(tasks) == 1
+    t = tasks[0]
+    assert t["stage"] == "roster_enumerate" and t["phase"] == "human"
+    assert t["status"] == "awaiting_human"
+
+
 def test_noscript_enable_javascript_banner_beside_content_is_not_a_wall():
     # live audit-2: a content-rich page that merely ships a <noscript>Please enable JavaScript</noscript>
     # fallback (WordPress / embedded map / Disqus) is NOT a wall — its real signals must still be

@@ -146,6 +146,21 @@ def live_value(conn, entity_kind: str, entity_id: str, field: str) -> bool:
     return row is not None
 
 
+def live_value_is_human(conn, entity_kind: str, entity_id: str, field: str) -> bool:
+    """True if the field's live ``value`` head is **human-assisted** (D-043).
+
+    A human-rung answer is never clobbered by a later absence; a stale *deterministic* value is —
+    a successful re-fetch whose re-extraction affirmatively finds nothing is a verified removal,
+    recorded as ``searched_absent`` so the delta surfaces it (live audit-5).
+    """
+    row = conn.execute(
+        "SELECT extractor_agent FROM claim WHERE entity_kind=? AND entity_id=? AND field=? "
+        "AND state='value' AND superseded_by IS NULL LIMIT 1",
+        (entity_kind, entity_id, field),
+    ).fetchone()
+    return row is not None and _is_human(row["extractor_agent"])
+
+
 def live_reached(conn, entity_kind: str, entity_id: str, field: str) -> bool:
     """True if a live claim shows the field was actually reached (``value`` or
     ``searched_absent``). A later failed fetch (``blocked``) must not downgrade a reached

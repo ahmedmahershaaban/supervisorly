@@ -152,6 +152,34 @@ def test_incidental_email_inside_a_sentence_is_not_flagged():
     assert jx.validate_export(ok) == []
 
 
+def test_email_shaped_name_is_redacted_at_build_and_flagged_by_validate():
+    """Audit: a bare email in a professor's name serialised unredacted, and validate only
+    checked field envelopes. An email-shaped name is not a name (D-024)."""
+    export = jx.build_export(
+        run_summary={"run_id": "r", "status": "finalized"},
+        field_descriptors=[
+            {"id": "recruiting", "label": "R", "kind": "filter", "datatype": "string"},
+        ],
+        professors=[{"id": "p1", "name": "jane@uni.edu"}],
+        claims_by_entity={"p1": [
+            {"field": "recruiting", "state": "value", "value": "recruiting",
+             "quote": "recruiting", "source_url": "https://p1/"},
+        ]},
+        generated_at="2026-07-23T00:00:00+00:00",
+    )
+    import json
+    assert "jane@uni.edu" not in json.dumps(export)
+    assert export["professors"][0]["name"] == "[email redacted — see source]"
+    assert jx.validate_export(export) == []
+    # validate flags an email-shaped id too — flag-only: the id is the join key, so
+    # redacting it would desync claims_by_entity and the delta
+    bad = {"schema_version": "1", "generated_at": "t", "run": {},
+           "fields": [{"id": "recruiting", "label": "R", "kind": "filter",
+                       "datatype": "string"}],
+           "professors": [{"id": "jane@uni.edu", "name": "Jane", "fields": {}}]}
+    assert any("D-024" in e and "jane@uni.edu" in e for e in jx.validate_export(bad))
+
+
 # ── deterministic layer is LLM-free (D-009) ───────────────────────────────────
 def test_deterministic_layer_has_no_llm_calls():
     offenders = []

@@ -7,6 +7,8 @@ Covers three confirmed findings:
 """
 
 from supervisorly import pipeline
+from supervisorly.fetch.normalize import quote_in_snapshot
+from supervisorly.fetch.transport import CassetteTransport
 
 
 def _page(sentence):
@@ -295,6 +297,29 @@ def test_abbreviated_month_names_are_parsed():
     ):
         r = _deadline(sentence)
         assert r is not None and r[0] == iso and r[2] == "quoted_official", sentence
+
+
+def test_dotted_abbreviated_month_quote_is_verbatim_and_records(tmp_path):
+    """live audit-5 (HIGH): the "Dec." dot-strip is for ANALYSIS only. The claim quote must be
+    the VERBATIM sentence (period kept) — the stripped text is not in the snapshot, so
+    quote_in_snapshot (punctuation-exact, D-010) rejected the claim and the field falsely
+    exported ``never_attempted`` although the page was reached and a real deadline parsed."""
+    page = ("<html><body><main><h1>Dr. D</h1>"
+            "<p>Applications close on 1 Dec. 2026.</p></main></body></html>")
+    iso, quote, conf = pipeline.extract_deadline(page)
+    assert iso == "2026-12-01" and conf == "quoted_official"
+    assert "Dec." in quote                          # verbatim — the period survives
+    assert quote_in_snapshot(quote, page)           # so the D-010 quote gate accepts it
+
+    tp = CassetteTransport()
+    tp.record("https://u.edu/robots.txt", 200, "User-agent: *\nAllow: /\n")
+    tp.record("https://u.edu/p", 200, page)
+    r = pipeline.run_offline({"intent_kind": "pre_phd", "resolved_topic_ids": ["T"]},
+                             [{"id": "p", "name": "Dr. D", "url": "https://u.edu/p"}],
+                             tp, tmp_path / "snaps")
+    env = r["export"]["professors"][0]["fields"]["deadline"]
+    assert env["state"] == "value" and env["value"] == "2026-12-01"
+    assert "Dec." in env["quote"]
 
 
 # ── audit round 5: no quadratic blow-up on long unpunctuated text ──────────────

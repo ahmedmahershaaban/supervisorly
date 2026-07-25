@@ -15,11 +15,16 @@ from supervisorly.fetch.transport import CassetteTransport
 EMAIL = "me@uni.edu"
 ALLOW = "User-agent: *\nAllow: /\n"
 
-ROR_CA = json.dumps({"number_of_results": 2, "items": [   # real ROR always returns the total
-    {"id": "https://ror.org/00abc11", "name": "Maple University",
-     "country": {"country_code": "CA"}, "links": ["https://maple.example/"], "types": ["Education"]},
-    {"id": "https://ror.org/00abc22", "name": "Northern Institute",
-     "country": {"country_code": "CA"}, "links": ["https://northern.example/"], "types": ["Education"]},
+ROR_CA = json.dumps({"number_of_results": 2, "items": [   # real ROR always returns the total;
+    # v2 record shape (v1 retired Dec 2025)
+    {"id": "https://ror.org/00abc11",
+     "names": [{"value": "Maple University", "types": ["ror_display", "label"], "lang": "en"}],
+     "locations": [{"geonames_details": {"country_code": "CA"}}],
+     "links": [{"type": "website", "value": "https://maple.example/"}], "types": ["education"]},
+    {"id": "https://ror.org/00abc22",
+     "names": [{"value": "Northern Institute", "types": ["ror_display", "label"], "lang": "en"}],
+     "locations": [{"geonames_details": {"country_code": "CA"}}],
+     "links": [{"type": "website", "value": "https://northern.example/"}], "types": ["education"]},
 ]})
 
 
@@ -123,9 +128,11 @@ def _trunc_transport():
              "last_known_institutions": [], "homepage_url": None} for i in range(n)]})
     tp = CassetteTransport()
     tp.record(ror.country_url("CA"), 200, json.dumps({"number_of_results": 1, "items": [
-        {"id": "https://ror.org/00abc11", "name": "Maple University",
-         "country": {"country_code": "CA"}, "links": ["https://maple.example/"],
-         "types": ["Education"]}]}))
+        {"id": "https://ror.org/00abc11",
+         "names": [{"value": "Maple University", "types": ["ror_display", "label"]}],
+         "locations": [{"geonames_details": {"country_code": "CA"}}],
+         "links": [{"type": "website", "value": "https://maple.example/"}],
+         "types": ["education"]}]}))
     tp.record(openalex.institutions_url("https://ror.org/00abc11", EMAIL), 200, _oa_inst("I100"))
     tp.record(openalex.authors_url("I100", EMAIL, page=1), 200, _authors(25))   # full page → page 2
     tp.record(openalex.authors_url("I100", EMAIL, page=2), 500, "boom")          # fails mid-pagination
@@ -144,3 +151,33 @@ def test_reexport_preserves_partial_coverage_after_the_human_rung(tmp_path):
     r2 = pipeline.reexport(str(db), targets)                     # resume: re-export from the DB only
     assert "PARTIAL" in r2["export"]["run"]["coverage"]          # still discloses it (was silently lost)
     assert "authors@I100" in r2["export"]["run"]["coverage"]
+
+
+def test_live_scan_warns_on_sparse_country_coverage_and_continues(tmp_path):
+    # D-060 (Phase L0 DoD): the sparse-country preflight is wired into run_live — it warns
+    # (2 ROR institutions < 5) and the run still finalizes.
+    r = _run(tmp_path)
+    assert any("ROR lists only 2 institution(s)" in w for w in r["stats"]["warnings"])
+    assert any("OpenAlex coverage" in w for w in r["stats"]["warnings"])   # 90 works < 500
+    assert r["export"]["run"]["status"] == "finalized_with_open_gaps"      # never blocks (D-049)
+    assert "Warning:" in r["export"]["run"]["coverage"]                    # reaches the export
+    assert all(w.isascii() for w in r["stats"]["warnings"])                # console-safe
+
+
+def test_live_scan_marks_partial_when_institution_resolution_fails(tmp_path):
+    # audit: a 500 on Maple University's ROR→OpenAlex resolution must NOT vanish the university —
+    # coverage reports PARTIAL naming the ROR id; the surviving institution still deep-dives.
+    tp = CassetteTransport()
+    tp.record(ror.country_url("CA"), 200, ROR_CA)
+    tp.record(openalex.institutions_url("https://ror.org/00abc11", EMAIL), 500, "{}")
+    tp.record(openalex.institutions_url("https://ror.org/00abc22", EMAIL), 200, _oa_inst("I200"))
+    tp.record(openalex.authors_url("I200", EMAIL), 200, json.dumps({"results": [
+        _author("A202", "A/Prof. Cara Cedar", "https://northern.example/~cara"),
+    ]}))
+    tp.record("https://northern.example/robots.txt", 200, ALLOW)
+    tp.record("https://northern.example/~cara", 200, CARA_PAGE)
+    r = pipeline.run_live(PLAN, tp, tmp_path / "snaps", email=EMAIL, **_FAST)
+    cov = r["export"]["run"]["coverage"]
+    assert "PARTIAL" in cov and "inst@00abc11" in cov
+    assert r["stats"]["truncated"] == ["inst@00abc11"]
+    assert {p["id"] for p in r["export"]["professors"]} == {"A202"}

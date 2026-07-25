@@ -29,6 +29,7 @@ class FetchResult:
     snapshot_hash: str | None = None
     error: str | None = None
     attempts: int = 1              # how many times the transport was hit (>1 = retried)
+    final_url: str | None = None   # where a redirect actually landed (None = no redirect)
 
     @property
     def ok(self) -> bool:
@@ -102,6 +103,16 @@ class Fetcher:
             if resp.status != 200:
                 return FetchResult(url=url, allowed=True, status=resp.status,
                                    error=f"http {resp.status}", attempts=attempt + 1)
+            # A redirect lands on a URL robots never vetted — re-check the FINAL url
+            # (fail closed, D-019/D-010) before the body is snapshotted or provenance recorded.
+            if resp.url != url:
+                fparts = urlsplit(resp.url)
+                final_robots = self._robots_for(fparts.scheme or "https", fparts.netloc)
+                if not robots.is_allowed(final_robots, resp.url, self._ua):
+                    return FetchResult(url=url, allowed=False, status=200,
+                                       error="redirect target disallowed by robots.txt",
+                                       attempts=attempt + 1, final_url=resp.url)
             h = self._snap.store(resp.text)
             return FetchResult(url=url, allowed=True, status=200, snapshot_hash=h,
-                               attempts=attempt + 1)
+                               attempts=attempt + 1,
+                               final_url=resp.url if resp.url != url else None)

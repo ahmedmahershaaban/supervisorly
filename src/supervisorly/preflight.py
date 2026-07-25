@@ -80,14 +80,16 @@ def coverage_preflight(stats: Mapping[str, object]) -> list[str]:
     country = stats.get("country", "this country/field")
     works = int(stats.get("openalex_works", 0) or 0)
     insts = int(stats.get("ror_institutions", 0) or 0)
+    # ASCII-only messages: the CLI prints these to the console, and the default Windows codec
+    # (cp1252) must never crash on them (same convention as cli._write_result).
     if works < SPARSE_WORKS:
         warnings.append(
             f"OpenAlex coverage for {country} looks thin ({works} works < {SPARSE_WORKS}); "
-            "results may be sparse — this is reported honestly, the run continues (D-060)."
+            "results may be sparse - this is reported honestly, the run continues (D-060)."
         )
     if insts < SPARSE_INSTITUTIONS:
         warnings.append(
             f"ROR lists only {insts} institution(s) for {country} (< {SPARSE_INSTITUTIONS}); "
-            "the directory ladder may find fewer targets — run continues."
+            "the directory ladder may find fewer targets - run continues."
         )
     return warnings

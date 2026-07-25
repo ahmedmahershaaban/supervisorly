@@ -118,7 +118,8 @@ def build_export(
         fields = {}
         for d in exportable:
             fields[d["id"]] = _envelope(_best_claim(claims, d["id"]))
-        out_professors.append({"id": prof["id"], "name": prof.get("name"), "fields": fields})
+        out_professors.append({"id": prof["id"], "name": _redact_pii(prof.get("name")),
+                               "fields": fields})
 
     return {
         "schema_version": SCHEMA_VERSION,
@@ -156,6 +157,12 @@ def validate_export(obj: dict) -> list[str]:
     for p in obj.get("professors", []):
         if "id" not in p:
             errors.append("professor missing id")
+        # an email-shaped id/name is PII, not an identifier (D-024). Flag-only: the id is
+        # the join key for claims_by_entity and delta — redacting it here would desync them.
+        for key in ("id", "name"):
+            if _is_pii_email(p.get(key)):
+                errors.append(f"professor {key} {p.get(key)!r} is a bare email — "
+                              "personal data must not be exported (D-024)")
         fields = p.get("fields", {})
         for fid, env in fields.items():
             if fid not in declared_ids:

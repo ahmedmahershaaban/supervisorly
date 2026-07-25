@@ -8,16 +8,22 @@ from supervisorly.fetch.transport import CassetteTransport
 
 EMAIL = "me@uni.edu"
 
-# ── synthetic ROR response (v1 shape) ─────────────────────────────────────────
+# ── synthetic ROR response (v2 shape — v1 was retired Dec 2025; the API now serves
+#    names[]/links[{type,value}]/locations[].geonames_details) ────────────────────────────
 ROR_CA = json.dumps({
     "number_of_results": 2,
     "items": [
-        {"id": "https://ror.org/00abc11", "name": "Maple University",
-         "country": {"country_code": "CA", "country_name": "Canada"},
-         "links": ["https://maple.example/"], "types": ["Education"]},
-        {"id": "https://ror.org/00abc22", "name": "Northern Institute",
-         "country": {"country_code": "CA", "country_name": "Canada"},
-         "links": [], "types": ["Facility"]},
+        {"id": "https://ror.org/00abc11",
+         "names": [{"value": "Maple University", "types": ["ror_display", "label"], "lang": "en"}],
+         "locations": [{"geonames_id": 101,
+                        "geonames_details": {"country_code": "CA", "country_name": "Canada"}}],
+         "links": [{"type": "website", "value": "https://maple.example/"}],
+         "types": ["education"]},
+        {"id": "https://ror.org/00abc22",
+         "names": [{"value": "Northern Institute", "types": ["ror_display", "label"], "lang": "en"}],
+         "locations": [{"geonames_id": 102,
+                        "geonames_details": {"country_code": "CA", "country_name": "Canada"}}],
+         "links": [], "types": ["facility"]},
     ],
 })
 
@@ -51,12 +57,55 @@ def test_ror_client_maps_country_institutions():
     assert insts[1]["homepage"] is None                 # no links → honest None, not dropped
 
 
+def test_ror_v2_mapping_picks_display_name_website_link_and_country():
+    # v2 regression (audit): name = names[] entry typed "ror_display" (fallback: first entry),
+    # homepage = the links[] entry typed "website", country = locations[].geonames_details.
+    item = {"id": "https://ror.org/00x",
+            "names": [{"value": "MU", "types": ["acronym"], "lang": None},
+                      {"value": "Maple Varsity", "types": ["ror_display", "label"], "lang": "en"}],
+            "links": [{"type": "wikipedia", "value": "https://en.wikipedia.org/wiki/mu"},
+                      {"type": "website", "value": "https://maple.example/"}],
+            "locations": [{"geonames_id": 1, "geonames_details": {"country_code": "CA"}}],
+            "types": ["education"]}
+    m = ror._map_institution(item)
+    assert m["name"] == "Maple Varsity"                 # ror_display, not the acronym
+    assert m["homepage"] == "https://maple.example/"    # website link, not wikipedia
+    assert m["country_code"] == "CA"
+    # fallbacks, null-safe at every step: no ror_display → first names[] entry;
+    # no website link / no locations → honest None
+    m2 = ror._map_institution({"id": "https://ror.org/00y",
+                               "names": [{"value": "Only Name", "types": ["label"]}],
+                               "links": None, "locations": None, "types": None})
+    assert m2["name"] == "Only Name"
+    assert m2["homepage"] is None and m2["country_code"] is None and m2["types"] == []
+
+
 def test_ror_client_returns_empty_on_error_not_crash():
     tp = CassetteTransport()
     tp.record(ror.country_url("ZZ"), 500, "boom")
     assert ror.RorClient(tp).institutions_in_country("ZZ") == []
     # a URL with no cassette (transport error) is also handled, not raised
     assert ror.RorClient(CassetteTransport()).institutions_in_country("ZZ") == []
+
+
+def test_openalex_institution_resolution_failure_records_truncation():
+    # audit: a 500 on the ROR→OpenAlex resolution is a FAILURE, not absence — the university's
+    # professors are unknown, so a PARTIAL marker naming the ROR id is recorded (D-037).
+    tp = CassetteTransport()
+    tp.record(openalex.institutions_url("https://ror.org/00abc11", EMAIL), 500, "{}")
+    oa = openalex.OpenAlexClient(tp, email=EMAIL)
+    assert oa.institution_by_ror("https://ror.org/00abc11") is None
+    assert oa.truncated_sources == ["inst@00abc11"]
+
+
+def test_openalex_institution_genuinely_absent_stays_silent():
+    # 200 with empty results = OpenAlex honestly has no such institution — no marker
+    tp = CassetteTransport()
+    tp.record(openalex.institutions_url("https://ror.org/00abc11", EMAIL), 200,
+              json.dumps({"results": []}))
+    oa = openalex.OpenAlexClient(tp, email=EMAIL)
+    assert oa.institution_by_ror("https://ror.org/00abc11") is None
+    assert oa.truncated_sources == []
 
 
 def test_openalex_topic_ids_resolve():
@@ -114,7 +163,8 @@ def test_openalex_truncation_is_recorded_when_cap_hit():
 def test_ror_truncation_is_recorded_when_cap_hit():
     tp = CassetteTransport()
     tp.record(ror.country_url("CA", 1), 200, json.dumps({"number_of_results": 500, "items": [
-        {"id": "https://ror.org/1", "name": "U", "country": {"country_code": "CA"}, "links": []}]}))
+        {"id": "https://ror.org/1", "names": [{"value": "U", "types": ["ror_display"]}],
+         "locations": [{"geonames_details": {"country_code": "CA"}}], "links": []}]}))
     rc = ror.RorClient(tp)
     insts = rc.institutions_in_country("CA", max_pages=1)
     assert len(insts) == 1 and rc.truncated_sources == ["institutions@CA"]
@@ -135,7 +185,8 @@ def test_ror_mid_pagination_failure_records_truncation():
     # ror.py has the same defect/fix: a mid-pagination failure before natural completion is PARTIAL.
     tp = CassetteTransport()
     tp.record(ror.country_url("CA", 1), 200, json.dumps({"number_of_results": 500, "items": [
-        {"id": "https://ror.org/1", "name": "U", "country": {"country_code": "CA"}, "links": []}]}))
+        {"id": "https://ror.org/1", "names": [{"value": "U", "types": ["ror_display"]}],
+         "locations": [{"geonames_details": {"country_code": "CA"}}], "links": []}]}))
     tp.record(ror.country_url("CA", 2), 500, "boom")
     rc = ror.RorClient(tp)
     insts = rc.institutions_in_country("CA")

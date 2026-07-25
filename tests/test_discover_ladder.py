@@ -8,11 +8,15 @@ from supervisorly.fetch.transport import CassetteTransport
 
 EMAIL = "me@uni.edu"
 
-ROR_CA = json.dumps({"number_of_results": 2, "items": [
-    {"id": "https://ror.org/00abc11", "name": "Maple University",
-     "country": {"country_code": "CA"}, "links": ["https://maple.example/"], "types": ["Education"]},
-    {"id": "https://ror.org/00abc22", "name": "Northern Institute",
-     "country": {"country_code": "CA"}, "links": ["https://northern.example/"], "types": ["Education"]},
+ROR_CA = json.dumps({"number_of_results": 2, "items": [   # ROR v2 shape (v1 retired Dec 2025)
+    {"id": "https://ror.org/00abc11",
+     "names": [{"value": "Maple University", "types": ["ror_display", "label"], "lang": "en"}],
+     "locations": [{"geonames_details": {"country_code": "CA"}}],
+     "links": [{"type": "website", "value": "https://maple.example/"}], "types": ["education"]},
+    {"id": "https://ror.org/00abc22",
+     "names": [{"value": "Northern Institute", "types": ["ror_display", "label"], "lang": "en"}],
+     "locations": [{"geonames_details": {"country_code": "CA"}}],
+     "links": [{"type": "website", "value": "https://northern.example/"}], "types": ["education"]},
 ]})
 
 
@@ -121,3 +125,77 @@ def test_build_targets_surfaces_truncation():
     oa.truncated_sources = ["authors@I100"]              # simulate a capped source
     out = ladder.build_targets(PLAN, rc, oa)
     assert out["truncated"] == ["authors@I100"]
+
+
+def test_university_matching_folds_diacritics():
+    # audit: accentless user input must match the accented ROR name in only/prioritise mode
+    rc = _FakeRor([{"name": "Université de Montréal", "ror_id": "https://ror.org/0161xgx34"},
+                   {"name": "Ludwig-Maximilians-Universität München",
+                    "ror_id": "https://ror.org/02wt2p731"}])
+    sel = ladder.select_institutions(
+        {"country": "CA", "university_mode": "only",
+         "universities": ["Universite de Montreal"]}, rc)
+    assert [i["name"] for i in sel] == ["Université de Montréal"]
+    sel2 = ladder.select_institutions(
+        {"country": "DE", "university_mode": "only",
+         "universities": ["Ludwig-Maximilians-Universitat Munchen"]}, rc)
+    assert [i["name"] for i in sel2] == ["Ludwig-Maximilians-Universität München"]
+
+
+def test_zero_named_universities_matched_surfaces_a_warning():
+    # a typo'd name silently narrowed the scan to nothing — the 0-of-N fact must reach the user
+    rc, oa = _clients()
+    out = ladder.build_targets({**PLAN, "university_mode": "only",
+                                "universities": ["Atlantis University"]}, rc, oa)
+    assert out["institutions"] == [] and out["targets"] == []
+    assert any("0 of 1 named universities matched" in w for w in out["warnings"])
+    # a matching name produces no warning
+    out2 = ladder.build_targets({**PLAN, "university_mode": "only",
+                                 "universities": ["maple"]}, rc, oa)
+    assert out2["warnings"] == []
+
+
+class _FakeOa:
+    truncated_sources = []
+
+    def __init__(self, authors):
+        self._authors = authors
+
+    def institution_by_ror(self, ror_id):
+        return "I1"
+
+    def authors_by_institution(self, inst_id, **kw):
+        return self._authors
+
+
+def _split_author(aid, orcid, works, topics, home="https://uni.example/~wwang"):
+    return {"openalex_id": f"https://openalex.org/{aid}", "short_id": aid, "name": "Wei Wang",
+            "orcid": orcid, "works_count": works, "cited_by_count": works * 5,
+            "topic_ids": topics, "institution_ids": ["I1"], "homepage": home}
+
+
+def test_split_profiles_sharing_an_orcid_merge_into_one_target():
+    # D-030/D-057: two OpenAlex author-ids, same ORCID → ONE target reconciled before scoring:
+    # topics unioned, works SUMMED (the fragments' works are disjoint), both ids retained.
+    oa = _FakeOa([
+        _split_author("A111", "https://orcid.org/0000-0002-1825-0097", 12, ["T1", "T2"]),
+        _split_author("A222", "https://orcid.org/0000-0002-1825-0097", 9, ["T2", "T3"]),
+    ])
+    targets = ladder.enumerate_professors([{"ror_id": "https://ror.org/00x", "name": "Uni"}], oa)
+    assert len(targets) == 1
+    t = targets[0]
+    assert t["works_count"] == 21                        # summed, not maxed
+    assert set(t["topic_ids"]) == {"T1", "T2", "T3"}     # unioned
+    assert set(t["merged_openalex_ids"]) == {"https://openalex.org/A111",
+                                             "https://openalex.org/A222"}
+
+
+def test_same_name_and_homepage_without_orcid_stays_two_targets():
+    # D-030: name+homepage is NOT decisive identity evidence — flag, never silently merge
+    oa = _FakeOa([
+        _split_author("A111", None, 12, ["T1"]),
+        _split_author("A222", None, 9, ["T2"]),
+    ])
+    targets = ladder.enumerate_professors([{"ror_id": "https://ror.org/00x", "name": "Uni"}], oa)
+    assert len(targets) == 2
+    assert "merged_openalex_ids" not in targets[0]

@@ -46,10 +46,13 @@ MODEL_ID = "deterministic"
 CACHE_SCHEMA_VERSION = "1"
 
 # ── recruiting signal ─────────────────────────────────────────────────────────
-# a recruiting-related sentence (candidate signal — not a classification)
+# a recruiting-related sentence (candidate signal — not a classification). This is the KEYWORD
+# alternation only — the sentence is found first and the keyword matched WITHIN it (see
+# _first_sentence), so a long period-free blob can't trigger O(n²) backtracking on the old
+# `[^.!?]*…[^.!?]*[.!?]` shape (live audit-5).
 _RECRUIT = re.compile(
-    r"[^.!?]*\b(recruit\w*|looking for|accepting|seeking|opening|join (?:my|the|our) "
-    r"(?:lab|group|team)|hiring|taking (?:new )?students?)\b[^.!?]*[.!?]",
+    r"\b(recruit\w*|looking for|accepting|seeking|opening|join (?:my|the|our) "
+    r"(?:lab|group|team)|hiring|taking (?:new )?students?)\b",
     re.IGNORECASE,
 )
 
@@ -213,7 +216,29 @@ _MDY = re.compile(rf"\b([A-Za-z]+)\.?\s+(\d{{1,2}}){_ORD},?\s+(20\d{{2}})\b") # 
 _NUM = re.compile(r"\b(\d{1,2})/(\d{1,2})/(20\d{2})\b")                    # 01/12/2026 (numeric)
 # The period after an abbreviated month ("1 Dec. 2026") otherwise reads as a sentence terminator to
 # _sentences and splits the date in half — strip it before sentence-splitting (live audit-3).
+# The strip is for ANALYSIS only: it rewrites the text, so a quote taken from the stripped text is
+# not verbatim in the snapshot and the D-010 quote gate rejects the claim (live audit-5). The
+# deadline extractor therefore maps its matched sentence back to the unstripped text for the quote.
 _ABBR_MONTH_DOT = re.compile(r"\b(jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\.", re.IGNORECASE)
+
+
+def _strip_month_dots(text: str) -> tuple[str, list[int]]:
+    """``text`` with abbreviated-month dots removed, plus a monotonic stripped→raw index map.
+
+    The transform only ever DELETES the "." after a month abbreviation, so ``idx[i]`` is the raw
+    position of stripped character ``i`` — the raw slice of a stripped span is verbatim page text.
+    """
+    out: list[str] = []
+    idx: list[int] = []
+    pos = 0
+    for m in _ABBR_MONTH_DOT.finditer(text):
+        dot = m.end() - 1                       # the "." the match ends on
+        out.append(text[pos:dot])
+        idx.extend(range(pos, dot))
+        pos = m.end()                           # skip the dot itself
+    out.append(text[pos:])
+    idx.extend(range(pos, len(text)))
+    return "".join(out), idx
 
 
 def _valid_date(y: int, mo: int, d: int) -> bool:
@@ -281,6 +306,15 @@ _DATE_COMMA = re.compile(r"(\d(?:st|nd|rd|th)?)\s*,(\s*20\d{2})")
 def _sentences(text: str):
     """Split text into sentences on terminal punctuation (bounded work per sentence)."""
     return re.split(r"(?<=[.!?])\s+", text)
+
+
+def _sentence_spans(text: str):
+    """Yield ``(sentence, start, end)`` — the same split as ``_sentences`` but with offsets."""
+    pos = 0
+    for m in re.finditer(r"(?<=[.!?])\s+", text):
+        yield text[pos:m.start()], pos, m.start()
+        pos = m.end()
+    yield text[pos:], pos, len(text)
 
 
 # Split a sentence into subject-bearing clauses on ``;`` and on a coordinating conjunction
@@ -352,11 +386,7 @@ def _normalize_date(text: str) -> tuple[str, bool] | None:
 
 def extract_recruiting_signal(html: str):
     """Return (value, quote, confidence) for the first recruiting-related sentence, or None."""
-    m = _RECRUIT.search(main_text(html))
-    if not m:
-        return None
-    sentence = m.group(0).strip()
-    return sentence, sentence, "quoted_official"
+    return _first_sentence(_RECRUIT, html)
 
 
 def extract_deadline(html: str):
@@ -368,8 +398,13 @@ def extract_deadline(html: str):
     (a *watch* date, D-061) when the clause is projected ("usually"/"each year"), the date is
     numeric/locale-ambiguous, or a strong signal ties the date to another event. Within the
     clause the date nearest the cue is chosen (so "…and close on 1 Dec" binds the close date).
+
+    The abbreviated-month dot is stripped for ANALYSIS only; the returned quote is the VERBATIM
+    slice of the unstripped text ("Dec." keeps its period), so the D-010 quote gate accepts it.
     """
-    for sentence in _sentences(_ABBR_MONTH_DOT.sub(r"\1", main_text(html))):
+    raw = main_text(html)
+    stripped, idx = _strip_month_dots(raw)
+    for sentence, start, end in _sentence_spans(stripped):
         if not _CUE_RE.search(sentence):        # cheap prefilter before the per-clause work
             continue
         for clause in _clauses(sentence):
@@ -383,7 +418,8 @@ def extract_deadline(html: str):
             projected = (ambiguous
                          or bool(_PROJECTED.search(clause))
                          or bool(_NONFIRM.search(clause)))
-            return iso, sentence.strip(), ("inferred" if projected else "quoted_official")
+            quote = raw[idx[start]:idx[end - 1] + 1].strip() if end > start else ""
+            return iso, quote, ("inferred" if projected else "quoted_official")
     return None
 
 
@@ -391,17 +427,19 @@ def extract_deadline(html: str):
 # Each is a deterministic candidate signal quoted from the professor's own public page — the LLM
 # synthesist confirms/structures it in Stage 2 (D-009/D-021). Walled social CONTENT (a recruiting
 # post on X/LinkedIn) is never fetched here — only an *advertised* link in the visible text is
-# recorded; the actual walled page goes to the human rung (D-039/043).
+# recorded; the actual walled page goes to the human rung (D-039/043). Like _RECRUIT these are
+# KEYWORD alternations matched within one sentence at a time (live audit-5: the old
+# `[^.!?]*…[^.!?]*[.!?]` shape was O(n²) on period-free text).
 _STUDENTS = re.compile(
-    r"[^.!?]*\b(current\s+(?:phd\s+)?(?:students?|members?)|lab\s+members?|group\s+members?|"
+    r"\b(current\s+(?:phd\s+)?(?:students?|members?)|lab\s+members?|group\s+members?|"
     r"team\s+members?|alumni|former\s+students?|advisees?|graduated?\s+students?|"
-    r"phd\s+students?\s+in\s+(?:my|the)\s+(?:group|lab))\b[^.!?]*[.!?]",
+    r"phd\s+students?\s+in\s+(?:my|the)\s+(?:group|lab))\b",
     re.IGNORECASE,
 )
 _INDUSTRY = re.compile(
-    r"[^.!?]*\b(industry\s+(?:partner\w*|collaborat\w*|experience|funding)|"
+    r"\b(industry\s+(?:partner\w*|collaborat\w*|experience|funding)|"
     r"in\s+collaboration\s+with|collaborat\w*\s+with|partnered?\s+with|"
-    r"consult\w*\s+(?:for|at)|funded\s+by|sponsored\s+by)\b[^.!?]*[.!?]",
+    r"consult\w*\s+(?:for|at)|funded\s+by|sponsored\s+by)\b",
     re.IGNORECASE,
 )
 _SOCIAL_URL = re.compile(
@@ -409,14 +447,23 @@ _SOCIAL_URL = re.compile(
     r"[a-z0-9.-]*mastodon[a-z0-9.-]*|bsky\.app)/[^\s\"'<>)]+",
     re.IGNORECASE,
 )
+# Walled social hosts — an advertised link here points to a page the tool must NOT scrape
+# (D-039/044), so the link is recorded AND reading the walled page becomes a human-rung task.
+# This host set is page-classification structure (an enum of source types, allowed under D-038 —
+# the same class as the login-wall marker phrases), not a per-field search-term dictionary.
+# github.com / bsky.app / mastodon are deliberately absent: D-044 marks those tool-fetchable.
+_WALLED_SOCIAL = re.compile(
+    r"^https?://(?:www\.)?(?:twitter\.com|x\.com|linkedin\.com)/", re.IGNORECASE)
 
 
 def _first_sentence(rx, html):
-    m = rx.search(main_text(html))
-    if not m:
-        return None
-    s = m.group(0).strip()
-    return s, s, "quoted_official"
+    """First sentence containing the keyword, verbatim — first match wins, bounded work per
+    sentence (the same approach the deadline extractor uses)."""
+    for sentence in _sentences(main_text(html)):
+        if rx.search(sentence):
+            s = sentence.strip()
+            return s, s, "quoted_official"
+    return None
 
 
 def extract_students_signal(html: str):
@@ -455,9 +502,11 @@ def _record_evidence(conn, pid, field, found, *, src_id, snapshot_hash, html):
     """Record one field's deterministic result with correct precedence.
 
     A fresh **value** supersedes prior heads (freshest evidence wins). An **absence**
-    (``searched_absent``) never clobbers a live value we already hold — e.g. a human-rung
-    answer — so a re-scan that finds nothing does not erase real data (D-046/D-049); otherwise
-    it is recorded and supersedes prior *non-value* heads so absences don't pile up.
+    (``searched_absent``) never clobbers a **human-assisted** value (D-043/D-046/D-049) — a
+    re-scan that finds nothing does not erase the human rung's answer. It DOES supersede a stale
+    *deterministic* value: reaching the page again and affirmatively finding nothing is a
+    verified removal, not a transient failure, and the delta must surface it (live audit-5).
+    Absences also supersede prior *non-value* heads so they don't pile up.
     """
     if found:
         value, quote, confidence = found
@@ -470,8 +519,8 @@ def _record_evidence(conn, pid, field, found, *, src_id, snapshot_hash, html):
         if rec.ok:
             claims.supersede_prior(conn, "person", pid, field, rec.claim_id)
         return rec
-    if claims.live_value(conn, "person", pid, field):
-        return None                       # keep the real value; don't downgrade to absent
+    if claims.live_value_is_human(conn, "person", pid, field):
+        return None                       # keep the human-rung answer; never downgrade to absent
     rec = claims.record_claim(
         conn, entity_kind="person", entity_id=pid, field=field,
         state="searched_absent", source_id=src_id, extractor_agent="deterministic",
@@ -506,13 +555,25 @@ def _source_tier(url: str | None) -> str:
     return "community_unverified" if _AGGREGATORS.search(url or "") else "official_institutional"
 
 
+def _target_open_gap(conn, pid) -> bool:
+    """True if the target still has an open gap for the human rung: any field ``blocked``
+    (unreached), or an advertised **walled** social page the tool recorded but must not scrape —
+    reading it is a human-rung task (D-039/044), so the run cannot claim ``finalized`` while a
+    known walled recruiting source went unchecked (Phase L3)."""
+    cs = claims.claims_for(conn, "person", pid)
+    return any(c.get("state") == "blocked" for c in cs) or any(
+        c.get("field") == "social" and c.get("state") == "value"
+        and isinstance(c.get("value"), str) and _WALLED_SOCIAL.search(c["value"])
+        for c in cs)
+
+
 def _process_targets(conn, run_id, targets, fetcher, snaps, *, stats, resume) -> int:
     """Deep-dive each target (fetch → extract → claim) — the shared core of run_offline/run_live.
 
-    Returns the gap count (targets with any still-``blocked`` field), derived from claim state so
-    the run status can never contradict the exported cells (D-046/D-049). A target with no page URL
-    (e.g. an OpenAlex professor with no discoverable homepage) is an honest open gap for the human
-    rung, never a fabricated value.
+    Returns the gap count (targets with any still-``blocked`` field or an unchecked walled social
+    page), derived from claim state so the run status can never contradict the exported cells
+    (D-046/D-049). A target with no page URL (e.g. an OpenAlex professor with no discoverable
+    homepage) is an honest open gap for the human rung, never a fabricated value.
     """
     for t in targets:
         pid = t["id"]
@@ -540,15 +601,30 @@ def _process_targets(conn, run_id, targets, fetcher, snaps, *, stats, resume) ->
                 runs.set_task_status(conn, task, "done")
                 continue
             src_id = claims.record_web_source(
-                conn, url, snapshot_hash=res.snapshot_hash, http_status=200,
-                source_tier=_source_tier(url), robots_allowed=True,
+                conn, res.final_url or url, snapshot_hash=res.snapshot_hash, http_status=200,
+                source_tier=_source_tier(res.final_url or url), robots_allowed=True,
             )
             claim_ids: list[str] = []
+            walled_social = None
             for field, extractor in _EXTRACTORS.items():
-                rec = _record_evidence(conn, pid, field, extractor(html), src_id=src_id,
+                found = extractor(html)
+                rec = _record_evidence(conn, pid, field, found, src_id=src_id,
                                        snapshot_hash=res.snapshot_hash, html=html)
                 if rec and rec.ok:
                     claim_ids.append(rec.claim_id)
+                if field == "social" and found and _WALLED_SOCIAL.search(found[0]):
+                    walled_social = found[0]
+            if walled_social:
+                # An advertised walled social page (X/Twitter/LinkedIn) is a known recruiting
+                # source the tool must NOT scrape (D-039/044): mint an awaiting_human task for it
+                # (the roster.route_directory pattern, Phase L3 DoD) — the target stays an open
+                # gap via _target_open_gap, so the run finalizes WITH open gaps, not `finalized`.
+                walled_task = runs.add_task(conn, run_id, "person", pid,
+                                            stage="gap_fill", phase="human")
+                runs.set_task_status(
+                    conn, walled_task, "awaiting_human",
+                    last_error=f"walled social page advertised ({walled_social}) — "
+                               "read it by hand and return it via the Phase-3 MD grammar")
             xcache.record(conn, "person", pid, chash, PROMPT_VERSION, MODEL_ID,
                           CACHE_SCHEMA_VERSION, claim_ids)
             stats["extractions"] += 1
@@ -559,11 +635,7 @@ def _process_targets(conn, run_id, targets, fetcher, snaps, *, stats, resume) ->
             err = res.error if res is not None else "no page url — open for the human rung"
             runs.set_task_status(conn, task, "blocked", last_error=err)
 
-    return sum(
-        1 for t in targets
-        if any(c.get("state") == "blocked"
-               for c in claims.claims_for(conn, "person", t["id"]))
-    )
+    return sum(1 for t in targets if _target_open_gap(conn, t["id"]))
 
 
 def run_offline(plan: dict, targets: list[dict], transport: Transport, snap_root,
@@ -613,6 +685,15 @@ def run_live(plan: dict, transport: Transport, snap_root, *, email: str,
     oa_client = _openalex.OpenAlexClient(transport, email=email, key=openalex_key)
     disc = _ladder.build_targets(plan, ror_client, oa_client)
 
+    # D-060 (Phase L0 DoD): the sparse-country preflight warns and continues — never blocks.
+    # Feed it the real discovery stats and surface its warnings (plus the ladder's) in the run
+    # stats + coverage line; the CLI prints them.
+    warnings = preflight.coverage_preflight({
+        "country": plan.get("country") or (plan.get("countries") or [None])[0],
+        "ror_institutions": len(disc["institutions"]),
+        "openalex_works": sum(int(t.get("works_count") or 0) for t in disc["targets"]),
+    }) + list(disc.get("warnings", []))
+
     conn = open_db(db_path) if db_path is not None else open_db()
     snaps = SnapshotStore(snap_root)
     # Polite by default for a real run (per-host min-interval + real backoff sleep); tests pass
@@ -626,7 +707,7 @@ def run_live(plan: dict, transport: Transport, snap_root, *, email: str,
     runs.set_run_status(conn, run_id, "deep_diving")
     stats = {"extractions": 0, "cache_hits": 0, "opted_out": opted_out, "resumed_skipped": 0,
              "discovered": len(disc["targets"]), "institutions": len(disc["institutions"]),
-             "truncated": disc.get("truncated", [])}
+             "truncated": disc.get("truncated", []), "warnings": warnings}
     # Persist the discovery truncation markers on the run so a later human-rung re-export can still
     # emit the PARTIAL coverage line instead of implicitly claiming completeness (D-037, audit-3 #7).
     if stats["truncated"]:
@@ -652,11 +733,7 @@ def reexport(db_path, targets: list[dict], *, optout_path=None) -> dict:
     conn = open_db(db_path)
     optout = optout_mod.load_optout(optout_path)
     targets, opted_out = optout_mod.filter_targets(targets, optout)
-    gaps = sum(
-        1 for t in targets
-        if any(c.get("state") == "blocked"
-               for c in claims.claims_for(conn, "person", t["id"]))
-    )
+    gaps = sum(1 for t in targets if _target_open_gap(conn, t["id"]))
     status = "finalized_with_open_gaps" if gaps else "finalized"
     latest = conn.execute(
         "SELECT run_id FROM run ORDER BY started_at DESC, rowid DESC LIMIT 1"
@@ -687,12 +764,15 @@ def _build_result(conn, run_id, status, targets, *, stats, gaps) -> dict:
                 "gap, not a filtered result." if enumerated == 0
                 else f"{enumerated} professor(s) enumerated; none were dropped for missing data.")
     if gaps:
-        coverage += f" {gaps} target(s) are blocked and open for the human rung."
+        coverage += f" {gaps} target(s) have open gaps for the human rung."
     truncated = (stats or {}).get("truncated")
     if truncated:
         # never claim completeness while a source hit its page cap (D-037)
         coverage += (f" Coverage is PARTIAL — {len(truncated)} source(s) had more results than "
                      f"were enumerated ({', '.join(truncated)}).")
+    for w in (stats or {}).get("warnings", []):
+        # sparse-coverage preflight + discovery-scope warnings (D-060) reach the dashboard too
+        coverage += f" Warning: {w}"
     export = jx.build_export(
         run_summary={"run_id": run_id, "status": status,
                      "counts": {"enumerated": enumerated}, "coverage": coverage},

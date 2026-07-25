@@ -5,7 +5,7 @@ from supervisorly.fetch import normalize as nz
 from supervisorly.fetch.fetcher import Fetcher
 from supervisorly.fetch.ratelimit import HostRateLimiter
 from supervisorly.fetch.snapshot import SnapshotStore
-from supervisorly.fetch.transport import CassetteTransport
+from supervisorly.fetch.transport import CassetteTransport, Response
 
 PEOPLE_HTML = (
     "<html><body><main><p>Prof Jane — I am recruiting PhD students for Fall 2027."
@@ -70,6 +70,68 @@ def test_missing_robots_fails_closed(tmp_path):
     f = Fetcher(tp, snaps)
     res = f.fetch("https://u.edu/people/jane")
     assert res.allowed is False
+
+
+# ── redirects: robots applies to the FINAL url, not just the requested one ──────
+def _redirect_response(_requested: str, final: str, text: str = PEOPLE_HTML):
+    """A cassette Response whose URL differs from the request — a followed redirect."""
+    return Response(final, 200, text)
+
+
+def test_redirect_into_disallowed_path_is_denied_and_not_snapshotted(tmp_path):
+    """Audit: a same-host redirect into a Disallow'd path must not be fetched —
+    robots is re-checked against the final URL, fail closed (D-019)."""
+    tp = CassetteTransport({
+        "https://u.edu/robots.txt": _redirect_response(
+            "https://u.edu/robots.txt", "https://u.edu/robots.txt",
+            "User-agent: *\nDisallow: /private/\n"),
+        "https://u.edu/people/jane": _redirect_response(
+            "https://u.edu/people/jane", "https://u.edu/private/roster"),
+    })
+    snaps = SnapshotStore(tmp_path / "snaps")
+    res = Fetcher(tp, snaps).fetch("https://u.edu/people/jane")
+    assert res.allowed is False and res.snapshot_hash is None   # body discarded, NO snapshot
+    assert res.final_url == "https://u.edu/private/roster"
+    assert "robots" in res.error
+
+
+def test_cross_host_redirect_to_a_disallow_all_host_is_denied(tmp_path):
+    """Audit: a cross-host redirect lands on a host robots never vetted — re-check there too."""
+    tp = CassetteTransport({
+        "https://u.edu/robots.txt": _redirect_response(
+            "https://u.edu/robots.txt", "https://u.edu/robots.txt", "User-agent: *\nAllow: /\n"),
+        "https://u.edu/people/jane": _redirect_response(
+            "https://u.edu/people/jane", "https://other.example/track"),
+        "https://other.example/robots.txt": _redirect_response(
+            "https://other.example/robots.txt", "https://other.example/robots.txt",
+            "User-agent: *\nDisallow: /\n"),
+    })
+    res = Fetcher(tp, SnapshotStore(tmp_path / "snaps")).fetch("https://u.edu/people/jane")
+    assert res.allowed is False and res.snapshot_hash is None
+    assert res.final_url == "https://other.example/track"
+
+
+def test_allowed_redirect_is_fetched_and_source_recorded_under_the_final_url(tmp_path):
+    """An allowed redirect is fetched; the pipeline records provenance under the FINAL
+    url so the export never cites a page the claim didn't come from (D-010)."""
+    from supervisorly import pipeline
+    from supervisorly.model.db import open_db
+    tp = CassetteTransport({
+        "https://u.edu/robots.txt": _redirect_response(
+            "https://u.edu/robots.txt", "https://u.edu/robots.txt", "User-agent: *\nAllow: /\n"),
+        "https://u.edu/people/jane": _redirect_response(
+            "https://u.edu/people/jane", "https://u.edu/people/jane-new"),
+    })
+    # fetcher level: the redirect is followed, fetched, and the final URL surfaced
+    res = Fetcher(tp, SnapshotStore(tmp_path / "snaps")).fetch("https://u.edu/people/jane")
+    assert res.ok and res.final_url == "https://u.edu/people/jane-new"
+    # pipeline level: the recorded web_source cites the final URL, not the requested one
+    db = tmp_path / "run.sqlite"
+    targets = [{"id": "p1", "name": "Prof Jane", "url": "https://u.edu/people/jane"}]
+    pipeline.run_offline({"intent_kind": "pre_phd"}, targets, tp, tmp_path / "snaps2",
+                         db_path=db)
+    urls = [r[0] for r in open_db(db).execute("SELECT url FROM web_source")]
+    assert urls == ["https://u.edu/people/jane-new"]
 
 
 def test_rate_limiter_waits_between_same_host(tmp_path):

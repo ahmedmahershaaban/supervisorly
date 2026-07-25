@@ -50,6 +50,42 @@ def test_deadline_change_invalidates_cache():
     assert nz.content_hash(PAGE_A) != nz.content_hash(changed)
 
 
+def test_deadline_right_after_an_updated_keyword_invalidates_cache():
+    """Regression (audit): the old volatile mask swallowed 40 chars of prose after
+    "updated", hiding a real deadline change from the cache hash forever (D-061).
+    The keyword tail must mask only timestamp-shaped tokens."""
+    page = ("<html><body><main><p>Site updated{pad} applications close {d} for entry."
+            "</p></main></body></html>")
+    for pad in ("", " Monday:", " xxxxxxxxxx"):   # 0–10 chars between keyword and sentence
+        a = page.format(pad=pad, d="1 Dec 2026")
+        b = page.format(pad=pad, d="5 Jun 2027")
+        assert nz.content_hash(a) != nz.content_hash(b)
+
+
+def test_stamp_timestamp_change_still_hashes_identically():
+    """Only the stamp's OWN timestamp is masked — a page whose stamp alone changed
+    still hits the warm cache."""
+    page = ("<html><body><main><p>Application deadline: 2027-12-15.</p>"
+            "<p>Last updated: {d}</p></main></body></html>")
+    assert nz.content_hash(page.format(d="2026-07-20")) == \
+        nz.content_hash(page.format(d="2026-07-24"))
+    assert nz.content_hash(page.format(d="July 20, 2026")) == \
+        nz.content_hash(page.format(d="July 24, 2026"))
+    assert nz.content_hash(page.format(d="1 Dec 2026")) == \
+        nz.content_hash(page.format(d="5 Jun 2027"))
+
+
+def test_comma_less_counter_change_hashes_identically():
+    """Regression (audit): the counter mask required comma groups, so '42 views' ->
+    '43 views' busted the cache on unchanged content."""
+    page = ("<html><body><main><p>I am recruiting PhD students for Fall 2027.</p>"
+            "<p>{n} views</p></main></body></html>")
+    assert nz.content_hash(page.format(n=42)) == nz.content_hash(page.format(n=43))
+    # the noun guard stays: a bare number next to real content is NOT masked
+    assert nz.content_hash(page.format(n=42)) != nz.content_hash(
+        page.format(n=42).replace("Fall 2027", "Fall 2028"))
+
+
 def test_main_text_keeps_dates_but_drops_boilerplate():
     t = nz.main_text(PAGE_A)
     assert "Fall 2027" in t
