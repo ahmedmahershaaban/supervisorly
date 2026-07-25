@@ -852,3 +852,31 @@ documented install -> **`253 passed` on the first try**; post-install tree clean
 **State: GOAL COMPLETE.** Suite green at **253 passed** on `build/live`; section 5 closed with zero
 open findings; clean-room green; every Definition-of-Done box checked in
 `docs/LIVE_COMPLETION_REPORT.md`.
+
+## round B4 — Scan Studio UI (D-067) (commit pending)
+
+- `export/studio.py` — `build_studio(subject_map, *, defaults=None)`: ONE self-contained,
+  offline HTML plan wizard in the Atlas "Living" language, same conventions as the dashboard
+  (`_inline_json` data embedding — every `<` neutralised, U+2028/U+2029 escaped; `esc()` for
+  the one Python-side interpolation; named Space Grotesk/Mono with system fallbacks, never
+  imported; `prefers-reduced-motion` kills all animation; `:focus-visible` ring; Escape closes
+  transient UI). Sections: Atlas hero (eyebrow `SUPERVISORLY · SCAN STUDIO` + decorative
+  cells-and-filaments SVG), intent radio cards (pre_phd default), country, university chips +
+  all/prioritise/only mode, the tri-state domain→field→subfield→topics checkbox tree
+  (parent cascades to descendants; indeterminate on partial; works-count chips "12.4k works"),
+  D-037 PARTIAL MAP banner when `truncated`, named professors, contact email. "Export plan"
+  validates inline (no `alert()`), builds the plan JSON
+  (`intent_kind, country, field, resolved_topic_ids, university_mode, universities, targets,
+  email`) and downloads `supervisorly_plan.json` via Blob (a static file cannot write to disk),
+  then shows the next command `supervisorly scan --plan supervisorly_plan.json --out
+  output/live.html` with a copy button.
+- CLI `studio --map ... [--out ...]` — fails loud (exit 2) on a missing/invalid/wrong-shape map;
+  reuses the `_warn_if_committable` D-005 guard on `--out`; ASCII-safe status line.
+- `scan --plan` now honours a Studio plan's own `email` (satisfies the polite-pool credential
+  check) and `targets` (named professors; invalid entries fail loud) — the exported plan is
+  self-sufficient; explicit flags still override the plan.
+- `tests/test_studio.py` (+17): self-containment scan, hostile-string injection (exactly one
+  `</script>`, no raw U+2028/`<img`), reduced-motion/keyboard/tri-state/plan-shape structure,
+  node `--check` on the embedded JS, truncation banner, honest empty map, CLI fail-loud +
+  D-005 warning, plan email/targets wiring via cassette.
+-> **319 passed** (302 + 17).

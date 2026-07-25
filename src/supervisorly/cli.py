@@ -3,8 +3,8 @@
 Every pipeline stage is independently runnable from here (architecture §7), so the
 tool is debuggable and portable. Shipped commands: ``init-db``, ``version``,
 ``scan`` (demo + live, plan-driven and named-target inputs, D-066), ``map-field``
-(the subject-map stage, D-066), ``ingest-page`` (the browser seam, D-064) and
-``pace`` (the social pacing gate, D-065).
+(the subject-map stage, D-066), ``studio`` (the Scan Studio plan wizard, D-067),
+``ingest-page`` (the browser seam, D-064) and ``pace`` (the social pacing gate, D-065).
 """
 
 from __future__ import annotations
@@ -140,6 +140,38 @@ def _write_result(result: dict, out: Path, label: str) -> int:
     # ASCII-only console output — the default Windows console codec (cp1252) can't encode a
     # Unicode arrow, which would crash the command after the files were already written.
     print(f"scanned {n} professors ({label}) -> {out} (+ {out.with_suffix('.json').name})")
+    return 0
+
+
+def cmd_studio(args: argparse.Namespace) -> int:
+    """Scan Studio (D-067): render a ``map-field`` subject map as the self-contained,
+    offline plan wizard. Fails loud (exit 2) on a missing/invalid map file (D-002)."""
+    import json
+
+    from .export.studio import build_studio
+
+    p = Path(args.map)
+    if not p.is_file():
+        print(f"subject map not found: {p} - run `supervisorly map-field` first.")
+        return 2
+    try:
+        smap = json.loads(p.read_text(encoding="utf-8"))
+    except ValueError as exc:
+        print(f"invalid subject-map JSON in {p}: {exc}")
+        return 2
+    if not isinstance(smap, dict) or not isinstance(smap.get("groups"), list):
+        print(f"{p} is not a subject map (expected a JSON object with a 'groups' list) - "
+              "produce one with `supervisorly map-field`.")
+        return 2
+
+    out = Path(args.out)
+    _warn_if_committable(out)                       # D-005 guard, same as scan --out
+    if out.parent != Path("") and not out.parent.exists():
+        out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(build_studio(smap), encoding="utf-8")
+    n_topics = sum(len(g.get("topics") or []) for g in smap["groups"] if isinstance(g, dict))
+    # ASCII-only console output (cp1252 convention — see _write_result)
+    print(f"studio wrote {n_topics} topics in {len(smap['groups'])} groups -> {out}")
     return 0
 
 
@@ -289,14 +321,9 @@ def cmd_scan(args: argparse.Namespace) -> int:
     import os
 
     from . import preflight
-    email = args.email or os.environ.get(preflight.CONTACT_EMAIL_ENV)
-    try:
-        preflight.require_credentials({preflight.CONTACT_EMAIL_ENV: email or ""})
-    except preflight.MissingCredentials as exc:
-        print(str(exc))
-        return 2
     # --plan: a Scan Studio / conversational plan JSON supplies the base scope; explicit
     # flags OVERRIDE the plan's values (D-066). Fail loud on a missing/invalid plan (D-002).
+    # Loaded BEFORE the credentials check so a Studio plan's own "email" can satisfy it.
     plan_file: dict = {}
     if args.plan:
         plan_file, err = _load_plan(args.plan)
@@ -304,13 +331,30 @@ def cmd_scan(args: argparse.Namespace) -> int:
             print(err)
             return 2
 
+    email = (args.email or os.environ.get(preflight.CONTACT_EMAIL_ENV)
+             or plan_file.get("email"))
+    try:
+        preflight.require_credentials({preflight.CONTACT_EMAIL_ENV: email or ""})
+    except preflight.MissingCredentials as exc:
+        print(str(exc))
+        return 2
+
     # --targets: named professors to deep-dive directly (resolved below, after the transport).
+    # A Studio plan may carry the same list under "targets" — the flag wins when both exist.
     target_specs: list | None = None
     if args.targets:
         target_specs, err = _load_target_specs(args.targets)
         if err:
             print(err)
             return 2
+    elif plan_file.get("targets"):
+        specs = plan_file["targets"]
+        if not isinstance(specs, list) or not all(
+                isinstance(e, str) or (isinstance(e, dict) and e.get("name")) for e in specs):
+            print(f"plan file {args.plan} has an invalid 'targets' entry — expected a list of "
+                  '{"name": ..., "affiliation": ...} objects or OpenAlex author URL strings.')
+            return 2
+        target_specs = specs
 
     country_in = args.country if args.country is not None else plan_file.get("country")
     field = args.field if args.field is not None else plan_file.get("field")
@@ -432,6 +476,15 @@ def build_parser() -> argparse.ArgumentParser:
     pm.add_argument("--openalex-key", dest="openalex_key", default=None,
                     help="optional OpenAlex premium key (higher limits)")
     pm.set_defaults(func=cmd_map_field)
+
+    pt = sub.add_parser("studio", help="render a subject map as the self-contained Scan Studio "
+                                       "plan wizard (D-067): intent, country, universities, "
+                                       "topic multi-select, named professors -> plan JSON")
+    pt.add_argument("--map", required=True, dest="map",
+                    help="subject-map JSON from `map-field` (default output/subject_map.json)")
+    pt.add_argument("--out", default="output/studio.html",
+                    help="studio HTML output path (default: output/studio.html)")
+    pt.set_defaults(func=cmd_studio)
 
     pb = sub.add_parser("ingest-page",
                         help="store browser-extracted page TEXT as a snapshot (D-064)")
