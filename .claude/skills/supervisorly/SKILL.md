@@ -25,11 +25,16 @@ locked decision in `docs/DECISIONS.md`.**
 
 ## Flow
 
-**Stage 0 — interpret intent (you, inline).** From the student's country + field + subfield +
-need, build a `SearchPlan`: the `intent_kind`, generated `resolved_topic_terms` and OpenAlex
-`resolved_topic_ids` (D-058), venues, target/excluded sources, languages, university mode. Run a
-**country-source preflight** (D-060) and tell the student what will be thin. **Show the plan and
-wait for confirmation** — nothing expensive runs until `confirmed_by_user`.
+**Stage 0 — interpret intent (you, inline).** From the student's country + field + need, interpret
+the intent inline (this is the "generate, don't look up" judgement — D-038/D-045). Then run
+`supervisorly map-field --field "<the student's free-text field>"` (D-066): it maps the field to a
+hierarchical, API-derived OpenAlex subject map (domains → fields → subfields → topics). Present
+that map as a **multi-select** — a numbered list in conversation, or generate the Scan Studio
+(`supervisorly studio --map <subject-map>`) and point the student at it. The student keeps the
+topics they want and skips the rest; the kept topic IDs become the plan's `resolved_topic_ids`.
+Finish the `SearchPlan` around them: the `intent_kind`, venues, target/excluded sources, languages,
+university mode. Run a **country-source preflight** (D-060) and tell the student what will be thin.
+**Show the plan and wait for confirmation** — nothing expensive runs until `confirmed_by_user`.
 
 **Stage 1 — roster (enumerate + signal tiers).** For each targeted university, run
 `discovery-ladder` (CRIS → sitemap → JSON-LD → CT logs → OpenAlex/ROR → adapter). Capture every
@@ -68,10 +73,15 @@ self-contained dashboard.
 
 For a **live** run against real sources, the flow is:
 
-1. **Intent recognition → SearchPlan.** From the student's request (a country, a field, and what
-   they need — pre_phd / master / phd / postdoc / mentor), *generate* a SearchPlan (D-038): resolve
-   the field to OpenAlex topic IDs, pick the country, and note any universities to prioritise or
-   restrict to (`university_mode` = all / prioritise / only). Nothing is looked up from a fixed list.
+1. **Intent recognition → subject map → plan.** From the student's request (a country, a field,
+   and what they need — training / pre_master / pre_phd / master / phd / postdoc / mentor),
+   interpret the intent inline (D-038), then run `supervisorly map-field --field "<field>"` and
+   present the hierarchical subject map as a multi-select (a numbered list in conversation, or
+   `supervisorly studio --map output/subject_map.json` for the Scan Studio wizard, D-066/D-067).
+   The kept topic IDs become the plan's `resolved_topic_ids`. A plan the student exports from the
+   Studio (or confirms in conversation) drives the scan via `supervisorly scan --plan plan.json`
+   (explicit flags override its values); named professors go in via `--targets profs.json`.
+   Nothing is looked up from a fixed list.
 2. **Confirm the plan with the user** before anything expensive runs.
 3. **Stage-1 — enumerate.** The discovery ladder (ROR by country → OpenAlex authors-by-institution)
    produces a de-duplicated list of professor targets with links; login-walled directories go to the
@@ -95,3 +105,41 @@ supervisorly scan --country Canada --field "causal ML" --intent pre_phd \
 
 Only a **contact email** is required (ROR is keyless, OpenAlex is free); the corpus is never read
 (D-035). Re-run with `--resume` for a cheap scheduled refresh (warm cache + a "what changed" delta).
+
+The MCP browser config is **host-portable** (D-064): the chrome-devtools server is registered once
+at user level (`mcp.json`); for Claude Code it's
+`claude mcp add chrome-devtools --scope user npx chrome-devtools-mcp@latest` — the same server
+(the slim / no-usage-statistics flags are recommended). The recipe below is identical under any
+MCP host.
+
+## Browser-primary live fetch (D-064)
+
+Chrome — launched and driven by you via the chrome-devtools MCP tools (`mcp__chrome-devtools__*`;
+the server auto-launches Chrome, headful, on a persistent profile) — is the **primary** page fetch
+for live scans. The exact recipe for every page:
+
+1. **Pace first.** Run `supervisorly pace --host <host>` BEFORE each page and branch on the exit
+   code: `0` = go; `3` = respect the printed verdict — sleep the printed `wait=` seconds and
+   re-check, or skip the host entirely on a cap/abort deny.
+2. **Skip the browser when you can.** A page already fresh in the warm cache needs no fetch at
+   all, and API endpoints never get one — ROR/OpenAlex JSON stays on the Python/httpx side.
+3. **Navigate** with the `mcp__chrome-devtools__*` tools. Walled pages use the logged-in
+   persistent profile — on the **first** browser run, pause and ask the user to log into the
+   walled sites once, themselves, in the opened Chrome window; after that the session persists.
+4. **Extract in-page.** Call `evaluate_script` with `src/supervisorly/extract/page_extract.js`
+   as the function body (default for static pages; args `[{"scroll": true}]` for scroll mode on
+   social pages). Write ONLY the returned `text` to a staging file (e.g. `browser_staging/`)
+   WITHOUT reading it into context — you handle paths and byte counts, never raw page content.
+5. **Ingest.** `supervisorly ingest-page --url <finalUrl> --file <staging>` prints a one-line
+   result; the deterministic engine takes it from there — snapshot → the existing extractors →
+   D-010 quote-verified claims. A browser page is just another snapshot.
+
+## Social rung (D-065)
+
+Walled-social gap tasks — the `awaiting_human` gap_fill tasks minted for a professor's
+**advertised** x.com / linkedin.com profiles — are executed by you through the logged-in profile,
+not parked for the student: per-target, read-only, scroll mode, `pace` enforced before every page.
+On ANY challenge, soft-block, or unexpected login redirect: `supervisorly pace --host <h> --abort
+"<reason>"` (the host latches aborted for the session), mark the field `blocked`, and route it to
+the classic human rung — never retry harder. Scholar is minimal-use: profile pages only, no search
+pagination. Only advertised profile URLs are ever visited — never people-search enumeration.

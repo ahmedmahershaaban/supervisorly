@@ -14,8 +14,9 @@ every fact links back to its source.
 - **Evidence, not vibes** — every displayed fact is a *claim* with a verbatim quote, a source
   URL, and a confidence level. "We looked and found nothing" is shown honestly, never guessed.
 - **Respectful by design** — it reads public sources and open APIs and never defeats a login;
-  walled pages (X, Scholar, login-only directories) are handled by *you* in your own browser via
-  a generated Claude-for-Chrome prompt.
+  walled pages (X, LinkedIn, Scholar) are read through *your own* logged-in browser session by the
+  agent (one-time login, strict pacing), and anything it still can't read goes to you via a
+  generated Claude-for-Chrome prompt.
 - **Runs in Claude Code** — no server, no account. Point Claude at this repo.
 
 See [`docs/HANDOVER.md`](docs/HANDOVER.md) for the map, and the interactive design atlas.
@@ -64,7 +65,8 @@ data — the four states (`value` / `searched_absent` / `never_attempted` / `blo
 distinctly.
 
 **Live scan (real sources)** — needs the credentials below. It fetches only public pages and
-open APIs, obeys `robots.txt`, and routes login-walled pages to you via a generated
+open APIs, obeys `robots.txt`, reads advertised walled profiles through your own logged-in
+browser (the browser tier below), and routes whatever remains to you via a generated
 Claude-for-Chrome prompt (paste the result back and the run resumes without re-fetching).
 
 ## Credentials (needed for live runs)
@@ -103,6 +105,41 @@ supervisorly scan --country Canada --field "causal ML" --intent pre_phd \
 (ROR) and professors (OpenAlex), deep-dives each professor's public pages into quote-verified
 claims (recruiting, deadline, students, collaborations, social), scores + ranks them, and writes a
 self-contained dashboard.
+
+## Planning a scan: subject map, Scan Studio, named professors
+
+Before a scan you can map your free-text field to a hierarchical, API-derived OpenAlex **subject
+map**, pick the topics you want (a numbered list in conversation, or the self-contained **Scan
+Studio** wizard), and run from the exported plan — or skip discovery and name professors directly:
+
+```bash
+python -m supervisorly map-field --field "causal ML"        # → output/subject_map.json
+python -m supervisorly studio --map output/subject_map.json # → output/studio.html (offline wizard)
+python -m supervisorly scan --plan supervisorly_plan.json --out output/live.html
+python -m supervisorly scan --targets profs.json --email you@example.com --out output/live.html
+```
+
+`--plan` takes a Scan Studio plan JSON (explicit flags override its values); `--targets` takes a
+JSON list of `{"name": ..., "affiliation": ...}` objects or OpenAlex author URLs — anyone who
+doesn't resolve is reported as an honest skip, never silently dropped.
+
+## The browser tier (live page fetches)
+
+When an agent runs Supervisorly, Chrome (driven via `chrome-devtools-mcp`) is the **primary** page
+fetch for live scans: the agent navigates, extracts the main text in-page, and hands it to the
+deterministic engine through the `ingest-page` seam — raw HTML never enters the agent's context,
+and APIs (ROR/OpenAlex) stay on plain HTTP. The browser runs on a persistent profile: on the
+**first** run you log into the walled sites (X, LinkedIn) **once, yourself**, in the opened Chrome
+window; after that the agent can read advertised profiles on its own, under a strict anti-ban
+pacing policy (`pace` gates every page — jittered intervals, per-session caps, abort-on-challenge).
+The setup is host-portable: register the server once at user level, e.g. for Claude Code
+`claude mcp add chrome-devtools --scope user npx chrome-devtools-mcp@latest`.
+
+```bash
+python -m supervisorly pace --host x.com            # gate before a browser page: exit 0 = go, 3 = wait/deny
+python -m supervisorly ingest-page --url <finalUrl> --file browser_staging/page.txt \
+    --db supervisorly.sqlite                        # store agent-extracted text as a snapshot
+```
 
 ## Scheduled re-scans
 

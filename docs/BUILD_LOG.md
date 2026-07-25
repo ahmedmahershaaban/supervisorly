@@ -853,7 +853,67 @@ documented install -> **`253 passed` on the first try**; post-install tree clean
 open findings; clean-room green; every Definition-of-Done box checked in
 `docs/LIVE_COMPLETION_REPORT.md`.
 
-## round B4 — Scan Studio UI (D-067) (commit pending)
+## round B0 — Goal 3 docs: D-064…D-067 + GOALS + goal doc (commit `72bcb48`)
+
+- `docs/DECISIONS.md` — appended four locked decisions: **D-064** (browser-primary live fetch is
+  agent-driven; page content enters only through the deterministic `ingest-page` snapshot seam;
+  raw HTML/DOM never enters agent context; APIs stay httpx; host-portable), **D-065** (social
+  pacing policy: jittered intervals, per-session caps, human-like scrolling, abort-on-challenge;
+  Scholar minimal; advertised profiles only), **D-066** (subject-map stage: API-derived
+  hierarchy, user multi-select before anything expensive), **D-067** (Scan Studio: one
+  self-contained Atlas-language plan wizard; conversational multi-select remains the fallback).
+- `docs/GOALS.md` — Goal 3 row (branch `build/browser`). `docs/BROWSER_IMPLEMENTATION_GOAL.md`
+  — the standing build contract (constraints, phases B1–B6, DoD, guardrails).
+
+## round B1+B2 — browser ingest seam (D-064) + pacing policy (D-065) (commit `ecec3ec`)
+
+- `extract/page_extract.js` — in-page main-text extractor mirroring `normalize.main_text`
+  (visible-text TreeWalker, whitespace collapse), UTF-8 byte cap 61440 with word-boundary cut +
+  `[truncated]` marker; async scroll mode (4–10 `scrollBy` steps, 1–3 s randomised pauses,
+  settle wait) for social pages. ES2019, no imports, `node --check` clean.
+- `fetch/browser_rung.py` — `ingest_page()`: text HTML-escaped inside a minimal `<main>` shell
+  so snapshots are byte-format-compatible with fetcher snapshots (`main_text`/`quote_in_snapshot`
+  round-trip exactly); web source under the FINAL url, tier `agent_browser`,
+  `robots_allowed=None` (same honesty convention as `human_assisted`).
+- `model/schema.sql` + `model/db.py` — schema v2: `agent_browser` added to the
+  `web_source.source_tier` CHECK; `migrate()` rebuilds the table on stale CHECK (data copied,
+  index preserved, `legacy_alter_table=ON`).
+- CLI `ingest-page` (exit 2 on invalid url/missing file/empty text; one ASCII line).
+- `ethics/pacing.py` — POLICY: social (x/twitter/linkedin, subdomains) 45–120 s jitter + cap
+  15/session; scholar.google.* 60–180 s + cap 5; non-social no-op. Persistent state JSON;
+  `check()` (allowed/wait/reason, injectable rng), `abort()` latch, `reset()`; corrupt state
+  fails closed. CLI `pace` (exit 0 ALLOW / 3 DENY; `--abort`, `--reset`, `--state`).
+- `.gitignore` — `pacing_state.json` + `**/browser_staging/` (D-005).
+- `tests/test_browser_rung.py` (+17), `tests/test_pacing.py` (+15); one expectation update
+  (`test_state_machine.py` pins `SCHEMA_VERSION` constant instead of "1" — the bump is the
+  intended change).
+-> **283 passed** (253 + 30).
+
+## round B3 — subject-map stage (D-066) + --plan/--targets (commit `fac260e`)
+
+- `discover/subjects.py` — `subject_map()`: OpenAlex topics search paginated, grouped
+  domain→field→subfield ("ungrouped" buckets for null hierarchy, never a crash), works_count
+  sort, `max_results` cap; D-037 truncation honesty (cap, first-page failure, mid-pagination
+  failure all marked `topics@<query>`; genuine empties unmarked).
+- `discover/openalex.py` — `topics_url` page param, `author_search_url`/`author_url`,
+  `author_search(name, affiliation)` (affiliation preference via last-known-institution
+  casefold substring; unmatched → top hit flagged `resolution: "unverified"`),
+  `author_by_id` (404 = honest skip vs failure = truncation marker).
+- CLI `map-field` (preflight email required; `output/subject_map.json` default; PARTIAL noted
+  in the summary line).
+- `scan --plan` — validated plan file (missing/invalid/keys → exit 2 listing expected keys);
+  plan country name resolves via `to_country_code` fail-loud; explicit flags override plan
+  values (argparse defaults → None so overrides are detectable); plan `resolved_topic_ids`
+  reach the scorer (ladder already prefers them — zero re-resolution, spy-tested).
+- `scan --targets` — named professors (dict specs or OpenAlex URLs) resolved in the CLI and
+  fed to `run_live(targets_override=...)` in the exact `enumerate_professors` shape, so
+  `_process_targets`/opt-out/resume/export work unchanged; unresolved names reported as
+  SKIPPED (never silently dropped); targets-only runs skip the country ladder and the
+  `--country`/`--field` requirement; `--targets` + `--country` unions both sets.
+- `tests/test_subjects.py` (+9), `tests/test_scan_plan.py` (+10).
+-> **302 passed** (283 + 19).
+
+## round B4 — Scan Studio UI (D-067) (commit `5809b40`)
 
 - `export/studio.py` — `build_studio(subject_map, *, defaults=None)`: ONE self-contained,
   offline HTML plan wizard in the Atlas "Living" language, same conventions as the dashboard
@@ -880,3 +940,47 @@ open findings; clean-room green; every Definition-of-Done box checked in
   node `--check` on the embedded JS, truncation banner, honest empty map, CLI fail-loud +
   D-005 warning, plan email/targets wiring via cassette.
 -> **319 passed** (302 + 17).
+
+## round B5 — Orchestration + docs (this commit)
+
+Documentation + orchestrator contract only — no code changes; every documented command/flag was
+verified against the real `--help` output on the project venv first.
+
+- `.claude/skills/supervisorly/SKILL.md` — Stage 0 is now intent → `map-field` (hierarchical,
+  API-derived subject map, D-066) → multi-select confirm (numbered list, or the Scan Studio via
+  `studio --map`) → plan; the nothing-expensive-before-confirmation rule stays. New section
+  **"Browser-primary live fetch (D-064)"**: the exact per-page agent recipe — `pace --host`
+  before every page (exit 0 = go, 3 = sleep the printed wait or skip the host), warm-cache pages
+  and API JSON (ROR/OpenAlex) never touch the browser, navigate via the `mcp__chrome-devtools__*`
+  tools (headful persistent profile; first run = the user logs into the walled sites once,
+  themselves), extract in-page with `evaluate_script(page_extract.js)` (scroll mode for social),
+  write only the text to a staging file the agent never reads, then `ingest-page --url <finalUrl>
+  --file <staging>` and the deterministic engine takes over (snapshot → extractors → D-010
+  quote-verified claims). New section **"Social rung (D-065)"**: walled-social `awaiting_human`
+  gap tasks are executed by the agent through the logged-in profile — per-target, read-only,
+  scroll mode, pacing enforced; any challenge/soft-block/login redirect → `pace --abort`, field
+  `blocked`, classic human rung; Scholar profile pages only; advertised profile URLs only, never
+  people-search enumeration. The live-orchestration flow now references `--plan` / `--targets` /
+  `map-field` / `studio`, carries the full intent list, and documents the host-portable MCP config
+  (user-level `mcp.json`; `claude mcp add chrome-devtools --scope user npx
+  chrome-devtools-mcp@latest` for Claude Code — same server, slim/no-usage-statistics flags
+  recommended).
+- `README.md` — new sections "Planning a scan: subject map, Scan Studio, named professors"
+  (`map-field`, `studio`, `scan --plan`, `scan --targets` with one-line examples) and "The browser
+  tier" (what it is, one-time login, pacing, host-portability; `pace` + `ingest-page` examples);
+  the two stale "walled pages go straight to the human rung" sentences now describe the browser
+  tier with the human rung as fallback.
+- `docs/getting-started.html` — the live section matches reality: the stale "live scanner is the
+  next piece being built" status box is replaced with the real flow (intent → subject map → pick
+  topics → Scan Studio or conversation → `scan --plan`); step C's commands are real
+  (`map-field` → `studio` → `scan --plan`) and the browser tier + one-time login are explained;
+  the human-rung section notes the agent's browser reads most walled pages first. Two stale
+  "two free keys (ROR & OpenAlex)" lines fixed — a live scan needs only the contact email
+  (doc-vs-code mismatch, fixed in the docs).
+- `.claude/agents/*.md` — reviewed all five contracts; no changes needed. The only login-wall
+  mention (`adapter-author.md`'s `LOGIN_WALL` marker) covers login-walled directory
+  *enumeration* (roster, D-052) — the browser tier never enumerates directories, so nothing
+  contradicts the new flow.
+**Verified:** `-m supervisorly {scan,map-field,studio,ingest-page,pace,init-db,version} --help`
+all match the documented flags; full suite re-run after the doc edits.
+-> **319 passed** (unchanged — docs only).
