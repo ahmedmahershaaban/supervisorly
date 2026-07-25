@@ -670,7 +670,8 @@ def run_offline(plan: dict, targets: list[dict], transport: Transport, snap_root
 
 def run_live(plan: dict, transport: Transport, snap_root, *, email: str,
              openalex_key=None, db_path=None, optout_path=None, resume=False,
-             rate_limit: float = 1.0, backoff_sleep=None) -> dict:
+             rate_limit: float = 1.0, backoff_sleep=None,
+             targets_override: list[dict] | None = None) -> dict:
     """A **live** scan: preflight → discovery ladder (ROR + OpenAlex) → the *same* fetch → extract
     → claim → score → export → dashboard pipeline as ``run_offline`` (D-028), now from **discovered**
     targets rather than hand-fed ones.
@@ -679,20 +680,42 @@ def run_live(plan: dict, transport: Transport, snap_root, *, email: str,
     premium ``openalex_key`` is optional. The ``transport`` serves both the open-API JSON (ROR/
     OpenAlex, via the clients) and the professor pages (via the robots-gated ``Fetcher``) — one seam,
     so a live run is exactly the cassette-tested path with httpx swapped in.
+
+    ``targets_override`` (D-066 ``--targets``) holds named-professor targets already resolved via
+    OpenAlex author search. With a plan country they are UNIONED with the ladder's targets (deduped
+    by OpenAlex id — nobody double-deep-dived); with NO plan country the country/discovery ladder
+    is skipped entirely and the named targets are deep-dived directly through the same
+    ``_process_targets`` path.
     """
     preflight.require_credentials({preflight.CONTACT_EMAIL_ENV: email})
     ror_client = _ror.RorClient(transport, email=email)
     oa_client = _openalex.OpenAlexClient(transport, email=email, key=openalex_key)
-    disc = _ladder.build_targets(plan, ror_client, oa_client)
+    country = plan.get("country") or (plan.get("countries") or [None])[0]
 
-    # D-060 (Phase L0 DoD): the sparse-country preflight warns and continues — never blocks.
-    # Feed it the real discovery stats and surface its warnings (plus the ladder's) in the run
-    # stats + coverage line; the CLI prints them.
-    warnings = preflight.coverage_preflight({
-        "country": plan.get("country") or (plan.get("countries") or [None])[0],
-        "ror_institutions": len(disc["institutions"]),
-        "openalex_works": sum(int(t.get("works_count") or 0) for t in disc["targets"]),
-    }) + list(disc.get("warnings", []))
+    if targets_override is not None and not country:
+        # named-professor run: no country/field scope, so the discovery ladder is skipped —
+        # nothing to enumerate. Truncation markers from the author lookups still surface (D-037).
+        disc = {"plan": dict(plan), "institutions": [], "targets": list(targets_override),
+                "truncated": sorted(set(oa_client.truncated_sources)), "warnings": []}
+        warnings: list[str] = []
+    else:
+        disc = _ladder.build_targets(plan, ror_client, oa_client)
+        if targets_override:
+            seen = {t.get("openalex_id") or t.get("id") for t in disc["targets"]}
+            for t in targets_override:
+                key = t.get("openalex_id") or t.get("id")
+                if key not in seen:
+                    seen.add(key)
+                    disc["targets"].append(t)
+            disc["truncated"] = sorted(set(disc["truncated"]) | set(oa_client.truncated_sources))
+        # D-060 (Phase L0 DoD): the sparse-country preflight warns and continues — never blocks.
+        # Feed it the real discovery stats and surface its warnings (plus the ladder's) in the run
+        # stats + coverage line; the CLI prints them.
+        warnings = preflight.coverage_preflight({
+            "country": country,
+            "ror_institutions": len(disc["institutions"]),
+            "openalex_works": sum(int(t.get("works_count") or 0) for t in disc["targets"]),
+        }) + list(disc.get("warnings", []))
 
     conn = open_db(db_path) if db_path is not None else open_db()
     snaps = SnapshotStore(snap_root)

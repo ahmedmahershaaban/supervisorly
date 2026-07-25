@@ -22,13 +22,36 @@ def _url(path: str, params: dict) -> str:
     return f"{OPENALEX_API}/{path}?" + urlencode(params)
 
 
-def topics_url(query: str, email: str | None, key: str | None = None) -> str:
+def topics_url(query: str, email: str | None, key: str | None = None,
+               page: int = 1) -> str:
     p = {"search": query, "per-page": PER_PAGE}
+    if page > 1:                       # page 1 omits the param → matches the un-paged URL
+        p["page"] = page
     if email:
         p["mailto"] = email
     if key:
         p["api_key"] = key
     return _url("topics", p)
+
+
+def author_search_url(query: str, email: str | None, key: str | None = None) -> str:
+    p = {"search": query, "per-page": PER_PAGE}
+    if email:
+        p["mailto"] = email
+    if key:
+        p["api_key"] = key
+    return _url("authors", p)
+
+
+def author_url(short_id: str, email: str | None, key: str | None = None) -> str:
+    """Single-author endpoint (``/authors/A…``) for resolving a URL-form target directly."""
+    p: dict = {}
+    if email:
+        p["mailto"] = email
+    if key:
+        p["api_key"] = key
+    base = f"{OPENALEX_API}/authors/{short_id}"
+    return base + ("?" + urlencode(p) if p else "")
 
 
 def institutions_url(ror_url: str, email: str | None, key: str | None = None) -> str:
@@ -131,6 +154,68 @@ class OpenAlexClient:
         if not data:
             return []
         return [_short_id(t.get("id")) for t in data.get("results", []) if t.get("id")]
+
+    def author_search(self, name: str, affiliation: str | None = None) -> dict | None:
+        """Best-match author for a ``--targets`` name (D-066), or None when OpenAlex has none.
+
+        Best match = the top search hit. When ``affiliation`` is given, a hit whose last-known
+        institution display name contains it (casefold, substring) is preferred; if NO hit
+        matches, the top hit is returned anyway with ``resolution="unverified"`` — an honest
+        flag, never a silent guess. A lookup FAILURE (transport / non-200 / bad JSON) records a
+        truncation marker and returns None, same failure class as the other enumerations (D-037);
+        a 200 with empty results is a genuine "no such author" — no marker, honest skip.
+        """
+        data = self._get_json(author_search_url(name, self._email, self._key))
+        if data is None:
+            self.truncated_sources.append(f"author-search@{name}")
+            return None
+        results = data.get("results") or []
+        if not results:
+            return None
+        pick, resolution = results[0], None
+        if affiliation:
+            want = affiliation.casefold()
+            for a in results:
+                names = [(i.get("display_name") or "").casefold()
+                         for i in (a.get("last_known_institutions") or [])]
+                if any(want in n for n in names):
+                    pick, resolution = a, "verified"
+                    break
+            else:
+                resolution = "unverified"       # top hit, affiliation NOT confirmed — say so
+        out = _map_author(pick)
+        out["institution_names"] = [i.get("display_name") for i in
+                                    (pick.get("last_known_institutions") or [])
+                                    if i.get("display_name")]
+        if resolution:
+            out["resolution"] = resolution
+        return out
+
+    def author_by_id(self, short_id: str) -> dict | None:
+        """Resolve a URL-form ``--targets`` entry (``https://openalex.org/A…``) to an author.
+
+        A 404 is a GENUINE "no such author" — None, no marker (the caller reports the skip).
+        A lookup FAILURE (transport / other non-200 / bad JSON) records a truncation marker
+        (D-037) and returns None."""
+        try:
+            resp = self._t.get(author_url(short_id, self._email, self._key))
+        except TransportError:
+            resp = None
+        if resp is None or resp.status != 200:
+            if resp is not None and resp.status == 404:
+                return None                     # genuinely absent — honest skip, not PARTIAL
+            self.truncated_sources.append(f"author@{short_id}")
+            return None
+        try:
+            data = json.loads(resp.text)
+        except ValueError:
+            self.truncated_sources.append(f"author@{short_id}")
+            return None
+        out = _map_author(data)
+        out["institution_names"] = [i.get("display_name") for i in
+                                    (data.get("last_known_institutions") or [])
+                                    if i.get("display_name")]
+        return out
 
     def authors_by_institution(self, institution_id: str, *, max_pages: int = 5) -> list[dict]:
         """Professor-target dicts for authors last known at ``institution_id`` — **paginated**.

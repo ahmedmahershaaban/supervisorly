@@ -2,8 +2,9 @@
 
 Every pipeline stage is independently runnable from here (architecture §7), so the
 tool is debuggable and portable. Shipped commands: ``init-db``, ``version``,
-``scan`` (demo + live), ``ingest-page`` (the browser seam, D-064) and ``pace``
-(the social pacing gate, D-065).
+``scan`` (demo + live, plan-driven and named-target inputs, D-066), ``map-field``
+(the subject-map stage, D-066), ``ingest-page`` (the browser seam, D-064) and
+``pace`` (the social pacing gate, D-065).
 """
 
 from __future__ import annotations
@@ -142,6 +143,135 @@ def _write_result(result: dict, out: Path, label: str) -> int:
     return 0
 
 
+def cmd_map_field(args: argparse.Namespace) -> int:
+    """Subject-map stage (D-066): field free text -> grouped OpenAlex topic map JSON.
+
+    API-derived only (D-038); the user multi-selects from the written map and the selected
+    topic IDs become a plan's ``resolved_topic_ids``. Requires a contact email (polite pool),
+    exactly like a live scan."""
+    import json
+    import os
+
+    from . import preflight
+
+    email = args.email or os.environ.get(preflight.CONTACT_EMAIL_ENV)
+    try:
+        preflight.require_credentials({preflight.CONTACT_EMAIL_ENV: email or ""})
+    except preflight.MissingCredentials as exc:
+        print(str(exc))
+        return 2
+
+    from .discover.subjects import subject_map
+    from .fetch.transport import httpx_transport
+
+    transport = httpx_transport(user_agent=f"SupervisorlyBot/0.1 (mailto:{email})")
+    smap = subject_map(args.field, transport, email=email,
+                       key=(args.openalex_key or os.environ.get(preflight.OPENALEX_KEY_ENV)))
+    out = Path(args.out)
+    if out.parent != Path("") and not out.parent.exists():
+        out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(smap, ensure_ascii=False, indent=2), encoding="utf-8")
+    n_topics = sum(len(g["topics"]) for g in smap["groups"])
+    # ASCII-only console output (cp1252 convention — see _write_result)
+    suffix = " (PARTIAL)" if smap["truncated"] else ""
+    print(f"mapped {n_topics} topics in {len(smap['groups'])} groups{suffix} -> {out}")
+    return 0
+
+
+# Keys a Scan Studio / conversational plan JSON must carry (D-066). A plan missing any of
+# these is rejected loudly with the full expected list, never silently defaulted (D-002).
+PLAN_REQUIRED_KEYS = ("intent_kind", "country", "resolved_topic_ids", "field",
+                      "university_mode", "universities")
+
+
+def _load_plan(path: str) -> tuple[dict | None, str | None]:
+    """Load + validate a ``--plan`` JSON file; returns ``(plan, None)`` or ``(None, error)``."""
+    import json
+
+    p = Path(path)
+    if not p.is_file():
+        return None, f"plan file not found: {p}"
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except ValueError as exc:
+        return None, f"invalid plan JSON in {p}: {exc}"
+    if not isinstance(data, dict):
+        return None, (f"plan file {p} must hold a JSON object with keys: "
+                      f"{', '.join(PLAN_REQUIRED_KEYS)}.")
+    missing = [k for k in PLAN_REQUIRED_KEYS if k not in data]
+    if missing:
+        return None, (f"plan file {p} is missing required key(s): {', '.join(missing)}. "
+                      f"Expected a Scan Studio plan with keys: {', '.join(PLAN_REQUIRED_KEYS)}.")
+    return data, None
+
+
+def _load_target_specs(path: str) -> tuple[list | None, str | None]:
+    """Load a ``--targets`` JSON file: ``[{name, affiliation?}, ...]`` or URL strings."""
+    import json
+
+    p = Path(path)
+    if not p.is_file():
+        return None, f"targets file not found: {p}"
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except ValueError as exc:
+        return None, f"invalid targets JSON in {p}: {exc}"
+    if not isinstance(data, list) or not all(
+            isinstance(e, str) or (isinstance(e, dict) and e.get("name")) for e in data):
+        return None, (f"targets file {p} must be a JSON list of "
+                      '{"name": ..., "affiliation": ...} objects or OpenAlex author URL strings.')
+    return data, None
+
+
+def _author_to_target(a: dict) -> dict:
+    """An OpenAlex author dict -> a deep-dive target in the ladder's shape (nothing dropped)."""
+    target = {
+        "id": a.get("short_id") or (a.get("name") or "unknown").strip().casefold(),
+        "name": a.get("name"),
+        "url": a.get("homepage"),
+        "openalex_id": a.get("openalex_id"),
+        "orcid": a.get("orcid"),
+        "ror_id": None,
+        "institution_names": list(a.get("institution_names") or []),
+        "topic_ids": list(a.get("topic_ids") or []),
+        "works_count": int(a.get("works_count") or 0),
+        "cited_by_count": int(a.get("cited_by_count") or 0),
+    }
+    if a.get("resolution"):
+        target["resolution"] = a["resolution"]
+    return target
+
+
+def _resolve_named_targets(oa, specs: list) -> tuple[list[dict], list[str], list[str]]:
+    """Resolve ``--targets`` specs via OpenAlex author search (D-066).
+
+    Returns ``(targets, skipped, notes)``: every spec that resolves to nothing goes into
+    ``skipped`` WITH its reason and is reported by the caller — nobody is silently dropped
+    (D-022). ``notes`` carries non-fatal honesty lines (e.g. an affiliation that could not be
+    confirmed -> ``resolution: unverified`` on the target)."""
+    targets: list[dict] = []
+    skipped: list[str] = []
+    notes: list[str] = []
+    for spec in specs:
+        if isinstance(spec, str):
+            short_id = spec.rstrip("/").rsplit("/", 1)[-1]
+            author = oa.author_by_id(short_id)
+            label = spec
+        else:
+            author = oa.author_search(spec["name"], spec.get("affiliation"))
+            label = spec["name"]
+        if not author:
+            skipped.append(f"{label}: no OpenAlex author match (lookup failed or none exists)")
+            continue
+        target = _author_to_target(author)
+        targets.append(target)
+        if target.get("resolution") == "unverified":
+            notes.append(f"{label}: resolved to {author.get('name')} "
+                         f"({author.get('openalex_id')}) but the affiliation did not match any "
+                         "last-known institution - target marked resolution=unverified.")
+    return targets, skipped, notes
+
+
 def cmd_scan(args: argparse.Namespace) -> int:
     out = Path(args.out)
     if out.parent != Path("") and not out.parent.exists():
@@ -165,32 +295,80 @@ def cmd_scan(args: argparse.Namespace) -> int:
     except preflight.MissingCredentials as exc:
         print(str(exc))
         return 2
-    if not args.country or not args.field:
-        print("a live scan needs --country and --field (or use --demo for the offline demo). "
-              "See --help.")
+    # --plan: a Scan Studio / conversational plan JSON supplies the base scope; explicit
+    # flags OVERRIDE the plan's values (D-066). Fail loud on a missing/invalid plan (D-002).
+    plan_file: dict = {}
+    if args.plan:
+        plan_file, err = _load_plan(args.plan)
+        if err:
+            print(err)
+            return 2
+
+    # --targets: named professors to deep-dive directly (resolved below, after the transport).
+    target_specs: list | None = None
+    if args.targets:
+        target_specs, err = _load_target_specs(args.targets)
+        if err:
+            print(err)
+            return 2
+
+    country_in = args.country if args.country is not None else plan_file.get("country")
+    field = args.field if args.field is not None else plan_file.get("field")
+    topic_ids = list(plan_file.get("resolved_topic_ids") or [])
+    if target_specs is None and not country_in:
+        print("a live scan needs --country and --field (or a --plan file, or --targets; "
+              "or use --demo for the offline demo). See --help.")
+        return 2
+    if country_in and not field and not topic_ids:
+        print("a live scan needs --field (or a --plan with resolved_topic_ids). See --help.")
         return 2
 
     from .discover.countries import to_country_code
-    # --country is documented as a country NAME ("Canada"); ROR's filter needs ISO alpha-2.
-    # Resolve here, where the plan is built, and fail loud on anything unrecognized (D-002) —
-    # never silently query ROR with a filter that matches 0 institutions.
-    country_code = to_country_code(args.country)
-    if not country_code:
-        print(f"unrecognized --country {args.country!r}: pass an ISO 3166-1 alpha-2 code "
-              "(e.g. CA) or an English country name (e.g. Canada).")
-        return 2
+    # --country (or a plan's country) may be a NAME ("Canada") or alpha-2; ROR's filter needs
+    # ISO alpha-2. Resolve here, where the plan is built, and fail loud on anything
+    # unrecognized (D-002) — never silently query ROR with a filter that matches 0 institutions.
+    country_code = None
+    if country_in:
+        country_code = to_country_code(country_in)
+        if not country_code:
+            print(f"unrecognized --country {country_in!r}: pass an ISO 3166-1 alpha-2 code "
+                  "(e.g. CA) or an English country name (e.g. Canada).")
+            return 2
 
+    intent = args.intent or plan_file.get("intent_kind") or "pre_phd"
+    university_mode = args.university_mode or plan_file.get("university_mode") or "all"
+    if args.universities is not None:
+        universities = [u.strip() for u in args.universities.split(",") if u.strip()]
+    else:
+        universities = list(plan_file.get("universities") or [])
+
+    from .discover.openalex import OpenAlexClient
     from .fetch.transport import httpx_transport
     from .pipeline import run_live
-    plan = {"intent_kind": args.intent, "country": country_code, "field": args.field,
-            "university_mode": args.university_mode,
-            "universities": [u.strip() for u in args.universities.split(",")]
-                            if args.universities else []}
+    openalex_key = args.openalex_key or os.environ.get(preflight.OPENALEX_KEY_ENV)
+    plan = {"intent_kind": intent, "country": country_code, "field": field,
+            "university_mode": university_mode, "universities": universities,
+            "resolved_topic_ids": topic_ids}
     transport = httpx_transport(user_agent=f"SupervisorlyBot/0.1 (mailto:{email})")
+
+    targets_override = None
+    if target_specs is not None:
+        oa = OpenAlexClient(transport, email=email, key=openalex_key)
+        targets_override, skipped, notes = _resolve_named_targets(oa, target_specs)
+        for line in notes:
+            print(f"WARNING: {line}")
+        for line in skipped:
+            print(f"SKIPPED target {line}")          # reported, never silently dropped (D-022)
+        if not targets_override and not country_code:
+            print("no --targets entry resolved and no --country ladder was requested - "
+                  "nothing to scan.")
+            return 2
+
     result = run_live(
         plan, transport, snap_root, email=email,
-        openalex_key=(args.openalex_key or os.environ.get(preflight.OPENALEX_KEY_ENV)),
+        openalex_key=openalex_key,
         db_path=out.parent / "supervisorly.sqlite", optout_path=args.optout, resume=args.resume,
+        targets_override=targets_override,
     )
     # sparse-coverage preflight + discovery warnings (D-060) — ASCII-safe by construction
     # (preflight/ladder messages are ASCII-only, like the rest of this console output).
@@ -219,15 +397,21 @@ def build_parser() -> argparse.ArgumentParser:
     ps.add_argument("--country", help="country to scan: ISO alpha-2 code or English name "
                                       "(e.g. CA or Canada) (a live scan)")
     ps.add_argument("--field", help="research field / subfield (a live scan)")
-    ps.add_argument("--intent", default="pre_phd",
+    ps.add_argument("--intent", default=None,
                     choices=["training", "pre_master", "pre_phd", "mentor", "master", "phd",
                              "postdoc"],
-                    help="what you're looking for (default: pre_phd)")
+                    help="what you're looking for (default: pre_phd; overrides --plan)")
     ps.add_argument("--universities", default=None,
                     help="comma-separated universities to prioritise / restrict to")
-    ps.add_argument("--university-mode", dest="university_mode", default="all",
+    ps.add_argument("--university-mode", dest="university_mode", default=None,
                     choices=["all", "prioritise", "only"],
-                    help="how to use --universities (default: all)")
+                    help="how to use --universities (default: all; overrides --plan)")
+    ps.add_argument("--plan", default=None,
+                    help="a Scan Studio plan JSON (D-066): supplies the scan scope; explicit "
+                         "flags override its values")
+    ps.add_argument("--targets", default=None,
+                    help="a JSON file of named professors ([{name, affiliation?}] or OpenAlex "
+                         "author URLs) to deep-dive directly (D-066)")
     ps.add_argument("--email", default=None,
                     help="contact email for the OpenAlex polite pool "
                          "(or set SUPERVISORLY_CONTACT_EMAIL)")
@@ -236,6 +420,18 @@ def build_parser() -> argparse.ArgumentParser:
     ps.add_argument("--resume", action="store_true",
                     help="reuse prior state; skip already-completed targets (cheap re-scan)")
     ps.set_defaults(func=cmd_scan)
+
+    pm = sub.add_parser("map-field", help="map a free-text field to a hierarchical OpenAlex "
+                                          "subject map (D-066) for topic multi-select")
+    pm.add_argument("--field", required=True, help="research field free text (e.g. 'causal ML')")
+    pm.add_argument("--out", default="output/subject_map.json",
+                    help="subject-map JSON output path (default: output/subject_map.json)")
+    pm.add_argument("--email", default=None,
+                    help="contact email for the OpenAlex polite pool "
+                         "(or set SUPERVISORLY_CONTACT_EMAIL)")
+    pm.add_argument("--openalex-key", dest="openalex_key", default=None,
+                    help="optional OpenAlex premium key (higher limits)")
+    pm.set_defaults(func=cmd_map_field)
 
     pb = sub.add_parser("ingest-page",
                         help="store browser-extracted page TEXT as a snapshot (D-064)")
