@@ -28,6 +28,14 @@ cache/
 *.cache.sqlite
 *.cache.sqlite-journal
 
+# --- Browser seam state (D-064/065): session metadata + staging --------------
+# Pacing state records which social hosts were visited in this login session, and the
+# browser staging dir holds extracted page text — both are session data, unanchored so
+# the guarantee is content-based, not layout-dependent (D-005).
+pacing_state.json
+**/pacing_state.json
+**/browser_staging/
+
 # --- Secrets ----------------------------------------------------------------
 # API keys, the polite-pool contact email, and any provider credentials.
 .env

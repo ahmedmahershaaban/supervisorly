@@ -110,6 +110,9 @@ CREATE TABLE IF NOT EXISTS extraction_cache (
 
 -- ── WebSource + Snapshot pointer ──────────────────────────────────────────────
 -- Snapshots live on disk addressed by content hash; the DB holds the pointer.
+-- 'agent_browser' (D-064) is the human-session browser tier: text extracted in-page
+-- by the agent and ingested via `ingest-page`; robots was never consulted, so
+-- robots_allowed stays NULL (honesty — same convention as 'human_assisted').
 CREATE TABLE IF NOT EXISTS web_source (
   source_id     TEXT PRIMARY KEY,
   url           TEXT NOT NULL,
@@ -120,7 +123,7 @@ CREATE TABLE IF NOT EXISTS web_source (
   source_tier   TEXT
     CHECK (source_tier IS NULL OR source_tier IN
       ('official_api','official_institutional','cris','registry','open_social',
-       'community_unverified','human_assisted')),
+       'community_unverified','human_assisted','agent_browser')),
   robots_allowed INTEGER CHECK (robots_allowed IS NULL OR robots_allowed IN (0,1))
 );
 CREATE INDEX IF NOT EXISTS idx_web_source_hash ON web_source(snapshot_hash);

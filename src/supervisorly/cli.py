@@ -1,8 +1,9 @@
 """Supervisorly command line.
 
 Every pipeline stage is independently runnable from here (architecture §7), so the
-tool is debuggable and portable. Phase A ships ``init-db`` and ``version``; later
-phases add ``scan``, ``resume``, ``export`` and friends.
+tool is debuggable and portable. Shipped commands: ``init-db``, ``version``,
+``scan`` (demo + live), ``ingest-page`` (the browser seam, D-064) and ``pace``
+(the social pacing gate, D-065).
 """
 
 from __future__ import annotations
@@ -29,6 +30,66 @@ def cmd_init_db(args: argparse.Namespace) -> int:
     open_db(path).close()
     print(f"initialised {path}")
     return 0
+
+
+def cmd_ingest_page(args: argparse.Namespace) -> int:
+    """Browser ingest seam (D-064): store agent-extracted page TEXT as a snapshot.
+
+    The agent saves the in-page JS extractor's output to a staging file and calls
+    this command; it handles only paths, byte counts, and the one-line result —
+    raw HTML/DOM never enters the agent's context."""
+    from urllib.parse import urlparse
+
+    from .fetch.browser_rung import ingest_page
+
+    url = (args.url or "").strip()
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        print(f"invalid --url {args.url!r}: pass the FINAL http(s) page url.")
+        return 2
+    file = Path(args.file)
+    if not file.is_file():
+        print(f"staging file not found: {file}")
+        return 2
+    text = file.read_text(encoding="utf-8")
+    if not text.strip():
+        print(f"staging file {file} is empty — nothing to ingest.")
+        return 2
+
+    db = Path(args.db)
+    if db.parent != Path("") and not db.parent.exists():
+        db.parent.mkdir(parents=True, exist_ok=True)   # same first-run rule as init-db
+    snap_root = Path(args.snap_root) if args.snap_root else db.parent / ".cache" / "snaps"
+    conn = open_db(db)
+    try:
+        res = ingest_page(conn, snap_root, final_url=url, text=text)
+    finally:
+        conn.close()
+    # ASCII-only console output (cp1252 consoles can't encode arrows — see _write_result)
+    print(f"ingested {res['bytes']} bytes -> snap {res['snapshot_hash'][:12]} "
+          f"source {res['source_id']}")
+    return 0
+
+
+def cmd_pace(args: argparse.Namespace) -> int:
+    """Social pacing gate (D-065): check/abort/reset before every browser page."""
+    from .ethics import pacing
+
+    if args.reset:
+        pacing.reset(None if args.reset == "all" else args.reset, state_path=args.state)
+        print(f"RESET host={args.reset}")
+        return 0
+    if not args.host:
+        print("pace needs --host <host> (unless --reset is given).")
+        return 2
+    if args.abort is not None:
+        pacing.abort(args.host, args.abort, state_path=args.state)
+        print(f"ABORTED host={args.host} reason={args.abort or 'challenge'}")
+        return 0
+    res = pacing.check(args.host, state_path=args.state)
+    verdict = "ALLOW" if res["allowed"] else "DENY"
+    print(f"{verdict} host={args.host} wait={res['wait_seconds']}s reason={res['reason']}")
+    return 0 if res["allowed"] else 3
 
 
 def _warn_if_committable(out: Path) -> None:
@@ -175,6 +236,27 @@ def build_parser() -> argparse.ArgumentParser:
     ps.add_argument("--resume", action="store_true",
                     help="reuse prior state; skip already-completed targets (cheap re-scan)")
     ps.set_defaults(func=cmd_scan)
+
+    pb = sub.add_parser("ingest-page",
+                        help="store browser-extracted page TEXT as a snapshot (D-064)")
+    pb.add_argument("--url", required=True, help="the FINAL page url (after redirects)")
+    pb.add_argument("--file", required=True,
+                    help="staging file holding the in-page extractor's text output")
+    pb.add_argument("--db", default="supervisorly.sqlite", help="database path")
+    pb.add_argument("--snap-root", dest="snap_root", default=None,
+                    help="snapshot store root (default: <db-dir>/.cache/snaps)")
+    pb.set_defaults(func=cmd_ingest_page)
+
+    pp = sub.add_parser("pace", help="social pacing gate — run before every browser page "
+                                     "(D-065); exit 0 = ALLOW, 3 = DENY")
+    pp.add_argument("--host", help="page host being considered (e.g. x.com)")
+    pp.add_argument("--abort", nargs="?", const="", default=None, metavar="REASON",
+                    help="latch the host aborted (captcha/soft-block/login redirect)")
+    pp.add_argument("--reset", nargs="?", const="all", default=None, metavar="HOST",
+                    help="clear pacing state for HOST, or all hosts when omitted")
+    pp.add_argument("--state", default=None,
+                    help="pacing state path (default: ./pacing_state.json)")
+    pp.set_defaults(func=cmd_pace)
 
     return p
 

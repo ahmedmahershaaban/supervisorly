@@ -6,7 +6,7 @@ terminal state (D-049) — and resumability works via incomplete-task queries.
 import pytest
 
 from supervisorly.model import runs
-from supervisorly.model.db import migrate, open_db
+from supervisorly.model.db import SCHEMA_VERSION, migrate, open_db
 
 
 def test_migrate_is_idempotent():
@@ -20,7 +20,10 @@ def test_migrate_is_idempotent():
     for t in ("run", "task", "checkpoint", "extraction_cache", "claim",
               "web_source", "conflict", "search_plan", "person", "unit", "institution"):
         assert t in tables, f"missing table {t}"
-    assert conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0] == "1"
+    # the recorded version tracks the current schema (v2 added the 'agent_browser'
+    # web_source tier, D-064) — pinned to the constant, not a literal
+    assert conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0] \
+        == SCHEMA_VERSION
 
 
 def test_run_lifecycle_including_terminal_states():
