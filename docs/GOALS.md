@@ -7,7 +7,7 @@ Definition of Done. Newest work at the bottom.
 | # | Goal | File | Status |
 |---|------|------|--------|
 | 1 | **Build + prove the offline engine** — deterministic collection, verified claims, four-state honesty, scoring, export/dashboard, human rung, ethics, cache/resume | [`docs/IMPLEMENTATION_GOAL.md`](IMPLEMENTATION_GOAL.md) | ✅ **Complete** — 140 tests green; see [`docs/COMPLETION_REPORT.md`](COMPLETION_REPORT.md) |
-| 2 | **Ship the LIVE scan + Atlas front-end** — real ROR/OpenAlex discovery, students who joined, companies worked with, recruiting/social via the human rung, university + professor ranking, prioritise/only scope, scheduled re-scans, and the whole UI + diagrams recreated in the Atlas design language | [`docs/LIVE_IMPLEMENTATION_GOAL.md`](LIVE_IMPLEMENTATION_GOAL.md) | ▶ **Active** — autonomous; runs to completion (does not stop until the DoD is met) |
+| 2 | **Ship the LIVE scan + Atlas front-end** — real ROR/OpenAlex discovery, students who joined, companies worked with, recruiting/social via the human rung, university + professor ranking, prioritise/only scope, scheduled re-scans, and the whole UI + diagrams recreated in the Atlas design language | [`docs/LIVE_IMPLEMENTATION_GOAL.md`](LIVE_IMPLEMENTATION_GOAL.md) | ✅ **Complete** — 253 tests green, adversarial audit closed (zero open findings), clean-room verified; see [`docs/LIVE_COMPLETION_REPORT.md`](LIVE_COMPLETION_REPORT.md) |
 
 ## Binding design reference (front-end & diagrams)
 
