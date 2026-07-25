@@ -8,6 +8,7 @@ Definition of Done. Newest work at the bottom.
 |---|------|------|--------|
 | 1 | **Build + prove the offline engine** — deterministic collection, verified claims, four-state honesty, scoring, export/dashboard, human rung, ethics, cache/resume | [`docs/IMPLEMENTATION_GOAL.md`](IMPLEMENTATION_GOAL.md) | ✅ **Complete** — 140 tests green; see [`docs/COMPLETION_REPORT.md`](COMPLETION_REPORT.md) |
 | 2 | **Ship the LIVE scan + Atlas front-end** — real ROR/OpenAlex discovery, students who joined, companies worked with, recruiting/social via the human rung, university + professor ranking, prioritise/only scope, scheduled re-scans, and the whole UI + diagrams recreated in the Atlas design language | [`docs/LIVE_IMPLEMENTATION_GOAL.md`](LIVE_IMPLEMENTATION_GOAL.md) | ✅ **Complete** — 253 tests green, adversarial audit closed (zero open findings), clean-room verified; see [`docs/LIVE_COMPLETION_REPORT.md`](LIVE_COMPLETION_REPORT.md) |
+| 3 | **Browser-primary live scan + subject-map stage + Scan Studio UI** — agent-driven Chrome (chrome-devtools-mcp) as the primary page fetch through a deterministic ingest seam; anti-ban social pacing (D-065); API-derived subject map with multi-select confirm (D-066); Atlas-language Scan Studio plan wizard (D-067) | [`docs/BROWSER_IMPLEMENTATION_GOAL.md`](BROWSER_IMPLEMENTATION_GOAL.md) | ▶ **Active** — branch `build/browser` |
 
 ## Binding design reference (front-end & diagrams)
 

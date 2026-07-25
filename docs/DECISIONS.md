@@ -1294,3 +1294,74 @@ carry more weight:
    ([D-023](#d-023--nationality-and-export-control-are-never-a-hard-filter)).
 4. **Cassette + synthetic tests** exercise more than one country's directory shape from the
    start, so genericity is tested, not assumed.
+
+---
+
+## D-064 — Browser-primary live fetch is agent-driven; page content enters only through the ingest-page snapshot seam
+
+**Status:** locked (Ahmed, 2026-07-25) — refines [D-039](#d-039--api-first-public-sources-human-rung-for-the-walled), hardens [D-009](#d-009--deterministic-collection-llm-interpretation), [D-010](#d-010--every-field-carries-provenance-and-confidence)
+
+Ahmed chose the browser (chrome-devtools-mcp, agent-driven) as the **primary** page fetch for
+live scans — the agent launches and controls Chrome; the user does nothing after a one-time
+login in the persistent profile. This does **not** move fetching into the LLM layer:
+
+1. **The Python layer stays LLM-free** ([D-009](#d-009--deterministic-collection-llm-interpretation)).
+   Browser-collected content enters the engine only through the deterministic
+   `ingest-page` seam: in-page JS extraction produces cleaned, capped main text; the CLI
+   stores it as a normal content-addressed snapshot; the existing extractors and the
+   quote-in-snapshot gate ([D-010](#d-010--every-field-carries-provenance-and-confidence))
+   run unchanged. A browser page is just another snapshot.
+2. **Raw HTML/DOM never enters the agent's context.** Extraction happens in-page and in
+   Python; the agent handles only file paths, byte counts, and one-line results. This is a
+   cost rule (tokens) and a hygiene rule (untrusted content).
+3. **APIs stay API-first** (ROR/OpenAlex over httpx — JSON endpoints need no browser), and
+   the agent may skip the browser for pages already fresh in the warm cache. "Primary"
+   means the default page tier, not the only tier.
+4. **Host-portable:** the same recipe runs under any MCP host (Kimi Code, Claude Code,
+   etc.) — the browser is an MCP server, the seam is the CLI.
+
+## D-065 — Social pacing policy: the anti-ban rules are code, not vibes
+
+**Status:** locked (Ahmed, 2026-07-25) — hardens [D-039](#d-039--api-first-public-sources-human-rung-for-the-walled), [D-043](#d-043--the-human-rung-claude-for-chrome), [D-044](#d-044--non-english-pages--social-sources)
+
+Scraping X/Twitter, LinkedIn, or Scholar through the user's own logged-in session is done
+**per-target, read-only, and politely** so no account is ever flagged. The rules are
+deterministic and testable, enforced before every browser page:
+
+1. **Jittered minimum intervals per host class** (social hosts wait tens of seconds to
+   minutes between pages, randomised; never a fixed metronome).
+2. **Per-session page caps** (a handful of profiles per site per run — never bulk).
+3. **Human-like in-page scrolling** (incremental scroll steps with randomised pauses,
+   capped) instead of instant full-page reads.
+4. **Abort-on-challenge:** a captcha, soft-block, or unexpected login redirect latches the
+   host as aborted for the session; the field becomes `blocked` and routes to the human
+   rung ([D-043](#d-043--the-human-rung-claude-for-chrome)). Never retry harder.
+5. **Scholar is minimal-use:** profile pages only, no search pagination — it is the most
+   aggressive blocker.
+6. Only the **specific advertised profile** is ever visited — the URL the professor
+   themselves published — never search/graph enumeration of people.
+
+## D-066 — The subject-map stage: field understanding is API-derived and user-confirmed
+
+**Status:** locked (Ahmed, 2026-07-25) — refines Stage 0 of the skill flow, hardens [D-038](#d-038--generate-dont-look-up)
+
+Before any scan, the student's free-text field is mapped to a **hierarchical subject map**
+(OpenAlex topics → subfields → fields → domains) built **from the OpenAlex API** — never
+from a hardcoded keyword dictionary ([D-038](#d-038--generate-dont-look-up)). The map is
+presented as a **multi-select** (checkbox tree in the Scan Studio, or a numbered list in
+conversation); the student keeps the topics they want and skips the rest. The selected
+topic IDs become the plan's `resolved_topic_ids`. **Nothing expensive runs before this
+confirmation** — the map step is the plan review made concrete.
+
+## D-067 — Scan Studio: the rich front-end is a self-contained Atlas-language plan wizard
+
+**Status:** locked (Ahmed, 2026-07-25) — refines [D-033](#d-033--dashboard-technology), [D-048](#d-048--the-dashboard-is-self-contained-and-offline)
+
+The interactive scan setup (intent, country, universities + mode, subject-map checkbox
+tree, named professors, contact email) ships as **one self-contained, offline HTML file**
+in the binding Atlas "Living" design language — same rules as the dashboard
+([D-048](#d-048--the-dashboard-is-self-contained-and-offline)): no external requests,
+inline CSS/JS, reduced-motion honoured, keyboard-operable, injection-safe. It consumes a
+subject-map JSON and exports a plan JSON (browser download — a static file cannot write
+to disk). The **conversational numbered multi-select remains the fallback** in every
+agent host, so the tool is fully usable even where opening HTML is awkward.
