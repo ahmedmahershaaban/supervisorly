@@ -20,6 +20,7 @@ A blocked page marks *every* field ``blocked`` (honest — we reached nothing), 
 from __future__ import annotations
 
 import datetime
+import logging
 import re
 import time
 
@@ -44,6 +45,51 @@ from .model.db import open_db, utcnow
 PROMPT_VERSION = "det-signal-v1"
 MODEL_ID = "deterministic"
 CACHE_SCHEMA_VERSION = "1"
+
+_log = logging.getLogger(__name__)
+
+
+# ── §4.1 progress events + cooperative stop ───────────────────────────────────
+def _emit_progress(progress, event: tuple) -> None:
+    """Fire one §4.1 progress event, never letting an observer break the scan.
+
+    Progress is strictly advisory: a broken callback must not kill a multi-hour
+    scan whose state is otherwise persisting fine, so every emit is guarded —
+    log-and-continue. ``KeyboardInterrupt`` is a ``BaseException`` and is NOT
+    caught here: Ctrl+C still interrupts the run (the state machine makes that
+    safe — a fresh run with ``resume`` picks up the persisted work, D-029).
+    """
+    if progress is None:
+        return
+    try:
+        progress(event)
+    except Exception:
+        _log.warning("progress callback raised on %r; continuing the scan",
+                     event[0] if event else event, exc_info=True)
+
+
+def _stop_requested(should_stop) -> bool:
+    """Consult the cooperative-stop hook between targets.
+
+    A RAISING hook is treated as "keep going": cancellation must be a deliberate
+    ``True``, never the side effect of a buggy observer force-stopping a healthy
+    run. ``KeyboardInterrupt`` propagates (same Ctrl+C reasoning as above)."""
+    if should_stop is None:
+        return False
+    try:
+        return bool(should_stop())
+    except Exception:
+        _log.warning("should_stop callback raised; continuing the scan", exc_info=True)
+        return False
+
+
+def _partial_warning_message(truncated: list[str]) -> str:
+    """The §4.1 ``partial_warning`` payload for recorded PARTIAL markers — ASCII-only,
+    so any console/log sink can render it (a marker derives from a URL or a
+    user-supplied target name, which need not be ASCII)."""
+    msg = (f"Coverage is PARTIAL - {len(truncated)} source(s) had more results than "
+           f"were enumerated ({', '.join(truncated)}).")
+    return msg.encode("ascii", "replace").decode("ascii")
 
 # ── recruiting signal ─────────────────────────────────────────────────────────
 # a recruiting-related sentence (candidate signal — not a classification). This is the KEYWORD
@@ -662,75 +708,92 @@ def _apply_shortlist(targets: list[dict], exempt_keys: set, topic_ids: list[str]
             if id(t) in keep or (t.get("openalex_id") or t.get("id")) in exempt_keys]
 
 
-def _process_targets(conn, run_id, targets, fetcher, snaps, *, stats, resume) -> int:
+def _process_targets(conn, run_id, targets, fetcher, snaps, *, stats, resume,
+                     progress=None, should_stop=None) -> int:
     """Deep-dive each target (fetch → extract → claim) — the shared core of run_offline/run_live.
 
     Returns the gap count (targets with any still-``blocked`` field or an unchecked walled social
     page), derived from claim state so the run status can never contradict the exported cells
     (D-046/D-049). A target with no page URL (e.g. an OpenAlex professor with no discoverable
     homepage) is an honest open gap for the human rung, never a fabricated value.
+
+    Emits the §4.1 ``("deep_dive_progress", i, k)`` event after every target (i = 1-based
+    count done, k = total; a resume-skipped target counts as done). Between targets it
+    consults ``should_stop()``: on True it stops cleanly at that checkpoint and marks
+    ``stats["cancelled"]`` — the untouched targets keep every field ``never_attempted``
+    (an honest "not checked yet"), their completed siblings' claims persist, and the
+    caller reports the run ``cancelled`` instead of a finalized status.
     """
-    for t in targets:
-        pid = t["id"]
-        if resume and runs.target_stage_done(conn, "person", pid, "deep_dive"):
-            stats["resumed_skipped"] += 1
-            continue
-        task = runs.add_task(conn, run_id, "person", pid, stage="deep_dive")
-        url = t.get("url")
-        res = fetcher.fetch(url) if url else None
-        if res is not None and res.ok:
-            html = snaps.load(res.snapshot_hash)
-            if _roster.detect_login_wall(html):
-                # a robots-allowed 200 that is really a login/JS/bot wall — its chrome text is NOT
-                # the professor's content, so never extract it; mark blocked → the human rung
-                # (D-039/D-044). This is what keeps a wall from being silently defeated.
-                for field in _EXTRACTORS:
-                    _record_blocked(conn, pid, field)
-                runs.set_task_status(conn, task, "blocked",
-                                     last_error="login/bot wall — routed to the human rung")
-                continue
-            chash = content_hash(html)
-            if xcache.lookup(conn, "person", pid, chash, PROMPT_VERSION, MODEL_ID,
-                             CACHE_SCHEMA_VERSION):
-                stats["cache_hits"] += 1
-                runs.set_task_status(conn, task, "done")
-                continue
-            src_id = claims.record_web_source(
-                conn, res.final_url or url, snapshot_hash=res.snapshot_hash, http_status=200,
-                source_tier=_source_tier(res.final_url or url), robots_allowed=True,
-            )
-            claim_ids: list[str] = []
-            walled_social = None
-            for field, extractor in _EXTRACTORS.items():
-                found = extractor(html)
-                rec = _record_evidence(conn, pid, field, found, src_id=src_id,
-                                       snapshot_hash=res.snapshot_hash, html=html)
-                if rec and rec.ok:
-                    claim_ids.append(rec.claim_id)
-                if field == "social" and found and _WALLED_SOCIAL.search(found[0]):
-                    walled_social = found[0]
-            if walled_social:
-                # An advertised walled social page (X/Twitter/LinkedIn) is a known recruiting
-                # source the tool must NOT scrape (D-039/044): mint an awaiting_human task for it
-                # (the roster.route_directory pattern, Phase L3 DoD) — the target stays an open
-                # gap via _target_open_gap, so the run finalizes WITH open gaps, not `finalized`.
-                walled_task = runs.add_task(conn, run_id, "person", pid,
-                                            stage="gap_fill", phase="human")
-                runs.set_task_status(
-                    conn, walled_task, "awaiting_human",
-                    last_error=f"walled social page advertised ({walled_social}) — "
-                               "read it by hand and return it via the Phase-3 MD grammar")
-            xcache.record(conn, "person", pid, chash, PROMPT_VERSION, MODEL_ID,
-                          CACHE_SCHEMA_VERSION, claim_ids)
-            stats["extractions"] += 1
-            runs.set_task_status(conn, task, "done")
-        else:
+    total = len(targets)
+    for i, t in enumerate(targets, 1):
+        _deep_dive_one(conn, run_id, t, fetcher, snaps, stats=stats, resume=resume)
+        _emit_progress(progress, ("deep_dive_progress", i, total))
+        if _stop_requested(should_stop):
+            stats["cancelled"] = True
+            break
+    return sum(1 for t in targets if _target_open_gap(conn, t["id"]))
+
+
+def _deep_dive_one(conn, run_id, t, fetcher, snaps, *, stats, resume) -> None:
+    """One target of ``_process_targets``: fetch → extract → claim (semantics per its docstring)."""
+    pid = t["id"]
+    if resume and runs.target_stage_done(conn, "person", pid, "deep_dive"):
+        stats["resumed_skipped"] += 1
+        return
+    task = runs.add_task(conn, run_id, "person", pid, stage="deep_dive")
+    url = t.get("url")
+    res = fetcher.fetch(url) if url else None
+    if res is not None and res.ok:
+        html = snaps.load(res.snapshot_hash)
+        if _roster.detect_login_wall(html):
+            # a robots-allowed 200 that is really a login/JS/bot wall — its chrome text is NOT
+            # the professor's content, so never extract it; mark blocked → the human rung
+            # (D-039/D-044). This is what keeps a wall from being silently defeated.
             for field in _EXTRACTORS:
                 _record_blocked(conn, pid, field)
-            err = res.error if res is not None else "no page url — open for the human rung"
-            runs.set_task_status(conn, task, "blocked", last_error=err)
-
-    return sum(1 for t in targets if _target_open_gap(conn, t["id"]))
+            runs.set_task_status(conn, task, "blocked",
+                                 last_error="login/bot wall — routed to the human rung")
+            return
+        chash = content_hash(html)
+        if xcache.lookup(conn, "person", pid, chash, PROMPT_VERSION, MODEL_ID,
+                         CACHE_SCHEMA_VERSION):
+            stats["cache_hits"] += 1
+            runs.set_task_status(conn, task, "done")
+            return
+        src_id = claims.record_web_source(
+            conn, res.final_url or url, snapshot_hash=res.snapshot_hash, http_status=200,
+            source_tier=_source_tier(res.final_url or url), robots_allowed=True,
+        )
+        claim_ids: list[str] = []
+        walled_social = None
+        for field, extractor in _EXTRACTORS.items():
+            found = extractor(html)
+            rec = _record_evidence(conn, pid, field, found, src_id=src_id,
+                                   snapshot_hash=res.snapshot_hash, html=html)
+            if rec and rec.ok:
+                claim_ids.append(rec.claim_id)
+            if field == "social" and found and _WALLED_SOCIAL.search(found[0]):
+                walled_social = found[0]
+        if walled_social:
+            # An advertised walled social page (X/Twitter/LinkedIn) is a known recruiting
+            # source the tool must NOT scrape (D-039/044): mint an awaiting_human task for it
+            # (the roster.route_directory pattern, Phase L3 DoD) — the target stays an open
+            # gap via _target_open_gap, so the run finalizes WITH open gaps, not `finalized`.
+            walled_task = runs.add_task(conn, run_id, "person", pid,
+                                        stage="gap_fill", phase="human")
+            runs.set_task_status(
+                conn, walled_task, "awaiting_human",
+                last_error=f"walled social page advertised ({walled_social}) — "
+                           "read it by hand and return it via the Phase-3 MD grammar")
+        xcache.record(conn, "person", pid, chash, PROMPT_VERSION, MODEL_ID,
+                      CACHE_SCHEMA_VERSION, claim_ids)
+        stats["extractions"] += 1
+        runs.set_task_status(conn, task, "done")
+    else:
+        for field in _EXTRACTORS:
+            _record_blocked(conn, pid, field)
+        err = res.error if res is not None else "no page url — open for the human rung"
+        runs.set_task_status(conn, task, "blocked", last_error=err)
 
 
 def run_offline(plan: dict, targets: list[dict], transport: Transport, snap_root,
@@ -769,7 +832,8 @@ def run_live(plan: dict, transport: Transport, snap_root, *, email: str,
              targets_override: list[dict] | None = None,
              targets_truncated: list[str] | None = None,
              shortlist_size: int = DEFAULT_SHORTLIST_SIZE,
-             max_institutions: int | None = None) -> dict:
+             max_institutions: int | None = None,
+             progress=None, should_stop=None) -> dict:
     """A **live** scan: preflight → discovery ladder (ROR + OpenAlex) → the *same* fetch → extract
     → claim → score → export → dashboard pipeline as ``run_offline`` (D-028), now from **discovered**
     targets rather than hand-fed ones.
@@ -800,6 +864,23 @@ def run_live(plan: dict, transport: Transport, snap_root, *, email: str,
     first N of the ROR enumeration, with an honest warning when the cap cuts (D-037); the
     explicit parameter wins, else the plan's own ``max_institutions`` is honored — 0/unset
     means all (current behavior).
+
+    ``progress`` (§4.1) is an optional callable fired with a structured event tuple at each
+    phase transition — ``("enumerated", n_targets, n_institutions)`` after the ladder,
+    ``("deep_dive_start", k)`` after the shortlist gate (k = targets actually deep-dived,
+    post-gate, post-opt-out), ``("deep_dive_progress", i, k)`` per target, a
+    ``("partial_warning", msg)`` alongside the warnings channel when a PARTIAL marker is
+    recorded (msg ASCII), and ``("scoring",)`` / ``("exported",)`` around the export build.
+    The default ``None`` is exactly today's behavior with zero overhead; a raising callback
+    is logged and ignored — an observer must never kill a scan.
+
+    ``should_stop`` is an optional callable consulted between deep-dive targets. On True the
+    run stops cleanly at that checkpoint: the run is marked ``cancelled`` (never a finalized
+    status — cancelled wins over the open-gaps audit), the partial results are exported
+    honestly through the same ``_build_result`` path (untouched targets stay
+    ``never_attempted``), and the result carries ``stats["cancelled"] = True``.
+    Completed-target claims persist, so a fresh run with ``resume=True`` skips them and
+    finishes the remainder (D-029). A raising hook means "keep going".
     """
     preflight.require_credentials({preflight.CONTACT_EMAIL_ENV: email})
     ror_client = _ror.RorClient(transport, email=email)
@@ -845,6 +926,9 @@ def run_live(plan: dict, transport: Transport, snap_root, *, email: str,
             "openalex_works": sum(int(t.get("works_count") or 0) for t in disc["targets"]),
         }) + list(disc.get("warnings", []))
 
+    _emit_progress(progress, ("enumerated", len(disc["targets"]),
+                              len(disc["institutions"])))
+
     conn = open_db(db_path) if db_path is not None else open_db()
     snaps = SnapshotStore(snap_root)
     # Polite by default for a real run (per-host min-interval + real backoff sleep); tests pass
@@ -859,6 +943,7 @@ def run_live(plan: dict, transport: Transport, snap_root, *, email: str,
     deep_dive = _apply_shortlist(targets, exempt_keys,
                                  disc["plan"].get("resolved_topic_ids") or [],
                                  shortlist_size)
+    _emit_progress(progress, ("deep_dive_start", len(deep_dive)))
 
     run_id = runs.create_run(conn)
     runs.set_run_status(conn, run_id, "deep_diving")
@@ -872,10 +957,24 @@ def run_live(plan: dict, transport: Transport, snap_root, *, email: str,
     # emit the PARTIAL coverage line instead of implicitly claiming completeness (D-037, audit-3 #7).
     if stats["truncated"]:
         runs.update_counts(conn, run_id, truncated=stats["truncated"])
-    gaps = _process_targets(conn, run_id, deep_dive, fetcher, snaps, stats=stats, resume=resume)
-    status = "finalized_with_open_gaps" if gaps else "finalized"
+        # the same PARTIAL disclosure the coverage line carries, as a §4.1 event (D-037)
+        _emit_progress(progress, ("partial_warning",
+                                  _partial_warning_message(stats["truncated"])))
+    gaps = _process_targets(conn, run_id, deep_dive, fetcher, snaps, stats=stats,
+                            resume=resume, progress=progress, should_stop=should_stop)
+    if stats.get("cancelled"):
+        # cancelled wins the status audit: a stopped run NEVER reports a finalized
+        # status, whatever the gap count of the processed targets says.
+        status = "cancelled"
+    else:
+        status = "finalized_with_open_gaps" if gaps else "finalized"
     runs.set_run_status(conn, run_id, status)
-    return _build_result(conn, run_id, status, targets, stats=stats, gaps=gaps)
+    _emit_progress(progress, ("scoring",))
+    # a cancelled run exports its partials through the same honest path (D-046 four-state
+    # model: untouched targets are never_attempted, never silently "checked").
+    result = _build_result(conn, run_id, status, targets, stats=stats, gaps=gaps)
+    _emit_progress(progress, ("exported",))
+    return result
 
 
 def reexport(db_path, targets: list[dict], *, optout_path=None) -> dict:

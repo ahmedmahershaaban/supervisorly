@@ -138,3 +138,40 @@ def test_scan_shortlist_rejects_a_non_positive_cap(tmp_path, monkeypatch, capsys
                    "--shortlist", "0", "--out", str(tmp_path / "d.html")])
     assert rc == 2
     assert "--shortlist must be a positive integer" in capsys.readouterr().out
+
+
+# ── §4.1: scan --progress prints one ASCII line per engine event ─────────────
+
+def test_scan_progress_flag_prints_one_ascii_line_per_event(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(transport_mod, "httpx_transport", lambda **kw: _cassette())
+    out = tmp_path / "out" / "live.html"
+    rc = cli.main(["scan", "--country", "CA", "--field", "causal ml", "--email", EMAIL,
+                   "--progress", "--out", str(out)])
+    assert rc == 0
+    captured = capsys.readouterr()
+    lines = [l for l in captured.err.splitlines() if l.startswith("progress: ")]
+    assert lines == [
+        "progress: enumerated 1 targets across 1 institutions",
+        "progress: deep-dive 0/1",
+        # the cassette lacks ROR's number_of_results, so the ladder honestly records a
+        # truncation marker (D-037) — which rides the same stream as a partial_warning
+        "progress: PARTIAL - Coverage is PARTIAL - 1 source(s) had more results than "
+        "were enumerated (institutions@CA).",
+        "progress: deep-dive 1/1",
+        "progress: scoring",
+        "progress: exported",
+    ]
+    assert captured.err.isascii()
+    assert "progress: " not in captured.out          # stderr only; stdout is result lines
+
+
+def test_scan_default_is_silent_about_progress(tmp_path, monkeypatch, capsys):
+    # no --progress flag → exactly today's behavior: no progress lines anywhere
+    monkeypatch.setattr(transport_mod, "httpx_transport", lambda **kw: _cassette())
+    out = tmp_path / "out" / "live.html"
+    rc = cli.main(["scan", "--country", "CA", "--field", "causal ml", "--email", EMAIL,
+                   "--out", str(out)])
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert "progress: " not in captured.out
+    assert "progress: " not in captured.err

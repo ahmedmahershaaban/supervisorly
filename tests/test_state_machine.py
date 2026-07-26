@@ -21,9 +21,72 @@ def test_migrate_is_idempotent():
               "web_source", "conflict", "search_plan", "person", "unit", "institution"):
         assert t in tables, f"missing table {t}"
     # the recorded version tracks the current schema (v2 added the 'agent_browser'
-    # web_source tier, D-064) — pinned to the constant, not a literal
+    # web_source tier, D-064; v3 added the 'cancelled' run status) — pinned to the
+    # constant, not a literal
     assert conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0] \
         == SCHEMA_VERSION
+
+
+def test_cancelled_run_status_round_trips():
+    # schema v3: the cooperative-stop terminal state is accepted by the CHECK and the
+    # state machine, and stamps finalized_at like every terminal state (D-049)
+    conn = open_db()
+    run_id = runs.create_run(conn)
+    runs.set_run_status(conn, run_id, "deep_diving")
+    runs.set_run_status(conn, run_id, "cancelled")
+    row = runs.get_run(conn, run_id)
+    assert row["status"] == "cancelled"
+    assert row["finalized_at"] is not None
+
+
+# the run table's CHECK as of schema v2 — no 'cancelled'
+_V2_RUN_DDL = """
+CREATE TABLE run (
+  run_id        TEXT PRIMARY KEY,
+  plan_id       TEXT REFERENCES search_plan(plan_id),
+  status        TEXT NOT NULL
+    CHECK (status IN (
+      'planning','enumerating','signalling','deep_diving','gap_filling',
+      'awaiting_human_input','scoring','finalized','finalized_with_open_gaps','failed'
+    )),
+  budget_tokens INTEGER,
+  budget_spent  INTEGER NOT NULL DEFAULT 0,
+  counts_json   TEXT NOT NULL DEFAULT '{}',
+  started_at    TEXT NOT NULL,
+  updated_at    TEXT NOT NULL,
+  finalized_at  TEXT
+)
+"""
+
+
+def test_open_db_migrates_a_pre_cancelled_schema_db(tmp_path):
+    # old DBs are unaffected on their data: the stale run CHECK is widened by an
+    # in-place rebuild (the schema v2 web_source pattern), rows preserved
+    import sqlite3
+    path = tmp_path / "old.sqlite"
+    conn = sqlite3.connect(str(path))
+    conn.row_factory = sqlite3.Row
+    # no FK pragma here: the old fixture only needs the stale run table itself (its DDL
+    # references search_plan, which this bare fixture doesn't create); open_db's own
+    # connect re-enables enforcement for the migrated DB below
+    conn.execute(_V2_RUN_DDL)
+    conn.execute(
+        "INSERT INTO run(run_id, status, counts_json, started_at, updated_at, finalized_at) "
+        "VALUES('run_old1', 'finalized', '{}', '2026-01-01', '2026-01-01', '2026-01-01')")
+    conn.commit()
+    conn.close()
+
+    conn = open_db(path)          # migrate: clean, no exception
+    row = conn.execute("SELECT * FROM run WHERE run_id='run_old1'").fetchone()
+    assert row is not None and row["status"] == "finalized"      # data preserved
+    assert conn.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()[0] \
+        == SCHEMA_VERSION
+    # the widened CHECK accepts 'cancelled'; FK references to run still work
+    runs.set_run_status(conn, "run_old1", "cancelled")
+    task_id = runs.add_task(conn, "run_old1", "person", "p1", stage="deep_dive")
+    assert runs.tasks_for_run(conn, "run_old1")[0]["task_id"] == task_id
+    conn.close()
+    open_db(path).close()         # re-open is idempotent — no rebuild loop
 
 
 def test_run_lifecycle_including_terminal_states():

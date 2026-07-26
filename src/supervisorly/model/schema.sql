@@ -42,14 +42,18 @@ CREATE TABLE IF NOT EXISTS search_plan (
 -- ── Run (D-029, D-049) ────────────────────────────────────────────────────────
 -- One invocation of the pipeline. Resumability comes from SELECT on this, not an
 -- agent's memory. finalized_with_open_gaps is the "student never returned the
--- Phase-3 Markdown" terminal state (D-049).
+-- Phase-3 Markdown" terminal state (D-049). 'cancelled' (schema v3) is the
+-- cooperative-stop terminal state: the run halted between targets on request and
+-- exported its partials honestly — completed-target claims persist, so a fresh
+-- run with resume picks up the remainder (D-029).
 CREATE TABLE IF NOT EXISTS run (
   run_id        TEXT PRIMARY KEY,
   plan_id       TEXT REFERENCES search_plan(plan_id),
   status        TEXT NOT NULL
     CHECK (status IN (
       'planning','enumerating','signalling','deep_diving','gap_filling',
-      'awaiting_human_input','scoring','finalized','finalized_with_open_gaps','failed'
+      'awaiting_human_input','scoring','finalized','finalized_with_open_gaps',
+      'failed','cancelled'
     )),
   budget_tokens INTEGER,
   budget_spent  INTEGER NOT NULL DEFAULT 0,

@@ -491,6 +491,23 @@ def _resolve_named_targets(oa, specs: list) -> tuple[list[dict], list[str], list
     return targets, skipped, notes
 
 
+def _progress_printer(event: tuple) -> None:
+    """``scan --progress``: ONE ASCII line per §4.1 engine event, on stderr (stdout stays
+    reserved for the result/warning lines)."""
+    phase = event[0]
+    if phase == "enumerated":
+        line = f"progress: enumerated {event[1]} targets across {event[2]} institutions"
+    elif phase == "deep_dive_start":
+        line = f"progress: deep-dive 0/{event[1]}"
+    elif phase == "deep_dive_progress":
+        line = f"progress: deep-dive {event[1]}/{event[2]}"
+    elif phase == "partial_warning":
+        line = f"progress: PARTIAL - {event[1]}"   # msg is ASCII by construction (pipeline)
+    else:                                          # scoring / exported — phase-only events
+        line = f"progress: {phase}"
+    print(line, file=sys.stderr)
+
+
 def cmd_scan(args: argparse.Namespace) -> int:
     out = Path(args.out)
     if out.parent != Path("") and not out.parent.exists():
@@ -613,6 +630,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
         targets_override=targets_override, targets_truncated=targets_truncated,
         shortlist_size=args.shortlist,
         max_institutions=args.max_institutions,
+        progress=_progress_printer if args.progress else None,
     )
     # sparse-coverage preflight + discovery warnings (D-060) — ASCII-safe by construction
     # (preflight/ladder messages are ASCII-only, like the rest of this console output).
@@ -663,6 +681,10 @@ def build_parser() -> argparse.ArgumentParser:
                     help="optional OpenAlex premium key (higher limits)")
     ps.add_argument("--resume", action="store_true",
                     help="reuse prior state; skip already-completed targets (cheap re-scan)")
+    ps.add_argument("--progress", action="store_true",
+                    help="print one ASCII progress line per scan phase to stderr "
+                         "(enumerated / deep-dive i/k / scoring / exported); "
+                         "default is silent")
     ps.add_argument("--shortlist", type=int, default=40, metavar="N",
                     help="deep-dive only the top N discovered professors by topic fit "
                          "(D-056; default 40). The rest stay listed, unchecked. Named "

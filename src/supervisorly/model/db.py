@@ -3,9 +3,11 @@
 SQLite is the source of truth (D-026). One file, real joins, an append-only
 claim history. The schema lives in ``schema.sql`` and is applied with
 ``IF NOT EXISTS`` semantics so ``migrate`` can run any number of times.
-The one exception is the ``web_source.source_tier`` CHECK (schema v2, D-064):
-CHECKs can't be ALTERed, so a stale table is rebuilt atomically in place (one
-transaction, foreign keys off during the rebuild), data preserved.
+The exceptions are CHECK-constraint widenings: CHECKs can't be ALTERed, so a
+stale table is rebuilt atomically in place (one transaction, foreign keys off
+during the rebuild), data preserved — schema v2 did this for the
+``web_source.source_tier`` CHECK (D-064), schema v3 for the ``run.status``
+CHECK (the 'cancelled' terminal state).
 """
 
 from __future__ import annotations
@@ -16,7 +18,7 @@ from datetime import datetime, timezone
 from importlib import resources
 from pathlib import Path
 
-SCHEMA_VERSION = "2"
+SCHEMA_VERSION = "3"
 
 
 def new_id(prefix: str) -> str:
@@ -59,6 +61,18 @@ def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
     return conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
     ).fetchone() is not None
+
+
+def _run_check_is_stale(conn: sqlite3.Connection) -> bool:
+    """True if an existing run table predates the 'cancelled' status (schema v3).
+
+    Same constraint-widening problem as the v2 web_source rebuild: CREATE TABLE
+    IF NOT EXISTS leaves the old CHECK in place, so a v1/v2 DB would reject a
+    'cancelled' status update. Detectable from the stored DDL."""
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='run'"
+    ).fetchone()
+    return row is not None and "'cancelled'" not in row["sql"]
 
 
 def _apply_schema(conn: sqlite3.Connection) -> None:
@@ -122,12 +136,59 @@ def _rebuild_web_source(conn: sqlite3.Connection) -> None:
         conn.execute("PRAGMA foreign_keys=ON")
 
 
+def _rebuild_run(conn: sqlite3.Connection) -> None:
+    """The same documented table-rebuild procedure as ``_rebuild_web_source``,
+    for the v3 run.status CHECK ('cancelled'): foreign_keys OFF, rename-aside /
+    recreate / copy / drop inside ONE transaction, foreign_keys back ON.
+
+    The run table carries no indexes of its own, but task.run_id and
+    checkpoint.run_id FK-reference it — the same two rename hazards apply (FK
+    clause rewrite with enforcement on; DROP failing on referencing rows), and a
+    leftover ``run_old`` from a crash is recovered (rows merged back) rather than
+    stranded. One transaction, so a crash can never leave the table half-rebuilt."""
+    conn.execute("PRAGMA foreign_keys=OFF")
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            if _run_check_is_stale(conn):
+                conn.execute("ALTER TABLE run RENAME TO run_old")
+            if _table_exists(conn, "run_old"):
+                _apply_schema(conn)         # recreates run with the new CHECK
+                # OR IGNORE: a recovered run may already hold post-crash rows
+                conn.execute(
+                    "INSERT OR IGNORE INTO run SELECT * FROM run_old")
+                conn.execute("DROP TABLE run_old")
+            dangling = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' "
+                "AND sql LIKE '%run_old%'").fetchone()
+            if dangling:
+                # a crashed pre-fix rebuild rewrote other tables' stored FK clauses to
+                # the temp name — repair the DDL, then bump schema_version to force a
+                # re-parse (this connection caches the old schema otherwise)
+                conn.execute("PRAGMA writable_schema=ON")
+                conn.execute(
+                    "UPDATE sqlite_master "
+                    "SET sql=replace(sql, 'run_old', 'run') "
+                    "WHERE type='table' AND sql LIKE '%run_old%'")
+                conn.execute("PRAGMA writable_schema=OFF")
+                v = conn.execute("PRAGMA schema_version").fetchone()[0]
+                conn.execute(f"PRAGMA schema_version={v + 1}")
+            conn.commit()
+        except Exception:
+            conn.rollback()                 # nothing half-applies; retry is safe
+            raise
+    finally:
+        conn.execute("PRAGMA foreign_keys=ON")
+
+
 def migrate(conn: sqlite3.Connection) -> None:
     """Apply the schema. Idempotent — safe to call on every startup. A leftover
-    ``web_source_old`` means an earlier rebuild crashed mid-way; it is recovered
-    (completed and its rows merged back) rather than skipped."""
+    ``web_source_old``/``run_old`` means an earlier rebuild crashed mid-way; it is
+    recovered (completed and its rows merged back) rather than skipped."""
     if _web_source_check_is_stale(conn) or _table_exists(conn, "web_source_old"):
         _rebuild_web_source(conn)
+    if _run_check_is_stale(conn) or _table_exists(conn, "run_old"):
+        _rebuild_run(conn)
     conn.executescript(_load_schema())
     conn.execute(
         "INSERT INTO meta(key, value) VALUES('schema_version', ?) "

@@ -17,10 +17,12 @@ from .db import new_id, utcnow
 RUN_STATUSES = {
     "planning", "enumerating", "signalling", "deep_diving", "gap_filling",
     "awaiting_human_input", "scoring", "finalized", "finalized_with_open_gaps",
-    "failed",
+    "failed", "cancelled",
 }
-# A run is over exactly when it reaches one of these (D-049).
-TERMINAL_RUN_STATUSES = {"finalized", "finalized_with_open_gaps", "failed"}
+# A run is over exactly when it reaches one of these (D-049). ``cancelled`` is
+# terminal too: the run stopped on request and its partials were exported; the
+# resume path is a FRESH run reusing the persisted completed-target claims (D-029).
+TERMINAL_RUN_STATUSES = {"finalized", "finalized_with_open_gaps", "failed", "cancelled"}
 
 TASK_STAGES = {"enumerate", "signal", "deep_dive", "gap_fill", "roster_enumerate"}
 TASK_PHASES = {"structured", "browse", "human"}
