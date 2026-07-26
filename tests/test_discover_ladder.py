@@ -46,8 +46,10 @@ def _clients():
     tp.record(ror.country_url("CA"), 200, ROR_CA)
     tp.record(openalex.institutions_url("https://ror.org/00abc11", EMAIL), 200, _oa_inst("I100"))
     tp.record(openalex.institutions_url("https://ror.org/00abc22", EMAIL), 200, _oa_inst("I200"))
-    tp.record(openalex.authors_url("I100", EMAIL), 200, AUTHORS_I100)
-    tp.record(openalex.authors_url("I200", EMAIL), 200, AUTHORS_I200)
+    tp.record(openalex.authors_url("I100", EMAIL, topic_ids=["T10001", "T10002"]),
+              200, AUTHORS_I100)
+    tp.record(openalex.authors_url("I200", EMAIL, topic_ids=["T10001", "T10002"]),
+              200, AUTHORS_I200)
     return ror.RorClient(tp, email=EMAIL), openalex.OpenAlexClient(tp, email=EMAIL)
 
 
@@ -149,10 +151,11 @@ def test_zero_named_universities_matched_surfaces_a_warning():
                                 "universities": ["Atlantis University"]}, rc, oa)
     assert out["institutions"] == [] and out["targets"] == []
     assert any("0 of 1 named universities matched" in w for w in out["warnings"])
-    # a matching name produces no warning
+    # a matching name produces no university-match warning (the topic-filter coverage note
+    # still applies — PLAN carries resolved_topic_ids, so the enumeration is filtered)
     out2 = ladder.build_targets({**PLAN, "university_mode": "only",
                                  "universities": ["maple"]}, rc, oa)
-    assert out2["warnings"] == []
+    assert not any("0 of" in w for w in out2["warnings"])
 
 
 class _FakeOa:
@@ -199,3 +202,63 @@ def test_same_name_and_homepage_without_orcid_stays_two_targets():
     targets = ladder.enumerate_professors([{"ror_id": "https://ror.org/00x", "name": "Uni"}], oa)
     assert len(targets) == 2
     assert "merged_openalex_ids" not in targets[0]
+
+
+# ── live fix: server-side topic filter in enumeration + ORCID url fallback ────
+
+def test_build_targets_filters_by_plan_topics_and_surfaces_the_coverage_note():
+    # _clients() cassettes are keyed on the FILTERED urls (topic_ids=T10001,T10002) —
+    # CassetteTransport raises on any other url, so being served proves the filter was sent.
+    rc, oa = _clients()
+    out = ladder.build_targets(PLAN, rc, oa)
+    assert [t["id"] for t in out["targets"]] == ["A200", "A201", "A202"]
+    # OpenAlex topic coverage is imperfect — the note says WHO excludes those authors
+    assert any("filtered to 2 topic(s)" in w and "excluded by the API, not by us" in w
+               for w in out["warnings"])
+
+
+def test_build_targets_without_topics_enumerates_unfiltered_and_stays_silent():
+    # a plan with no resolved topics keeps the old behavior exactly: no filter, no note
+    tp = CassetteTransport()
+    tp.record(ror.country_url("CA"), 200, ROR_CA)
+    tp.record(openalex.institutions_url("https://ror.org/00abc11", EMAIL), 200, _oa_inst("I100"))
+    tp.record(openalex.institutions_url("https://ror.org/00abc22", EMAIL), 200, _oa_inst("I200"))
+    tp.record(openalex.authors_url("I100", EMAIL), 200, AUTHORS_I100)   # UNFILTERED urls
+    tp.record(openalex.authors_url("I200", EMAIL), 200, AUTHORS_I200)
+    rc = ror.RorClient(tp, email=EMAIL)
+    oa = openalex.OpenAlexClient(tp, email=EMAIL)
+    plan = {"intent_kind": "pre_phd", "country": "CA", "university_mode": "all"}
+    out = ladder.build_targets(plan, rc, oa)
+    assert len(out["targets"]) == 3                       # served → the unfiltered url was used
+    assert not any("filtered to" in w for w in out["warnings"])
+    assert out["truncated"] == []                         # truncation markers unchanged
+
+
+def test_orcid_is_the_deep_dive_url_fallback_when_no_homepage():
+    # live evidence: real OpenAlex author objects carry no homepage key at all, but many
+    # carry an ORCID (a public, fetchable page) — without the fallback every target was
+    # url=None and 100% of the run routed to the human rung ("no page url").
+    oa = _FakeOa([_split_author("A111", "https://orcid.org/0000-0002-1825-0097", 12, ["T1"],
+                                home=None)])
+    t = ladder.enumerate_professors([{"ror_id": "https://ror.org/00x", "name": "Uni"}], oa)[0]
+    assert t["url"] == "https://orcid.org/0000-0002-1825-0097"
+    assert t["url_kind"] == "orcid"
+
+
+def test_homepage_wins_over_orcid_and_neither_stays_honestly_url_less():
+    oa = _FakeOa([
+        _split_author("A111", "https://orcid.org/0000-0002-1825-0097", 12, ["T1"]),
+        _split_author("A222", None, 9, ["T2"], home=None),
+    ])
+    targets = ladder.enumerate_professors([{"ror_id": "https://ror.org/00x", "name": "Uni"}], oa)
+    assert targets[0]["url"] == "https://uni.example/~wwang"
+    assert targets[0]["url_kind"] == "homepage"           # homepage wins (cassette compat)
+    assert targets[1]["url"] is None and targets[1]["url_kind"] is None  # honest blocked path
+
+
+def test_author_url_reads_orcid_from_the_raw_ids_shape():
+    # _map_author output carries "orcid" directly; a raw API-shaped dict carries ids.orcid —
+    # both resolve, and the API's full https://orcid.org/... url is used as-is.
+    assert ladder._author_url({"ids": {"orcid": "https://orcid.org/0000-0002-1825-0097"}}) == \
+        ("https://orcid.org/0000-0002-1825-0097", "orcid")
+    assert ladder._author_url({}) == (None, None)

@@ -624,6 +624,44 @@ def recompute_run_status(conn, run_id) -> str:
     return "finalized_with_open_gaps" if gaps else "finalized"
 
 
+# ── the D-056 shortlist gate ──────────────────────────────────────────────────
+#: Default deep-dive shortlist size (D-056): only the top-N by research fit get the
+#: expensive per-page deep-dive; every enumerated professor still appears in the export.
+DEFAULT_SHORTLIST_SIZE = 40
+
+
+def _topic_overlap(target: dict, topic_ids: list[str]) -> int:
+    """How many of the plan's resolved topic ids appear in the target's own topics."""
+    own = set(target.get("topic_ids") or [])
+    return sum(1 for t in topic_ids if t in own)
+
+
+def _apply_shortlist(targets: list[dict], exempt_keys: set, topic_ids: list[str],
+                     size: int) -> list[dict]:
+    """D-056: rank ``targets`` deterministically and deep-dive only the top ``size``.
+
+    Ranking key: topic overlap with the plan's resolved topics (desc), tie-broken by
+    works_count (desc); Python's stable sort keeps discovery order beyond that. Targets
+    whose key is in ``exempt_keys`` (named ``--targets`` professors, D-066) are NEVER
+    gated — the user asked for them by name. The non-shortlisted are NOT dropped: the
+    caller still exports them (fields ``never_attempted`` — an honest "not checked yet").
+
+    A plan with NO resolved topic ids still gets gated: every overlap is then 0 and the
+    ranking falls back to works_count alone. Passing all targets through ungated in that
+    case would re-open the very defect this gate fixes (6,123 discovered targets → a 2+
+    hour deep-dive), so the bounded-by-default behavior is the safer option.
+    """
+    gated = [t for t in targets
+             if (t.get("openalex_id") or t.get("id")) not in exempt_keys]
+    if len(gated) <= size:
+        return list(targets)
+    ranked = sorted(gated, key=lambda t: (-_topic_overlap(t, topic_ids),
+                                          -int(t.get("works_count") or 0)))
+    keep = {id(t) for t in ranked[:size]}
+    return [t for t in targets
+            if id(t) in keep or (t.get("openalex_id") or t.get("id")) in exempt_keys]
+
+
 def _process_targets(conn, run_id, targets, fetcher, snaps, *, stats, resume) -> int:
     """Deep-dive each target (fetch → extract → claim) — the shared core of run_offline/run_live.
 
@@ -729,7 +767,8 @@ def run_live(plan: dict, transport: Transport, snap_root, *, email: str,
              openalex_key=None, db_path=None, optout_path=None, resume=False,
              rate_limit: float = 1.0, backoff_sleep=None,
              targets_override: list[dict] | None = None,
-             targets_truncated: list[str] | None = None) -> dict:
+             targets_truncated: list[str] | None = None,
+             shortlist_size: int = DEFAULT_SHORTLIST_SIZE) -> dict:
     """A **live** scan: preflight → discovery ladder (ROR + OpenAlex) → the *same* fetch → extract
     → claim → score → export → dashboard pipeline as ``run_offline`` (D-028), now from **discovered**
     targets rather than hand-fed ones.
@@ -745,6 +784,12 @@ def run_live(plan: dict, transport: Transport, snap_root, *, email: str,
     is skipped entirely and the named targets are deep-dived directly through the same
     ``_process_targets`` path.
 
+    The **shortlist gate** (D-056) bounds the deep-dive: ladder targets are ranked by topic
+    overlap with the plan's resolved topics (works_count breaks ties) and only the top
+    ``shortlist_size`` are deep-dived. The rest are NOT dropped — they stay enumerated and are
+    exported with every field ``never_attempted`` (honest "not checked yet"), and the coverage
+    line states the split plainly. Named targets (``targets_override``) always bypass the gate.
+
     ``targets_truncated`` carries the truncation markers (``author-search@…`` / ``author@…``)
     recorded by the CLI-side client that resolved ``targets_override`` — those lookups happened
     before run_live existed, so without this hand-off a lookup FAILURE would vanish and the run
@@ -759,17 +804,20 @@ def run_live(plan: dict, transport: Transport, snap_root, *, email: str,
     if targets_override is not None and not country:
         # named-professor run: no country/field scope, so the discovery ladder is skipped —
         # nothing to enumerate. Truncation markers from the CLI-side author lookups still
-        # surface via ``targets_truncated`` (D-037).
+        # surface via ``targets_truncated`` (D-037). Named targets are never gated (D-066).
         disc = {"plan": dict(plan), "institutions": [], "targets": list(targets_override),
                 "truncated": sorted(set(oa_client.truncated_sources) | set(targets_truncated)),
                 "warnings": []}
         warnings: list[str] = []
+        exempt_keys = {t.get("openalex_id") or t.get("id") for t in targets_override}
     else:
         disc = _ladder.build_targets(plan, ror_client, oa_client)
+        exempt_keys = set()
         if targets_override:
             seen = {t.get("openalex_id") or t.get("id") for t in disc["targets"]}
             for t in targets_override:
                 key = t.get("openalex_id") or t.get("id")
+                exempt_keys.add(key)        # named targets bypass the shortlist gate (D-066)
                 if key not in seen:
                     seen.add(key)
                     disc["targets"].append(t)
@@ -796,17 +844,26 @@ def run_live(plan: dict, transport: Transport, snap_root, *, email: str,
                       rate_limiter=HostRateLimiter(min_interval=rate_limit))
     optout = optout_mod.load_optout(optout_path)
     targets, opted_out = optout_mod.filter_targets(disc["targets"], optout)
+    # The D-056 shortlist gate, AFTER the opt-out filter (a suppressed person must not burn a
+    # shortlist slot): only the top ``shortlist_size`` ladder targets are deep-dived; the rest
+    # stay in ``targets`` and are exported with fields ``never_attempted`` — listed, unchecked.
+    deep_dive = _apply_shortlist(targets, exempt_keys,
+                                 disc["plan"].get("resolved_topic_ids") or [],
+                                 shortlist_size)
 
     run_id = runs.create_run(conn)
     runs.set_run_status(conn, run_id, "deep_diving")
     stats = {"extractions": 0, "cache_hits": 0, "opted_out": opted_out, "resumed_skipped": 0,
              "discovered": len(disc["targets"]), "institutions": len(disc["institutions"]),
              "truncated": disc.get("truncated", []), "warnings": warnings}
+    if len(deep_dive) < len(targets):
+        stats["shortlisted"] = len(deep_dive)
+        stats["unchecked"] = len(targets) - len(deep_dive)
     # Persist the discovery truncation markers on the run so a later human-rung re-export can still
     # emit the PARTIAL coverage line instead of implicitly claiming completeness (D-037, audit-3 #7).
     if stats["truncated"]:
         runs.update_counts(conn, run_id, truncated=stats["truncated"])
-    gaps = _process_targets(conn, run_id, targets, fetcher, snaps, stats=stats, resume=resume)
+    gaps = _process_targets(conn, run_id, deep_dive, fetcher, snaps, stats=stats, resume=resume)
     status = "finalized_with_open_gaps" if gaps else "finalized"
     runs.set_run_status(conn, run_id, status)
     return _build_result(conn, run_id, status, targets, stats=stats, gaps=gaps)
@@ -872,6 +929,12 @@ def _build_result(conn, run_id, status, targets, *, stats, gaps) -> dict:
                     "gap, not a filtered result.")
     else:
         coverage = f"{enumerated} professor(s) enumerated; none were dropped for missing data."
+        shortlisted = (stats or {}).get("shortlisted")
+        if shortlisted is not None:
+            # the D-056 gate bounded the deep-dive — state the split plainly, never let the
+            # unchecked remainder read as "checked and found nothing" (D-046).
+            coverage += (f" Deep-dived the top {shortlisted} by topic fit; the remaining "
+                         f"{stats['unchecked']} stay listed, unchecked (never_attempted).")
     if gaps:
         coverage += f" {gaps} target(s) have open gaps for the human rung."
     truncated = (stats or {}).get("truncated")

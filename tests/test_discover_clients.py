@@ -198,3 +198,27 @@ def test_openalex_premium_key_is_included_when_present():
     url = openalex.topics_url("x", EMAIL, key="sk-123")
     assert "mailto=me%40uni.edu" in url and "api_key=sk-123" in url
     assert "api_key" not in openalex.topics_url("x", EMAIL)   # omitted when no key
+
+
+# ── live fix: server-side topic filter on the authors enumeration ─────────────
+
+def test_authors_url_appends_the_topic_filter_only_when_topics_are_given():
+    # live defect: enumerating EVERY author at an institution (353 x N institutions =
+    # 6,123 targets for a niche field). The plan's topics now filter server-side
+    # (OpenAlex "," = AND, "|" = OR); a no-topics call stays exactly as before.
+    from urllib.parse import unquote
+    filtered = unquote(openalex.authors_url("I100", EMAIL,
+                                            topic_ids=["T10001", "T10002"]))
+    assert "last_known_institutions.id:I100,topics.id:T10001|T10002" in filtered
+    plain = unquote(openalex.authors_url("I100", EMAIL))
+    assert "topics.id" not in plain
+
+
+def test_authors_by_institution_requests_the_filtered_url():
+    # the cassette is keyed on the FILTERED url — CassetteTransport raises on any other,
+    # so a served response proves the filter string reached the request.
+    tp = CassetteTransport()
+    tp.record(openalex.authors_url("I100", EMAIL, topic_ids=["T10001"]), 200, OA_AUTHORS)
+    oa = openalex.OpenAlexClient(tp, email=EMAIL)
+    authors = oa.authors_by_institution("I100", topic_ids=["T10001"])
+    assert len(authors) == 1 and oa.truncated_sources == []

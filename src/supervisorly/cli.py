@@ -434,10 +434,13 @@ def _load_target_specs(path: str) -> tuple[list | None, str | None]:
 
 def _author_to_target(a: dict) -> dict:
     """An OpenAlex author dict -> a deep-dive target in the ladder's shape (nothing dropped)."""
+    from .discover.ladder import _author_url
+    url, url_kind = _author_url(a)          # homepage wins, else the ORCID profile (live fix)
     target = {
         "id": a.get("short_id") or (a.get("name") or "unknown").strip().casefold(),
         "name": a.get("name"),
-        "url": a.get("homepage"),
+        "url": url,
+        "url_kind": url_kind,
         "openalex_id": a.get("openalex_id"),
         "orcid": a.get("orcid"),
         "ror_id": None,
@@ -592,11 +595,18 @@ def cmd_scan(args: argparse.Namespace) -> int:
                   "nothing to scan.")
             return 2
 
+    if args.shortlist < 1:
+        # fail loud (D-002): a 0/negative shortlist would silently deep-dive NOBODY while
+        # the export still lists everyone as enumerated-but-unchecked.
+        print(f"--shortlist must be a positive integer, got {args.shortlist}.")
+        return 2
+
     result = run_live(
         plan, transport, snap_root, email=email,
         openalex_key=openalex_key,
         db_path=out.parent / "supervisorly.sqlite", optout_path=args.optout, resume=args.resume,
         targets_override=targets_override, targets_truncated=targets_truncated,
+        shortlist_size=args.shortlist,
     )
     # sparse-coverage preflight + discovery warnings (D-060) — ASCII-safe by construction
     # (preflight/ladder messages are ASCII-only, like the rest of this console output).
@@ -647,6 +657,10 @@ def build_parser() -> argparse.ArgumentParser:
                     help="optional OpenAlex premium key (higher limits)")
     ps.add_argument("--resume", action="store_true",
                     help="reuse prior state; skip already-completed targets (cheap re-scan)")
+    ps.add_argument("--shortlist", type=int, default=40, metavar="N",
+                    help="deep-dive only the top N discovered professors by topic fit "
+                         "(D-056; default 40). The rest stay listed, unchecked. Named "
+                         "--targets always deep-dive.")
     ps.set_defaults(func=cmd_scan)
 
     pm = sub.add_parser("map-field", help="map a free-text field to a hierarchical OpenAlex "

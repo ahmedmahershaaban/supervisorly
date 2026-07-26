@@ -87,3 +87,54 @@ def test_country_resolution_helper_codes_names_and_unknowns():
     assert to_country_code("Canada") == "CA"
     assert to_country_code("ca") == "CA"          # a 2-letter code passes through
     assert to_country_code("Narnia") is None
+
+
+# ── live fix: --shortlist flag drives the D-056 gate ──────────────────────────
+
+def _shortlist_cassette():
+    """Two professors at one institution (works 10 and 5); only the works leader's page
+    is recorded, so deep-diving the wrong one (or both) fails on the cassette seam."""
+    tp = CassetteTransport()
+    tp.record(ror.country_url("CA"), 200, json.dumps({"items": [   # ROR v2 shape
+        {"id": "https://ror.org/00x",
+         "names": [{"value": "Uni", "types": ["ror_display", "label"], "lang": "en"}],
+         "locations": [{"geonames_details": {"country_code": "CA"}}],
+         "links": [{"type": "website", "value": "https://uni.example/"}],
+         "types": ["education"]}]}))
+    tp.record(openalex.institutions_url("https://ror.org/00x", EMAIL), 200,
+              json.dumps({"results": [{"id": "https://openalex.org/I1"}]}))
+    tp.record(openalex.authors_url("I1", EMAIL), 200, json.dumps({"results": [
+        {"id": "https://openalex.org/A1", "display_name": "Prof One", "works_count": 10,
+         "topics": [], "last_known_institutions": [], "homepage_url": "https://uni.example/~a"},
+        {"id": "https://openalex.org/A2", "display_name": "Prof Two", "works_count": 5,
+         "topics": [], "last_known_institutions": [], "homepage_url": "https://uni.example/~b"}]}))
+    tp.record("https://uni.example/robots.txt", 200, "User-agent: *\nAllow: /\n")
+    tp.record("https://uni.example/~a", 200,
+              "<html><body><main><p>I am recruiting a PhD student for 2027.</p></main></body></html>")
+    return tp
+
+
+def test_scan_shortlist_flag_bounds_the_deep_dive(tmp_path, monkeypatch, capsys):
+    # the CLI field-text topic lookup has no cassette and honestly resolves to [] -> the
+    # enumeration is unfiltered and the gate ranks by works_count (see _apply_shortlist).
+    monkeypatch.setattr(transport_mod, "httpx_transport", lambda **kw: _shortlist_cassette())
+    out = tmp_path / "out" / "live.html"
+    rc = cli.main(["scan", "--country", "CA", "--field", "causal ml", "--email", EMAIL,
+                   "--shortlist", "1", "--out", str(out)])
+    assert rc == 0
+    printed = capsys.readouterr().out
+    assert "scanned 2 professors (live)" in printed      # both enumerated, nobody dropped
+    export = json.loads(out.with_suffix(".json").read_text(encoding="utf-8"))
+    states = {p["id"]: p["fields"]["recruiting_signal"]["state"]
+              for p in export["professors"]}
+    assert states == {"A1": "value", "A2": "never_attempted"}
+    assert "Deep-dived the top 1 by topic fit" in export["run"]["coverage"]
+
+
+def test_scan_shortlist_rejects_a_non_positive_cap(tmp_path, monkeypatch, capsys):
+    # fail loud (D-002): --shortlist 0 would silently deep-dive NOBODY
+    monkeypatch.setattr(transport_mod, "httpx_transport", lambda **kw: _shortlist_cassette())
+    rc = cli.main(["scan", "--country", "CA", "--field", "causal ml", "--email", EMAIL,
+                   "--shortlist", "0", "--out", str(tmp_path / "d.html")])
+    assert rc == 2
+    assert "--shortlist must be a positive integer" in capsys.readouterr().out

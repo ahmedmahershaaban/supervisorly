@@ -29,6 +29,12 @@ def _ladder_cassette():
          "types": ["education"]}]}))
     tp.record(openalex.institutions_url("https://ror.org/00x", EMAIL), 200,
               json.dumps({"results": [{"id": "https://openalex.org/I1"}]}))
+    tp.record(openalex.authors_url("I1", EMAIL, topic_ids=["T10001", "T10002"]),
+              200, json.dumps({"results": [
+        {"id": "https://openalex.org/A1", "display_name": "Prof One", "works_count": 10,
+         "topics": [], "last_known_institutions": [], "homepage_url": "https://uni.example/~a"}]}))
+    # the --targets + --country union run carries NO plan topics (the field-text topic lookup
+    # has no cassette and honestly resolves to []) — its enumeration is unfiltered
     tp.record(openalex.authors_url("I1", EMAIL), 200, json.dumps({"results": [
         {"id": "https://openalex.org/A1", "display_name": "Prof One", "works_count": 10,
          "topics": [], "last_known_institutions": [], "homepage_url": "https://uni.example/~a"}]}))

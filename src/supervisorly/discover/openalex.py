@@ -64,8 +64,15 @@ def institutions_url(ror_url: str, email: str | None, key: str | None = None) ->
 
 
 def authors_url(institution_id: str, email: str | None, key: str | None = None,
-                page: int = 1) -> str:
-    p = {"filter": f"last_known_institutions.id:{institution_id}", "per-page": PER_PAGE}
+                page: int = 1, topic_ids: list[str] | None = None) -> str:
+    filt = f"last_known_institutions.id:{institution_id}"
+    if topic_ids:
+        # Server-side topic filter (OpenAlex "," = AND, "|" = OR): enumerate only authors
+        # in the plan's topics. Without it the ladder paginates EVERY author at the
+        # institution regardless of field (live: 353 authors x N institutions = 6,123
+        # targets for a niche field, a 2+ hour scan).
+        filt += ",topics.id:" + "|".join(topic_ids)
+    p = {"filter": filt, "per-page": PER_PAGE}
     if page > 1:                       # page 1 omits the param → matches the un-paged URL
         p["page"] = page
     if email:
@@ -219,16 +226,21 @@ class OpenAlexClient:
                                     if i.get("display_name")]
         return out
 
-    def authors_by_institution(self, institution_id: str, *, max_pages: int = 5) -> list[dict]:
+    def authors_by_institution(self, institution_id: str, *, max_pages: int = 5,
+                               topic_ids: list[str] | None = None) -> list[dict]:
         """Professor-target dicts for authors last known at ``institution_id`` — **paginated**.
 
         Fetches up to ``max_pages`` pages; if the cap is hit while a full page remained, records a
         truncation marker in ``truncated_sources`` so the coverage stays honest (never a silent cut).
+        ``topic_ids`` narrows the enumeration server-side to authors in those topics (the plan's
+        resolved topics, D-058) — authors with missing topic metadata are excluded BY THE API,
+        which the caller surfaces as a coverage warning.
         """
         out: list[dict] = []
         page = 1
         while page <= max_pages:
-            data = self._get_json(authors_url(institution_id, self._email, self._key, page=page))
+            data = self._get_json(authors_url(institution_id, self._email, self._key,
+                                              page=page, topic_ids=topic_ids))
             if not data:
                 # a page fetch failed mid-enumeration (transport / non-200 / bad JSON) — we do NOT
                 # know what those pages held, so record truncation: coverage reports PARTIAL, never

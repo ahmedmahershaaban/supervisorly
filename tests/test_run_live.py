@@ -53,11 +53,11 @@ def _transport():
     tp.record(ror.country_url("CA"), 200, ROR_CA)
     tp.record(openalex.institutions_url("https://ror.org/00abc11", EMAIL), 200, _oa_inst("I100"))
     tp.record(openalex.institutions_url("https://ror.org/00abc22", EMAIL), 200, _oa_inst("I200"))
-    tp.record(openalex.authors_url("I100", EMAIL), 200, json.dumps({"results": [
+    tp.record(openalex.authors_url("I100", EMAIL, topic_ids=["T10001"]), 200, json.dumps({"results": [
         _author("A200", "Dr. Ada Maple", "https://maple.example/~ada"),
         _author("A201", "Prof. Ben Birch", None),           # no homepage → open gap
     ]}))
-    tp.record(openalex.authors_url("I200", EMAIL), 200, json.dumps({"results": [
+    tp.record(openalex.authors_url("I200", EMAIL, topic_ids=["T10001"]), 200, json.dumps({"results": [
         _author("A202", "A/Prof. Cara Cedar", "https://northern.example/~cara"),
     ]}))
     # professor pages (robots + html)
@@ -134,8 +134,8 @@ def _trunc_transport():
          "links": [{"type": "website", "value": "https://maple.example/"}],
          "types": ["education"]}]}))
     tp.record(openalex.institutions_url("https://ror.org/00abc11", EMAIL), 200, _oa_inst("I100"))
-    tp.record(openalex.authors_url("I100", EMAIL, page=1), 200, _authors(25))   # full page → page 2
-    tp.record(openalex.authors_url("I100", EMAIL, page=2), 500, "boom")          # fails mid-pagination
+    tp.record(openalex.authors_url("I100", EMAIL, page=1, topic_ids=["T10001"]), 200, _authors(25))   # full page → page 2
+    tp.record(openalex.authors_url("I100", EMAIL, page=2, topic_ids=["T10001"]), 500, "boom")          # fails mid-pagination
     return tp
 
 
@@ -171,7 +171,7 @@ def test_live_scan_marks_partial_when_institution_resolution_fails(tmp_path):
     tp.record(ror.country_url("CA"), 200, ROR_CA)
     tp.record(openalex.institutions_url("https://ror.org/00abc11", EMAIL), 500, "{}")
     tp.record(openalex.institutions_url("https://ror.org/00abc22", EMAIL), 200, _oa_inst("I200"))
-    tp.record(openalex.authors_url("I200", EMAIL), 200, json.dumps({"results": [
+    tp.record(openalex.authors_url("I200", EMAIL, topic_ids=["T10001"]), 200, json.dumps({"results": [
         _author("A202", "A/Prof. Cara Cedar", "https://northern.example/~cara"),
     ]}))
     tp.record("https://northern.example/robots.txt", 200, ALLOW)
@@ -238,3 +238,137 @@ def test_partial_opt_out_keeps_the_normal_coverage_line(tmp_path):
     cov = r["export"]["run"]["coverage"]
     assert "2 professor(s) enumerated; none were dropped" in cov
     assert "opt-out list" not in cov
+
+
+# ── live fix: the D-056 shortlist gate bounds the deep-dive ───────────────────
+# Live defect: the ladder deep-dived EVERY enumerated professor (6,123 targets for a
+# niche field -> 2+ hours). Now ladder targets are ranked by topic overlap (works_count
+# breaks ties) and only the top ``shortlist_size`` are deep-dived; the rest stay listed
+# with fields never_attempted, and named --targets bypass the gate.
+
+_GATE_ROR = json.dumps({"number_of_results": 1, "items": [
+    {"id": "https://ror.org/00abc11",
+     "names": [{"value": "Maple University", "types": ["ror_display", "label"], "lang": "en"}],
+     "locations": [{"geonames_details": {"country_code": "CA"}}],
+     "links": [{"type": "website", "value": "https://maple.example/"}],
+     "types": ["education"]}]})
+
+
+def _gate_author(aid, name, topics, works, home):
+    return {"id": f"https://openalex.org/{aid}", "display_name": name,
+            "works_count": works, "cited_by_count": works * 10,
+            "topics": [{"id": f"https://openalex.org/{t}"} for t in topics],
+            "last_known_institutions": [], "homepage_url": home}
+
+
+_GATE_PAGE = ("<html><body><main><p>I am recruiting a PhD student for 2027.</p>"
+              "</main></body></html>")
+
+# ranking against PLAN's resolved_topic_ids ["T10001"]: A300 (overlap 1, works 5) and
+# A301 (overlap 1, works 3) beat A302 (overlap 0, works 100) — topic fit outranks size.
+_GATE_AUTHORS = json.dumps({"results": [
+    _gate_author("A300", "Dr. Fit One", ["T10001"], 5, "https://maple.example/~fit1"),
+    _gate_author("A301", "Dr. Fit Two", ["T10001"], 3, "https://maple.example/~fit2"),
+    _gate_author("A302", "Dr. Off Topic", ["T10002"], 100, "https://maple.example/~big"),
+    _gate_author("A303", "Dr. No Topics", [], 1, "https://maple.example/~small"),
+]})
+
+
+def _gate_transport(with_pages=True):
+    tp = CassetteTransport()
+    tp.record(ror.country_url("CA"), 200, _GATE_ROR)
+    tp.record(openalex.institutions_url("https://ror.org/00abc11", EMAIL), 200,
+              _oa_inst("I100"))
+    tp.record(openalex.authors_url("I100", EMAIL, topic_ids=["T10001"]), 200, _GATE_AUTHORS)
+    if with_pages:
+        # pages for the two expected shortlist members ONLY: CassetteTransport raises on any
+        # other fetch, so an unchecked target being deep-dived would fail the test outright.
+        tp.record("https://maple.example/robots.txt", 200, ALLOW)
+        tp.record("https://maple.example/~fit1", 200, _GATE_PAGE)
+        tp.record("https://maple.example/~fit2", 200, _GATE_PAGE)
+    return tp
+
+
+def test_shortlist_gate_deep_dives_only_the_top_n_by_topic_fit(tmp_path):
+    r = pipeline.run_live(PLAN, _gate_transport(), tmp_path / "snaps", email=EMAIL,
+                          shortlist_size=2, **_FAST)
+    assert jx.validate_export(r["export"]) == []
+    # nobody dropped: all four enumerated professors are exported
+    states = {p["id"]: p["fields"]["recruiting_signal"]["state"]
+              for p in r["export"]["professors"]}
+    assert set(states) == {"A300", "A301", "A302", "A303"}
+    # claims exist ONLY for the two shortlisted (highest topic overlap, not highest works)
+    assert states["A300"] == "value" and states["A301"] == "value"
+    # the rest were never fetched: every field honestly never_attempted, not "searched"
+    for p in r["export"]["professors"]:
+        if p["id"] in ("A302", "A303"):
+            assert all(f["state"] == "never_attempted" for f in p["fields"].values())
+    assert r["stats"]["shortlisted"] == 2 and r["stats"]["unchecked"] == 2
+    cov = r["export"]["run"]["coverage"]
+    assert "4 professor(s) enumerated" in cov
+    assert "Deep-dived the top 2 by topic fit" in cov
+    assert "the remaining 2 stay listed, unchecked (never_attempted)" in cov
+
+
+def test_shortlist_gate_never_gates_named_targets(tmp_path):
+    # D-066: a named --targets professor always deep-dives, even with no topic overlap and
+    # a shortlist already full of ladder targets.
+    tp = _gate_transport()
+    tp.record("https://named.example/robots.txt", 200, ALLOW)
+    tp.record("https://named.example/~prof", 200, _GATE_PAGE)
+    named = {"id": "A900", "name": "Dr. Named", "url": "https://named.example/~prof",
+             "url_kind": "homepage", "openalex_id": "https://openalex.org/A900",
+             "topic_ids": [], "works_count": 0}
+    r = pipeline.run_live(PLAN, tp, tmp_path / "snaps", email=EMAIL,
+                          targets_override=[named], shortlist_size=2, **_FAST)
+    states = {p["id"]: p["fields"]["recruiting_signal"]["state"]
+              for p in r["export"]["professors"]}
+    assert states["A900"] == "value"                       # bypassed the gate
+    assert states["A300"] == "value" and states["A301"] == "value"
+    assert r["stats"]["shortlisted"] == 3 and r["stats"]["unchecked"] == 2
+
+
+def test_shortlist_gate_falls_back_to_works_count_without_plan_topics(tmp_path):
+    # a plan with no resolved topic ids still gates (an ungated 6,123-target deep-dive is
+    # the defect); with every overlap 0 the ranking is works_count desc.
+    tp = CassetteTransport()
+    tp.record(ror.country_url("CA"), 200, _GATE_ROR)
+    tp.record(openalex.institutions_url("https://ror.org/00abc11", EMAIL), 200,
+              _oa_inst("I100"))
+    tp.record(openalex.authors_url("I100", EMAIL), 200, json.dumps({"results": [  # unfiltered
+        _gate_author("A310", "Dr. Small", ["T10001"], 1, "https://maple.example/~s"),
+        _gate_author("A311", "Dr. Big", ["T10001"], 9, "https://maple.example/~b"),
+        _gate_author("A312", "Dr. Mid", ["T10001"], 5, "https://maple.example/~m"),
+    ]}))
+    tp.record("https://maple.example/robots.txt", 200, ALLOW)
+    tp.record("https://maple.example/~b", 200, _GATE_PAGE)   # only the works leader's page
+    plan = {"intent_kind": "pre_phd", "country": "CA", "university_mode": "all"}  # no topics
+    r = pipeline.run_live(plan, tp, tmp_path / "snaps", email=EMAIL,
+                          shortlist_size=1, **_FAST)
+    states = {p["id"]: p["fields"]["recruiting_signal"]["state"]
+              for p in r["export"]["professors"]}
+    assert states["A311"] == "value"
+    assert states["A310"] == "never_attempted" and states["A312"] == "never_attempted"
+    assert "Deep-dived the top 1 by topic fit" in r["export"]["run"]["coverage"]
+
+
+def test_shortlist_gate_resume_still_skips_completed_targets(tmp_path):
+    # resume is unchanged: the shortlisted targets of a prior persisted run are skipped,
+    # the unchecked remainder stays listed-and-unchecked (it was never attempted).
+    db = tmp_path / "run.sqlite"
+    r1 = pipeline.run_live(PLAN, _gate_transport(), tmp_path / "snaps", email=EMAIL,
+                           db_path=str(db), shortlist_size=2, **_FAST)
+    assert r1["stats"]["shortlisted"] == 2
+    r2 = pipeline.run_live(PLAN, _gate_transport(with_pages=False), tmp_path / "snaps",
+                           email=EMAIL, db_path=str(db), resume=True, shortlist_size=2, **_FAST)
+    assert r2["stats"]["resumed_skipped"] == 2               # no page was re-fetched
+    states = {p["id"]: p["fields"]["recruiting_signal"]["state"]
+              for p in r2["export"]["professors"]}
+    assert states["A300"] == "value" and states["A302"] == "never_attempted"
+
+
+def test_shortlist_gate_does_nothing_when_targets_fit(tmp_path):
+    # at/under the cap the run is exactly as before: everyone deep-dived, no split line
+    r = _run(tmp_path)                                       # 3 targets, default cap 40
+    assert "shortlisted" not in r["stats"]
+    assert "Deep-dived" not in r["export"]["run"]["coverage"]

@@ -128,25 +128,52 @@ def _merge_split_profiles(targets: list[dict]) -> list[dict]:
     return out
 
 
-def enumerate_professors(institutions: list[dict], oa) -> list[dict]:
-    """Round-1 professor targets across the institutions, de-duplicated/reconciled by identity."""
+def _author_url(a: dict) -> tuple[str | None, str | None]:
+    """The deep-dive URL for an author target plus its provenance (``url_kind``).
+
+    The author's own homepage wins when present. Otherwise fall back to their ORCID
+    profile — a public, fetchable page. Live OpenAlex author objects almost never carry a
+    homepage (verified against the real API: no ``homepage``/``homepage_url`` key at all),
+    so without the fallback EVERY enumerated target was ``url=None`` and 100% of the run
+    routed to the human rung ("no page url"). When neither exists the honest blocked path
+    stays exactly as before: url None, url_kind None.
+    """
+    if a.get("homepage"):
+        return a["homepage"], "homepage"
+    orcid = a.get("orcid") or (a.get("ids") or {}).get("orcid")
+    if orcid:
+        return orcid, "orcid"
+    return None, None
+
+
+def enumerate_professors(institutions: list[dict], oa,
+                         topic_ids: list[str] | None = None) -> list[dict]:
+    """Round-1 professor targets across the institutions, de-duplicated/reconciled by identity.
+
+    When ``topic_ids`` is given the per-institution enumeration is filtered SERVER-SIDE to
+    authors in those topics (``topics.id:T1|T2``); without it a niche field enumerates every
+    author at every institution. OpenAlex topic coverage is imperfect — authors with missing
+    topic metadata are excluded by the API, which ``build_targets`` surfaces as a warning.
+    """
     seen: dict[str, dict] = {}
     order: list[str] = []
     for inst in institutions:
         oa_inst = oa.institution_by_ror(inst.get("ror_id"))
         if not oa_inst:
             continue
-        for a in oa.authors_by_institution(oa_inst):
+        for a in oa.authors_by_institution(oa_inst, topic_ids=topic_ids or None):
             key = a.get("short_id") or _norm(a.get("name"))
             if not key:
                 continue
             if key in seen:
                 _reconcile_into(seen[key], a, inst.get("name"))
                 continue
+            url, url_kind = _author_url(a)
             seen[key] = {
                 "id": a.get("short_id") or key,
                 "name": a.get("name"),
-                "url": a.get("homepage"),           # their own page (may be None → deep-dive handles)
+                "url": url,                       # homepage, else ORCID profile (None → deep-dive handles)
+                "url_kind": url_kind,             # "homepage"/"orcid"/None — provenance marker only
                 "openalex_id": a.get("openalex_id"),
                 "orcid": a.get("orcid"),
                 "ror_id": inst.get("ror_id"),
@@ -171,7 +198,15 @@ def build_targets(plan: dict, ror, oa) -> dict:
     plan["resolved_topic_ids"] = resolve_topic_ids(plan, oa)
     warnings: list[str] = []
     institutions = select_institutions(plan, ror, warnings=warnings)
-    targets = enumerate_professors(institutions, oa)
+    topic_ids = plan["resolved_topic_ids"]
+    if topic_ids:
+        # the enumeration below is filtered server-side to these topics — say so honestly:
+        # OpenAlex topic coverage is imperfect, so authors with missing topic metadata are
+        # excluded BY THE API, not by us. A no-topics plan is unfiltered, exactly as before.
+        warnings.append(
+            f"filtered to {len(topic_ids)} topic(s); authors with missing topic metadata "
+            "are excluded by the API, not by us.")
+    targets = enumerate_professors(institutions, oa, topic_ids=topic_ids or None)
     truncated = sorted(set(getattr(ror, "truncated_sources", []))
                        | set(getattr(oa, "truncated_sources", [])))
     return {"plan": plan, "institutions": institutions, "targets": targets,
