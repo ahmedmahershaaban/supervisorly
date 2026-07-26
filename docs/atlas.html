@@ -162,7 +162,7 @@
 
   .lightbox { position: fixed; inset: 0; z-index: 80; display: none; background: rgba(0,0,0,.8); backdrop-filter: blur(3px); padding: 4vh 4vw; }
   .lightbox.open { display: grid; place-items: center; }
-  .lightbox .stage { background: var(--panel); border: 1px solid var(--panel-border); border-radius: 14px; padding: 30px; max-width: 96vw; max-height: 92vh; overflow: auto; box-shadow: var(--shadow-panel); }
+  .lightbox .stage { background: var(--panel); border: 1px solid var(--panel-border); border-radius: 14px; padding: 30px; width: min(1400px, 96vw); max-height: 92vh; overflow: auto; box-shadow: var(--shadow-panel); }
   .lightbox .stage svg { width: 100%; height: auto; }
   .lightbox .close { position: fixed; top: 20px; right: 24px; font-family: var(--mono); font-size: 12px; color: var(--ink); background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.22); border-radius: 8px; padding: 8px 13px; cursor: pointer; }
   .lightbox .close:hover { background: rgba(255,255,255,.16); }
@@ -3012,7 +3012,7 @@ Expecting `+Ze.join(", ")+", got '"+(this.terminals_[Ne]||Ne)+"'":Dt="Parse erro
 
     /* ---------- lightbox ---------- */
     var lb = document.getElementById('lightbox'), stage = document.getElementById('lbStage');
-    function lbOpen(svg){ stage.innerHTML=''; var c=svg.cloneNode(true); stage.appendChild(c); stage.querySelectorAll('.node.hot').forEach(function(n){n.classList.remove('hot');}); lb.classList.add('open'); }
+    function lbOpen(svg){ stage.innerHTML=''; var c=svg.cloneNode(true); c.style.maxWidth='none'; stage.appendChild(c); stage.querySelectorAll('.node.hot').forEach(function(n){n.classList.remove('hot');}); lb.classList.add('open'); }
     function lbClose(){ lb.classList.remove('open'); stage.innerHTML=''; }
     document.getElementById('lbClose').addEventListener('click', lbClose);
     lb.addEventListener('click', function(e){ if(e.target===lb) lbClose(); });
