@@ -1,0 +1,10 @@
+rules_version = '2';
+
+// The results bucket is private (D-069(c)): clients can read and write NOTHING.
+// The Functions/worker use the Admin SDK (which bypasses these rules), and the
+// dashboard is served via 15-min signed URLs minted server-side (GET /api/result/<id>).
+service firebase.storage {
+  match /b/{bucket}/o/{allPaths=**} {
+    allow read, write: if false;
+  }
+}

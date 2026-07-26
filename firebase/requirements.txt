@@ -1,2 +1,5 @@
-firebase_functions>=0.4.0
-supervisorly @ git+https://github.com/ahmedmahershaaban/supervisorly.git@build/browser
+firebase-functions>=0.4.0
+google-cloud-firestore>=2.16
+google-cloud-run>=0.10
+google-cloud-storage>=2.16
+supervisorly @ git+https://github.com/ahmedmahershaaban/supervisorly.git@<RELEASE_TAG>

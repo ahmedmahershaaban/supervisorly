@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Supervisorly</title>
+</head>
+<body>
+<p>This placeholder is shadowed by the Hosting <code>/**</code> rewrite to the
+<code>webapp</code> function, which serves the real one-page app.</p>
+<p>If you prefer to serve the page as a static file instead: generate it with
+<code>python -c "from supervisorly.export.webapp import build_webapp;
+print(build_webapp(api_base='&lt;API_BASE_URL&gt;'))" &gt; public/index.html</code>
+(substituting <code>&lt;API_BASE_URL&gt;</code> — empty string = same-origin rewrites)
+and drop the <code>**</code> rewrite from <code>firebase.json</code>.</p>
+</body>
+</html>

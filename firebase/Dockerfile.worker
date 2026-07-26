@@ -1,0 +1,17 @@
+# Cloud Run Job "supervisorly-scan-worker" — runs ONE scan job (JOB_ID env) to
+# completion (plan §3.6). Create the job (see README.md for the full deploy order):
+#
+#   gcloud run jobs create supervisorly-scan-worker --source . --region <REGION> \
+#     --tasks 1 --max-retries 1 --task-timeout 6h
+#
+# (--source . builds from a file named Dockerfile — copy this file to Dockerfile in
+# a scratch dir together with requirements.txt, main.py, _core.py and worker.py.)
+FROM python:3.11-slim
+
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY main.py _core.py worker.py ./
+
+# one job execution = one scan; JOB_ID is injected per run by the Functions wrapper
+CMD ["python", "worker.py"]
