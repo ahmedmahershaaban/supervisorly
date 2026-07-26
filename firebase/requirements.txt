@@ -1,0 +1,2 @@
+firebase_functions>=0.4.0
+supervisorly @ git+https://github.com/ahmedmahershaaban/supervisorly.git@build/browser
