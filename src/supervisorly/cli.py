@@ -600,6 +600,11 @@ def cmd_scan(args: argparse.Namespace) -> int:
         # the export still lists everyone as enumerated-but-unchecked.
         print(f"--shortlist must be a positive integer, got {args.shortlist}.")
         return 2
+    if args.max_institutions is not None and args.max_institutions < 1:
+        # fail loud (D-002): a 0/negative cap would silently scan NO institution while
+        # the plan reads as a full-country scan.
+        print(f"--max-institutions must be a positive integer, got {args.max_institutions}.")
+        return 2
 
     result = run_live(
         plan, transport, snap_root, email=email,
@@ -607,6 +612,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
         db_path=out.parent / "supervisorly.sqlite", optout_path=args.optout, resume=args.resume,
         targets_override=targets_override, targets_truncated=targets_truncated,
         shortlist_size=args.shortlist,
+        max_institutions=args.max_institutions,
     )
     # sparse-coverage preflight + discovery warnings (D-060) — ASCII-safe by construction
     # (preflight/ladder messages are ASCII-only, like the rest of this console output).
@@ -661,6 +667,11 @@ def build_parser() -> argparse.ArgumentParser:
                     help="deep-dive only the top N discovered professors by topic fit "
                          "(D-056; default 40). The rest stay listed, unchecked. Named "
                          "--targets always deep-dive.")
+    ps.add_argument("--max-institutions", dest="max_institutions", type=int, default=None,
+                    metavar="N",
+                    help="scan only the first N institutions of the ROR enumeration "
+                         "(relevance-ordered). A cap that cuts is disclosed as a warning "
+                         "(D-037); unset scans all.")
     ps.set_defaults(func=cmd_scan)
 
     pm = sub.add_parser("map-field", help="map a free-text field to a hierarchical OpenAlex "

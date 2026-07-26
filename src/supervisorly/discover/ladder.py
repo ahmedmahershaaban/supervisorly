@@ -186,18 +186,27 @@ def enumerate_professors(institutions: list[dict], oa,
     return _merge_split_profiles([seen[k] for k in order])
 
 
-def build_targets(plan: dict, ror, oa) -> dict:
+def build_targets(plan: dict, ror, oa, *, max_institutions: int | None = None) -> dict:
     """Round 1 end to end: {plan (with resolved topics), institutions, targets, truncated, warnings}.
 
     ``truncated`` lists any source whose enumeration hit the page cap (more results existed), so
     the run coverage can say so honestly rather than claiming completeness while truncating (D-037).
     ``warnings`` carries non-fatal discovery-scope notes (e.g. 0 of N named universities matched)
     that must reach the user instead of silently narrowing the scan.
+
+    ``max_institutions`` (the §4.3 scale control) caps the institution scan to the first N of
+    the ROR enumeration (already relevance-ordered by the API, and by ``university_mode``
+    reordering); a cap that actually cuts appends an honest warning — the narrowed scope is
+    always disclosed, never silent (D-037). ``None`` (default) scans all, exactly as before.
     """
     plan = dict(plan)
     plan["resolved_topic_ids"] = resolve_topic_ids(plan, oa)
     warnings: list[str] = []
     institutions = select_institutions(plan, ror, warnings=warnings)
+    if max_institutions is not None and len(institutions) > max_institutions:
+        warnings.append(f"institution scan capped at {max_institutions} of "
+                        f"{len(institutions)} (raise max_institutions to widen)")
+        institutions = institutions[:max_institutions]
     topic_ids = plan["resolved_topic_ids"]
     if topic_ids:
         # the enumeration below is filtered server-side to these topics — say so honestly:

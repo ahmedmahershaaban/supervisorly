@@ -341,3 +341,63 @@ def test_map_field_no_note_on_honest_empty(tmp_path, monkeypatch, capsys):
     assert "mapped 0 topics in 0 groups" in printed
     assert "note:" not in printed
     assert "relaxed_from" not in json.loads(out.read_text(encoding="utf-8"))
+
+
+# ── subject_map_multi (D-068 multi-variant merge) ─────────────────────────────
+
+def test_subject_map_multi_merges_variants_best_rank_and_found_by():
+    tp = CassetteTransport()
+    tp.record(openalex.topics_url("causal ml", EMAIL), 200, _page([
+        _topic(1, "Causal inference", 900, "Physical Sciences", "Mathematics", "Statistics"),
+        _topic(2, "Machine learning", 5000, "Physical Sciences", "Computer Science", "AI"),
+    ]))
+    tp.record(openalex.topics_url("causal inference", EMAIL), 200, _page([
+        _topic(2, "Machine learning", 5000, "Physical Sciences", "Computer Science", "AI"),
+        _topic(3, "Econometrics", 700, "Social Sciences", "Economics", "Econometrics"),
+    ]))
+    smap = subjects.subject_map_multi(["causal ml", "causal inference"], tp, email=EMAIL)
+    assert smap["queries"] == ["causal ml", "causal inference"]
+    assert smap["truncated"] is False and smap["truncated_sources"] == []
+    flat = [t for g in smap["groups"] for t in g["topics"]]
+    # each variant is works_count-sorted first (T2 rank 0 in both); T2 surfaced in BOTH
+    # variants, ties on best rank keep first-seen order
+    assert [t["topic_id"] for t in flat] == ["T2", "T1", "T3"]
+    assert flat[0]["found_by"] == ["causal ml", "causal inference"]
+    assert flat[1]["found_by"] == ["causal ml"] and flat[2]["found_by"] == ["causal inference"]
+    # the SAME domain/field/subfield clustering as a single-query map — never merged across
+    assert [(g["domain"], g["field"], g["subfield"]) for g in smap["groups"]] == [
+        ("Physical Sciences", "Computer Science", "AI"),
+        ("Physical Sciences", "Mathematics", "Statistics"),
+        ("Social Sciences", "Economics", "Econometrics"),
+    ]
+
+
+def test_subject_map_multi_unions_truncation_and_keeps_partial_topics():
+    tp = CassetteTransport()
+    tp.record(openalex.topics_url("x", EMAIL), 200, _page([_topic(1, "A", 30)]))
+    tp.record(openalex.topics_url("y", EMAIL), 500, "boom")
+    smap = subjects.subject_map_multi(["x", "y"], tp, email=EMAIL)
+    assert [t["topic_id"] for g in smap["groups"] for t in g["topics"]] == ["T1"]
+    assert smap["truncated"] is True and smap["truncated_sources"] == ["topics@y"]
+
+
+def test_subject_map_multi_honest_empty_variant_contributes_nothing():
+    tp = CassetteTransport()
+    tp.record(openalex.topics_url("causal", EMAIL), 200,
+              _page([_topic(1, "Causal inference", 900)]))
+    tp.record(openalex.topics_url("zzz", EMAIL), 200, _page([]))   # 200, zero results
+    smap = subjects.subject_map_multi(["causal", "zzz"], tp, email=EMAIL)
+    assert smap["truncated"] is False and smap["truncated_sources"] == []
+    flat = [t for g in smap["groups"] for t in g["topics"]]
+    assert [(t["topic_id"], t["found_by"]) for t in flat] == [("T1", ["causal"])]
+
+
+def test_subject_map_multi_dedupes_case_insensitively_and_caps_input_at_8():
+    tp = CassetteTransport()
+    for i in range(1, 9):
+        tp.record(openalex.topics_url(f"q{i}", EMAIL), 200, _page([]))
+    counting = _Counting(tp)
+    queries = ["q1", "Q1"] + [f"q{i}" for i in range(2, 10)]       # 9 unique after dedupe
+    smap = subjects.subject_map_multi(queries, counting, email=EMAIL)
+    assert smap["queries"] == [f"q{i}" for i in range(1, 9)]       # first casing kept, cap 8
+    assert len(counting.urls) == 8

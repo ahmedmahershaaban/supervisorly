@@ -367,3 +367,30 @@ def test_scan_targets_resolution_travels_to_export_and_dashboard(
         html = out.read_text(encoding="utf-8")
         assert f'"identity_resolution": "{expected}"' in html
         assert "function idBadge(" in html
+
+
+# ── scan --max-institutions (§4.3 scale control) ──────────────────────────────
+
+def test_scan_max_institutions_reaches_the_ladder(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(transport_mod, "httpx_transport", lambda **kw: _ladder_cassette())
+    seen = {}
+    real = ladder.build_targets
+
+    def spy(plan, ror, oa, **kw):
+        seen.update(kw)
+        return real(plan, ror, oa, **kw)
+
+    monkeypatch.setattr(ladder, "build_targets", spy)
+    out = tmp_path / "out" / "live.html"
+    rc = cli.main(["scan", "--plan", str(_plan(tmp_path)), "--email", EMAIL,
+                   "--max-institutions", "1", "--out", str(out)])
+    assert rc == 0
+    assert "scanned 1 professors (live)" in capsys.readouterr().out
+    assert seen["max_institutions"] == 1
+
+
+def test_scan_max_institutions_fails_loud_on_a_non_positive_cap(tmp_path, capsys):
+    rc = cli.main(["scan", "--plan", str(_plan(tmp_path)), "--email", EMAIL,
+                   "--max-institutions", "0", "--out", str(tmp_path / "d.html")])
+    assert rc == 2
+    assert "--max-institutions must be a positive integer, got 0." in capsys.readouterr().out

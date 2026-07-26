@@ -262,3 +262,27 @@ def test_author_url_reads_orcid_from_the_raw_ids_shape():
     assert ladder._author_url({"ids": {"orcid": "https://orcid.org/0000-0002-1825-0097"}}) == \
         ("https://orcid.org/0000-0002-1825-0097", "orcid")
     assert ladder._author_url({}) == (None, None)
+
+
+# ── max_institutions cap (§4.3 scale control, D-037 honesty) ──────────────────
+
+def test_max_institutions_caps_the_scan_and_warns_honestly():
+    rc, oa = _clients()                                     # 2 institutions in the country
+    out = ladder.build_targets(PLAN, rc, oa, max_institutions=1)
+    # ROR's enumeration order is kept; only the first institution is scanned
+    assert [i["name"] for i in out["institutions"]] == ["Maple University"]
+    assert [t["id"] for t in out["targets"]] == ["A200", "A201"]
+    assert any("institution scan capped at 1 of 2 (raise max_institutions to widen)" in w
+               for w in out["warnings"])
+
+
+def test_max_institutions_none_scans_all_and_stays_silent():
+    rc, oa = _clients()
+    out = ladder.build_targets(PLAN, rc, oa)                # default: uncapped, as before
+    assert len(out["institutions"]) == 2 and len(out["targets"]) == 3
+    assert not any("capped" in w for w in out["warnings"])
+    # a cap at/above the count cuts nothing -> no warning either
+    rc, oa = _clients()
+    out = ladder.build_targets(PLAN, rc, oa, max_institutions=2)
+    assert len(out["institutions"]) == 2
+    assert not any("capped" in w for w in out["warnings"])

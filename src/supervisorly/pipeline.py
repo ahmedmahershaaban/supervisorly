@@ -768,7 +768,8 @@ def run_live(plan: dict, transport: Transport, snap_root, *, email: str,
              rate_limit: float = 1.0, backoff_sleep=None,
              targets_override: list[dict] | None = None,
              targets_truncated: list[str] | None = None,
-             shortlist_size: int = DEFAULT_SHORTLIST_SIZE) -> dict:
+             shortlist_size: int = DEFAULT_SHORTLIST_SIZE,
+             max_institutions: int | None = None) -> dict:
     """A **live** scan: preflight → discovery ladder (ROR + OpenAlex) → the *same* fetch → extract
     → claim → score → export → dashboard pipeline as ``run_offline`` (D-028), now from **discovered**
     targets rather than hand-fed ones.
@@ -794,6 +795,11 @@ def run_live(plan: dict, transport: Transport, snap_root, *, email: str,
     recorded by the CLI-side client that resolved ``targets_override`` — those lookups happened
     before run_live existed, so without this hand-off a lookup FAILURE would vanish and the run
     would read as complete (D-037).
+
+    ``max_institutions`` (the §4.3 scale control) caps the ladder's institution scan to the
+    first N of the ROR enumeration, with an honest warning when the cap cuts (D-037); the
+    explicit parameter wins, else the plan's own ``max_institutions`` is honored — 0/unset
+    means all (current behavior).
     """
     preflight.require_credentials({preflight.CONTACT_EMAIL_ENV: email})
     ror_client = _ror.RorClient(transport, email=email)
@@ -811,7 +817,10 @@ def run_live(plan: dict, transport: Transport, snap_root, *, email: str,
         warnings: list[str] = []
         exempt_keys = {t.get("openalex_id") or t.get("id") for t in targets_override}
     else:
-        disc = _ladder.build_targets(plan, ror_client, oa_client)
+        disc = _ladder.build_targets(plan, ror_client, oa_client,
+                                     max_institutions=(max_institutions
+                                                       or plan.get("max_institutions")
+                                                       or None))
         exempt_keys = set()
         if targets_override:
             seen = {t.get("openalex_id") or t.get("id") for t in disc["targets"]}

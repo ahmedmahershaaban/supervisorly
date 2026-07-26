@@ -372,3 +372,20 @@ def test_shortlist_gate_does_nothing_when_targets_fit(tmp_path):
     r = _run(tmp_path)                                       # 3 targets, default cap 40
     assert "shortlisted" not in r["stats"]
     assert "Deep-dived" not in r["export"]["run"]["coverage"]
+
+
+def test_run_live_reads_plan_max_institutions(tmp_path):
+    # the §4.3 scale control: the plan's own max_institutions caps the institution scan,
+    # and the cut is disclosed in the run warnings (D-037), never silent
+    r = pipeline.run_live({**PLAN, "max_institutions": 1}, _transport(), tmp_path / "snaps",
+                          email=EMAIL, **_FAST)
+    assert r["stats"]["institutions"] == 1
+    assert {p["id"] for p in r["export"]["professors"]} == {"A200", "A201"}
+    assert any("institution scan capped at 1 of 2" in w for w in r["stats"]["warnings"])
+
+
+def test_run_live_max_institutions_param_wins_over_the_plan(tmp_path):
+    r = pipeline.run_live({**PLAN, "max_institutions": 1}, _transport(), tmp_path / "snaps",
+                          email=EMAIL, max_institutions=2, **_FAST)
+    assert r["stats"]["institutions"] == 2                  # explicit param beats the plan
+    assert not any("capped" in w for w in r["stats"]["warnings"])

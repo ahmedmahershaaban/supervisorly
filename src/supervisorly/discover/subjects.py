@@ -201,3 +201,67 @@ def subject_map(query: str, transport: Transport, *, email: str | None = None,
     result["truncated"] = truncated
     result["truncated_sources"] = truncated_sources
     return result
+
+
+#: Input cap for ``subject_map_multi`` — matches the D-068 expansion contract (<= 8).
+MAX_QUERIES = 8
+
+
+def subject_map_multi(queries: list[str], transport: Transport, *,
+                      email: str | None = None, key: str | None = None,
+                      max_results: int = 25) -> dict:
+    """Map several query variants (e.g. a D-068 expansion) to ONE merged subject map.
+
+    Runs ``subject_map`` per unique variant (stripped, deduped case-insensitively, input
+    capped at MAX_QUERIES) and merges the results: topics are deduped by ``topic_id``
+    keeping the BEST (lowest) rank position across variants, each topic is tagged
+    ``found_by`` with the variant string(s) that surfaced it (capped at 8), and the
+    domain -> field -> subfield clustering is the SAME as a single-query map — variants
+    never merge or rewrite clusters. ``truncated`` is set when ANY variant truncated,
+    with the union of every variant's ``truncated_sources`` (each marker already names
+    its variant, D-037). A variant that returns an honest empty contributes nothing —
+    never an error. The result carries ``queries`` naming the variants actually run.
+    """
+    seen: set[str] = set()
+    unique: list[str] = []
+    for q in queries or []:
+        q = (q or "").strip()
+        if q and q.casefold() not in seen:
+            seen.add(q.casefold())
+            unique.append(q)
+    unique = unique[:MAX_QUERIES]
+
+    merged: dict[str, dict] = {}        # topic_id -> {rank, gkey, topic}
+    truncated = False
+    truncated_sources: list[str] = []
+    for q in unique:
+        smap = subject_map(q, transport, email=email, key=key, max_results=max_results)
+        truncated = truncated or smap["truncated"]
+        for marker in smap["truncated_sources"]:
+            if marker not in truncated_sources:
+                truncated_sources.append(marker)
+        rank = 0
+        for g in smap["groups"]:
+            gkey = (g["domain"], g["field"], g["subfield"])
+            for t in g["topics"]:
+                entry = merged.get(t["topic_id"])
+                if entry is None:
+                    merged[t["topic_id"]] = {
+                        "rank": rank, "gkey": gkey,
+                        "topic": {**t, "found_by": [q]}}
+                else:
+                    entry["rank"] = min(entry["rank"], rank)   # best rank across variants
+                    found = entry["topic"]["found_by"]
+                    if q not in found and len(found) < MAX_QUERIES:
+                        found.append(q)
+                rank += 1
+
+    groups: dict[tuple[str, str, str], dict] = {}
+    for entry in sorted(merged.values(), key=lambda e: e["rank"]):
+        gkey = entry["gkey"]
+        group = groups.setdefault(gkey, {"domain": gkey[0], "field": gkey[1],
+                                         "subfield": gkey[2], "topics": []})
+        group["topics"].append(entry["topic"])
+    # sorted by best rank, so first-appearance order ranks groups by their top topic
+    return {"queries": unique, "groups": list(groups.values()),
+            "truncated": truncated, "truncated_sources": truncated_sources}
