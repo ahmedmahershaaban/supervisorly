@@ -1365,3 +1365,43 @@ inline CSS/JS, reduced-motion honoured, keyboard-operable, injection-safe. It co
 subject-map JSON and exports a plan JSON (browser download — a static file cannot write
 to disk). The **conversational numbered multi-select remains the fallback** in every
 agent host, so the tool is fully usable even where opening HTML is awkward.
+
+---
+
+## D-068 — The LLM may generate queries, never claims
+
+**Status:** locked (Ahmed, 2026-07-26) — refines [D-009](#d-009--deterministic-collection-llm-interpretation), hardens [D-038](#d-038--generate-dont-look-up)
+
+The deterministic layer stays LLM-free for *facts*. The one sanctioned exception: an
+**optional query-expansion** step may use an LLM to turn a student's raw phrasing ("NLP",
+"natural language procssisng") into candidate *search strings* (canonical forms, acronym
+expansions, synonyms). Guardrails, all in code:
+
+1. **Queries, never claims.** Expansion output is a validated list of ≤8 short strings
+   (≤120 chars each, deduped); anything else is discarded. It is only ever sent to search
+   endpoints as URL parameters. A wrong expansion yields zero topics — it can never mint a
+   professor, a deadline, or a recruiting status; every fact still passes the
+   [D-010](#d-010--every-field-carries-provenance-and-confidence) quote gate.
+2. **Fail-closed.** No key, any error, or a timeout → expansion is silently skipped and the
+   raw query proceeds. Nobody is ever blocked by a missing LLM.
+3. **Server-side only.** The key lives in server config, is never logged, returned, or
+   client-overridable; model and base URL are server constants.
+
+## D-069 — The hosted web product: honesty, privacy, and user control
+
+**Status:** locked (Ahmed, 2026-07-26) — hardens [D-005](#d-005--ethics-in-code), [D-037](#d-037--honest-emptiness)
+
+The hosted page + endpoints (the Firebase web app) follow the same ethics as the engine:
+
+1. **Read-only, rate-limited endpoints.** The shared OpenAlex budget is protected, not
+   spent for strangers: per-IP throttles, one active scan job per email, server-side caps.
+2. **Job ids are unguessable UUIDs and are the access token** — status is readable only by
+   id and never listable.
+3. **Results are personal data** ([D-005](#d-005--ethics-in-code)): private bucket, 15-min
+   signed URLs re-issued on request, 7-day auto-delete of results AND job docs. No personal
+   data is stored client-side (no localStorage/cookies for plan or email).
+4. **The hosted page is a new artifact class** — unlike the dashboard/Studio
+   ([D-048](#d-048--dashboard-delivery-pre-transpiled-jsx-vendored-inline-no-runtime-toolchain)/[D-067](#d-067--scan-studio-the-rich-front-end-is-a-self-contained-atlas-language-plan-wizard))
+   it MAY call the API, but ships no other external resource and no tracking.
+5. **The user can always stop safely and continue.** Cancel is graceful, partial results
+   are kept and exportable, and every terminal state is resumable — never a dead end.
