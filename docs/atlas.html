@@ -77,6 +77,7 @@
   .legend .row { display: flex; align-items: center; gap: 9px; font-size: 12px; color: var(--ink-soft); }
   .legend .sw { width: 13px; height: 13px; border-radius: 4px; flex: none; border: 1.5px solid; }
   .sw.tool     { background:#182338; border-color:#5f8fd9; }
+  .sw.agentv   { background:#221a33; border-color:#a478e8; }
   .sw.verified { background:#12281d; border-color:#4bbd7f; }
   .sw.human    { background:#2c1620; border-color:#e06a83; }
   .sw.store    { background:#2a2110; border-color:#d9a441; }
@@ -227,24 +228,28 @@
     </div>
 
     <div>
-      <div class="nav-label">Nine maps</div>
+      <div class="nav-label">Twelve maps</div>
       <nav id="nav">
         <a href="#context"><span class="idx">01</span> Context</a>
-        <a href="#components"><span class="idx">02</span> Components</a>
-        <a href="#pipeline"><span class="idx">03</span> Pipeline</a>
-        <a href="#fetch"><span class="idx">04</span> Fetch &amp; human rung</a>
-        <a href="#sources"><span class="idx">05</span> Sources</a>
-        <a href="#data"><span class="idx">06</span> Data model</a>
-        <a href="#provenance"><span class="idx">07</span> Provenance</a>
-        <a href="#rules"><span class="idx">08</span> Rules</a>
-        <a href="#decisions"><span class="idx">09</span> Decisions</a>
+        <a href="#modes"><span class="idx">02</span> Modes</a>
+        <a href="#components"><span class="idx">03</span> Components</a>
+        <a href="#scan-setup"><span class="idx">04</span> Scan setup</a>
+        <a href="#pipeline"><span class="idx">05</span> Pipeline</a>
+        <a href="#fetch"><span class="idx">06</span> Fetch &amp; browser tier</a>
+        <a href="#browser-tier"><span class="idx">07</span> Browser tier</a>
+        <a href="#sources"><span class="idx">08</span> Sources</a>
+        <a href="#data"><span class="idx">09</span> Data model</a>
+        <a href="#provenance"><span class="idx">10</span> Provenance</a>
+        <a href="#rules"><span class="idx">11</span> Rules</a>
+        <a href="#decisions"><span class="idx">12</span> Decisions</a>
       </nav>
     </div>
 
     <div class="legend">
       <div class="row"><span class="sw tool"></span> Tool does it automatically</div>
+      <div class="row"><span class="sw agentv"></span> Browser tier — your session, agent-driven</div>
       <div class="row"><span class="sw verified"></span> Verified / reliable</div>
-      <div class="row"><span class="sw human"></span> Human rung — your browser</div>
+      <div class="row"><span class="sw human"></span> Human rung — the MD fallback</div>
       <div class="row"><span class="sw store"></span> Data store / orchestrator</div>
       <div class="row"><span class="sw gate"></span> Rule / enforcement gate</div>
       <div class="row"><span class="sw skip"></span> Skipped on purpose</div>
@@ -254,11 +259,11 @@
   <main>
     <header class="hero">
       <div class="hero-inner">
-        <div class="eyebrow">Architecture bible · 56 decisions · 31 entities</div>
+        <div class="eyebrow">Architecture bible · 67 decisions · 31 entities</div>
         <h1>Everything, connected.</h1>
-        <p>One place that ties together the skill, its agents and tools, the pipeline, the three-phase fetch with its human rung, the data model, how a value becomes a trusted claim, and where every rule bites. Click any diagram to open it full-size.</p>
+        <p>One place that ties together the skill, its agents and tools, the two run modes, the scan setup from free text to a confirmed plan, the pipeline, the fetch ladder with its browser tier and human-rung fallback, the data model, how a value becomes a trusted claim, and where every rule bites. Click any diagram to open it full-size.</p>
         <div class="meta">
-          <span class="chip"><b>Skill-first</b> · runs in Claude Code</span>
+          <span class="chip"><b>Skill-first</b> · any MCP host</span>
           <span class="chip"><b>Any country</b> · generated, not looked up</span>
           <span class="chip"><b>Evidence</b> · every field is a cited claim</span>
         </div>
@@ -270,13 +275,13 @@
 
       <section class="map" id="context">
         <div class="map-head"><span class="map-code">MAP 01</span><h2>Context — the boundary of the tool</h2></div>
-        <p class="purpose">What Supervisorly is, and where the line runs between what the tool does and what your own browser does.</p>
+        <p class="purpose">What Supervisorly is, and where the line runs between what the tool does, what the agent-driven browser does in your session, and what still falls back to you.</p>
         <div class="diagram"><span class="expand">Expand ⤢</span>
 <pre class="mermaid">
 %%{init:{'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif,system-ui,sans-serif','fontSize':'14px','background':'#16181d','primaryColor':'#20232b','primaryTextColor':'#e9eaed','primaryBorderColor':'#d9a441','lineColor':'#858994','secondaryColor':'#1b1e25','tertiaryColor':'#181a20','clusterBkg':'#131519','clusterBorder':'#31353f','edgeLabelBackground':'#16181d','textColor':'#d0d2d8'}}}%%
 flowchart LR
   S["Student"]
-  subgraph CC["Claude Code"]
+  subgraph HOST["Agent host — Kimi Code · Claude Code"]
     SK["Supervisorly skill<br/>SKILL.md + agents + tools"]
   end
   S -->|"country · field · subfield<br/>need · universities"| SK
@@ -285,56 +290,106 @@ flowchart LR
     PUB["Professor's own pages<br/>homepage · openings · lab News"]
     SOC["Open-API social<br/>Bluesky · Mastodon · GitHub"]
   end
-  subgraph HR["Human rung — your own browser"]
-    CFC["Claude for Chrome"]
-    GATED["Walled<br/>X/Twitter · LinkedIn · Scholar"]
-    CFC --> GATED
+  subgraph BT["Browser tier — your session, agent-driven"]
+    CHR["Chrome via chrome-devtools-mcp<br/>persistent profile · one-time login"]
+    GATED["Walled — advertised profiles only<br/>X/Twitter · LinkedIn · Scholar"]
+    CHR --> GATED
+  end
+  subgraph HR["Human rung — fallback"]
+    CFC["Claude for Chrome<br/>classic MD prompt"]
   end
   SK --> API
   SK --> PUB
   SK --> SOC
-  SK -.->|"generates MD prompt"| CFC
+  SK -->|"paced (D-065)"| CHR
+  CHR -.->|"challenge → abort latch"| CFC
+  CHR -.->|"staging text → ingest-page<br/>never read into context"| SK
   CFC -.->|"returns MD files"| SK
   subgraph OUT["Outputs — local, never committed"]
     DB["SQLite<br/>source of truth"]
     JSON["JSON export"]
-    DASH["Dashboard<br/>HTML + JSX"]
+    DASH["Dashboard<br/>one self-contained HTML"]
   end
   SK --> DB --> JSON --> DASH
-  DASH <-->|"ask · edit UI"| SKQ["Your Claude session"]
+  DASH <-->|"ask · edit UI"| SKQ["Your agent session"]
   classDef tool fill:#182338,stroke:#5f8fd9,color:#cfe0ff;
+  classDef agentv fill:#221a33,stroke:#a478e8,color:#e6d6fa;
   classDef human fill:#2c1620,stroke:#e06a83,color:#ffd0da;
   classDef store fill:#2a2110,stroke:#d9a441,color:#f4dfa8;
   class API,PUB,SOC tool
-  class CFC,GATED human
+  class CHR,GATED agentv
+  class CFC human
   class DB,JSON,DASH store
 </pre>
         </div>
-        <div class="caption"><span class="key">Governs</span><span class="refs">architecture.md · D-039 · D-042 · D-044 — the tool reads public sources; the human reads everything walled.</span></div>
+        <div class="caption"><span class="key">Governs</span><span class="refs">architecture.md · D-039 · D-042 · D-044 · D-064 — the tool reads public sources; walled pages are reached through your own session — agent-driven Chrome first, the classic MD rung as fallback.</span></div>
+      </section>
+
+      <section class="map" id="modes">
+        <div class="map-head"><span class="map-code">MAP 02</span><h2>Modes — offline demo vs live</h2></div>
+        <p class="purpose">Two ways in. The demo proves the whole pipeline offline against a synthetic cassette; a live scan needs only a contact email — ROR is keyless, an OpenAlex key just raises limits, and the browser tier supplies your logged-in session for the walled pages.</p>
+        <div class="diagram"><span class="expand">Expand ⤢</span>
+<pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif,system-ui,sans-serif','fontSize':'14px','background':'#16181d','primaryColor':'#20232b','primaryTextColor':'#e9eaed','primaryBorderColor':'#d9a441','lineColor':'#858994','secondaryColor':'#1b1e25','tertiaryColor':'#181a20','clusterBkg':'#131519','clusterBorder':'#31353f','edgeLabelBackground':'#16181d','textColor':'#d0d2d8'}}}%%
+flowchart LR
+  subgraph DEMO["Offline demo — scan --demo"]
+    FIX["synthetic cassette fixture<br/>3 directory shapes · 3 countries"]
+    NOKEY["no keys · no network<br/>corpus never read (D-035)"]
+    NOKEY -.-> FIX
+  end
+  subgraph LIVE["Live — scan --country --field"]
+    EMAIL["contact email required<br/>SUPERVISORLY_CONTACT_EMAIL"]
+    ROR["ROR v2 — keyless"]
+    OA["OpenAlex — free<br/>--openalex-key optional"]
+    BT2["browser tier — your logged-in profile<br/>one-time login, then hands-off"]
+  end
+  SAME["the same deterministic pipeline<br/>SQLite → JSON → dashboard"]
+  RE["--resume — warm cache<br/>+ what-changed delta"]
+  FIX --> SAME
+  EMAIL --> SAME
+  ROR --> SAME
+  OA --> SAME
+  BT2 --> SAME
+  SAME --> RE
+  classDef tool fill:#182338,stroke:#5f8fd9,color:#cfe0ff;
+  classDef agentv fill:#221a33,stroke:#a478e8,color:#e6d6fa;
+  classDef verified fill:#12281d,stroke:#4bbd7f,color:#c5f0d6;
+  classDef store fill:#2a2110,stroke:#d9a441,color:#f4dfa8;
+  class FIX,NOKEY verified
+  class ROR,OA,SAME tool
+  class BT2 agentv
+  class EMAIL,RE store
+</pre>
+        </div>
+        <div class="caption"><span class="key">Governs</span><span class="refs">demo.py · preflight.py · SKILL.md · D-064 — the demo is the genericity fixture too; live credentials stay minimal on purpose.</span></div>
       </section>
 
       <section class="map" id="components">
-        <div class="map-head"><span class="map-code">MAP 02</span><h2>Components — skill, tools, and agents</h2></div>
-        <p class="purpose">The orchestrator (Claude) interprets intent and generates queries inline, producing a SearchPlan the deterministic tools consume. Agents run only where judgement is genuinely needed.</p>
+        <div class="map-head"><span class="map-code">MAP 03</span><h2>Components — skill, tools, and agents</h2></div>
+        <p class="purpose">The orchestrator interprets intent and generates queries inline, producing a SearchPlan the deterministic tools consume. The browser seam is the default walled path; the MD rung is its fallback. Agents run only where judgement is genuinely needed.</p>
         <div class="diagram"><span class="expand">Expand ⤢</span>
 <pre class="mermaid">
 %%{init:{'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif,system-ui,sans-serif','fontSize':'14px','background':'#16181d','primaryColor':'#20232b','primaryTextColor':'#e9eaed','primaryBorderColor':'#d9a441','lineColor':'#858994','secondaryColor':'#1b1e25','tertiaryColor':'#181a20','clusterBkg':'#131519','clusterBorder':'#31353f','edgeLabelBackground':'#16181d','textColor':'#d0d2d8'}}}%%
 flowchart TD
-  subgraph ORCH["Orchestrator — Claude, inline (SKILL.md)"]
+  subgraph ORCH["Orchestrator — the agent, inline (SKILL.md)"]
     SK["run state · budget · tier gating"]
     INT["interpret intent<br/>+ generate queries"]
     PLAN["SearchPlan"]
     INT --> PLAN
   end
   subgraph TOOLS["Tools — deterministic, no LLM"]
+    SM["subject-map — map-field"]
+    ST["scan studio — plan wizard"]
     D["discovery-ladder"]
     FE["fetcher — 3 phases"]
     DD["deep-dive collector"]
     GQ["gap-queue"]
+    PACE["pacing gate — pace"]
+    BR["browser-rung + browser-fill"]
     CP["chrome-prompt-generator"]
     MI["md-ingester"]
     SCR["scorer — gates + weights"]
-    EXP["exporter — JSON + HTML"]
+    EXP["exporter — JSON + HTML dashboard"]
   end
   subgraph AGENTS["Agents — LLM judgement only"]
     A1["recruiting-analyst"]
@@ -344,8 +399,12 @@ flowchart TD
     A5["adapter-author"]
   end
   SK --> INT
-  PLAN --> D --> FE --> DD --> GQ --> CP --> MI
+  INT --> SM --> PLAN
+  ST --> PLAN
+  PLAN --> D --> FE --> DD --> GQ --> PACE --> BR
+  BR -.->|"abort-on-challenge"| CP --> MI
   MI -.->|"resume"| DD
+  BR -.->|"fill + resume"| DD
   SK --> SCR --> EXP
   DD -->|"classify state"| A1
   DD -->|"admissions/funding"| A2
@@ -353,18 +412,69 @@ flowchart TD
   D -.->|"on failed fetch"| A5
   SCR -->|"sample claims"| A4
   classDef tool fill:#182338,stroke:#5f8fd9,color:#cfe0ff;
+  classDef agentv fill:#221a33,stroke:#a478e8,color:#e6d6fa;
   classDef agent fill:#12281d,stroke:#4bbd7f,color:#c5f0d6;
+  classDef gate fill:#0f2723,stroke:#3fbdad,color:#bff0e6;
   classDef orch fill:#2a2110,stroke:#d9a441,color:#f4dfa8;
-  class D,FE,DD,GQ,CP,MI,SCR,EXP tool
+  class D,FE,DD,GQ,SM,ST,CP,MI,SCR,EXP tool
+  class BR agentv
+  class PACE gate
   class A1,A2,A3,A4,A5 agent
   class SK,INT,PLAN orch
 </pre>
         </div>
-        <div class="caption"><span class="key">Governs</span><span class="refs">architecture.md §4 · D-042 · D-045 · D-055 — workers return a task id and status, never prose.</span></div>
+        <div class="caption"><span class="key">Governs</span><span class="refs">architecture.md §4 · D-042 · D-045 · D-055 · D-064 · D-065 · D-066 · D-067 — workers return a task id and status, never prose.</span></div>
+      </section>
+
+      <section class="map" id="scan-setup">
+        <div class="map-head"><span class="map-code">MAP 04</span><h2>Scan setup — from free text to a confirmed plan</h2></div>
+        <p class="purpose">Nothing expensive runs before you confirm the plan. Your free-text field becomes an API-derived subject map; you multi-select topics — in the Scan Studio's checkbox tree, or as a numbered list in conversation — and the confirmed plan (or a file of named professors) drives the scan.</p>
+        <div class="diagram"><span class="expand">Expand ⤢</span>
+<pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif,system-ui,sans-serif','fontSize':'14px','background':'#16181d','primaryColor':'#20232b','primaryTextColor':'#e9eaed','primaryBorderColor':'#d9a441','lineColor':'#858994','secondaryColor':'#1b1e25','tertiaryColor':'#181a20','clusterBkg':'#131519','clusterBorder':'#31353f','edgeLabelBackground':'#16181d','textColor':'#d0d2d8'}}}%%
+flowchart TD
+  FREE["free text<br/>intent · country · universities · field"]
+  MF["map-field — discover/subjects.py<br/>OpenAlex topics → domain/field/subfield<br/>works-count sorted · truncation-honest"]
+  subgraph STUDIO["Scan Studio — one self-contained offline HTML (D-067)"]
+    SI["intent picker"]
+    SC["country"]
+    SU["universities + mode chips<br/>all · prioritise · only"]
+    STREE["tri-state subject tree<br/>domain → field → subfield → topic"]
+    SP["named professors"]
+    SE["contact email"]
+  end
+  CHAT["conversational fallback<br/>numbered multi-select in chat"]
+  PLANJ["supervisorly_plan.json<br/>Blob download → move out of Downloads"]
+  TGT["targets JSON<br/>name + optional affiliation, or OpenAlex URLs"]
+  SCAN["scan --plan / --targets<br/>identity_resolution: verified / unverified / unchecked"]
+  DASHO["dashboard.html<br/>+ reexport after browser fills"]
+  FREE --> MF
+  MF --> STREE
+  FREE --> CHAT
+  SI --> PLANJ
+  SC --> PLANJ
+  SU --> PLANJ
+  STREE --> PLANJ
+  SP --> PLANJ
+  SE --> PLANJ
+  SP -.-> TGT
+  CHAT -->|"resolved_topic_ids confirmed"| SCAN
+  PLANJ --> SCAN
+  TGT --> SCAN
+  SCAN --> DASHO
+  classDef tool fill:#182338,stroke:#5f8fd9,color:#cfe0ff;
+  classDef human fill:#2c1620,stroke:#e06a83,color:#ffd0da;
+  classDef store fill:#2a2110,stroke:#d9a441,color:#f4dfa8;
+  class MF,SI,SC,SU,STREE,SP,SE,SCAN tool
+  class CHAT human
+  class FREE,PLANJ,TGT,DASHO store
+</pre>
+        </div>
+        <div class="caption"><span class="key">Governs</span><span class="refs">discover/subjects.py · export/studio.py · scan --help · D-058 · D-066 · D-067 — unresolved named professors are reported as skips, never silently dropped.</span></div>
       </section>
 
       <section class="map" id="pipeline">
-        <div class="map-head"><span class="map-code">MAP 03</span><h2>Pipeline — the student's journey</h2></div>
+        <div class="map-head"><span class="map-code">MAP 05</span><h2>Pipeline — the student's journey</h2></div>
         <p class="purpose">Intent is understood before anything is searched. The shortlist forms on research fit — cheaply available — not on recruiting status, which only exists after the deep dive.</p>
         <div class="diagram"><span class="expand">Expand ⤢</span>
 <pre class="mermaid">
@@ -390,12 +500,12 @@ flowchart TD
   class DASH store
 </pre>
         </div>
-        <div class="caption"><span class="key">Governs</span><span class="refs">product-flow.md · D-021 · D-022 · D-037 · D-056 — "never dropped" is display; "deep-dive" is the shortlist.</span></div>
+        <div class="caption"><span class="key">Governs</span><span class="refs">product-flow.md · D-021 · D-022 · D-037 · D-056 · D-066 — "never dropped" is display; "deep-dive" is the shortlist; the subject map is the plan review.</span></div>
       </section>
 
       <section class="map" id="fetch">
-        <div class="map-head"><span class="map-code">MAP 04</span><h2>Fetch — three phases and the human rung</h2></div>
-        <p class="purpose">Each phase runs across the target set, marks its failures, and hands only the residual to the next. Phase 3 is your original Chrome-extension method, turned into the tool's escape hatch.</p>
+        <div class="map-head"><span class="map-code">MAP 06</span><h2>Fetch — three phases, the browser tier, and the fallback</h2></div>
+        <p class="purpose">Each phase runs across the target set, marks its failures, and hands only the residual to the next. Phase 3 is now the agent-driven browser tier (D-064); the original MD human rung remains as the fallback when the browser is denied or challenged.</p>
         <div class="diagram"><span class="expand">Expand ⤢</span>
 <pre class="mermaid">
 %%{init:{'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif,system-ui,sans-serif','fontSize':'14px','background':'#16181d','primaryColor':'#20232b','primaryTextColor':'#e9eaed','primaryBorderColor':'#d9a441','lineColor':'#858994','secondaryColor':'#1b1e25','tertiaryColor':'#181a20','clusterBkg':'#131519','clusterBorder':'#31353f','edgeLabelBackground':'#16181d','textColor':'#d0d2d8'}}}%%
@@ -405,36 +515,92 @@ flowchart TD
   P1OK{"resolved?"}
   P2["Phase 2 — automated browse<br/>the marked pages"]
   P2OK{"resolved?"}
-  P3["Phase 3 — generate MD prompt<br/>for the residual gaps"]
-  HUMAN["You run it in Claude for Chrome<br/>own logged-in session"]
+  P3["Phase 3 — browser tier (primary)<br/>agent-driven Chrome · your session"]
+  PACE{"pace gate<br/>exit 0 = allow · 3 = deny"}
+  SNAPB["staging text → ingest-page<br/>snapshot tier agent_browser"]
+  FILLB["browser-fill — pipeline extractors<br/>D-010 quote-verified claims"]
+  P3OK{"found?"}
+  HUMAN["fallback: classic human rung<br/>MD prompt in Claude for Chrome"]
   MD["returns MD files<br/>value · source · date · quote"]
   INGEST["md-ingester → Claim<br/>extractor = human-assisted"]
-  P3OK{"found?"}
-  CLAIM["Claim stored, run resumes"]
+  CLAIM["Claim stored, gap task closes"]
   NONE["'we looked, found nothing'<br/>professor still shown"]
   G --> P1 --> P1OK
   P1OK -->|"yes"| CLAIM
   P1OK -->|"404 / error → mark"| P2 --> P2OK
   P2OK -->|"yes"| CLAIM
-  P2OK -->|"still blocked → mark"| P3 --> HUMAN --> MD --> INGEST --> P3OK
+  P2OK -->|"still blocked → mark"| P3 --> PACE
+  PACE -->|"allow"| SNAPB --> FILLB --> P3OK
+  PACE -->|"deny / abort latch"| HUMAN --> MD --> INGEST --> P3OK
   P3OK -->|"yes"| CLAIM
   P3OK -->|"no"| NONE
   classDef tool fill:#182338,stroke:#5f8fd9,color:#cfe0ff;
+  classDef agentv fill:#221a33,stroke:#a478e8,color:#e6d6fa;
   classDef human fill:#2c1620,stroke:#e06a83,color:#ffd0da;
+  classDef gate fill:#0f2723,stroke:#3fbdad,color:#bff0e6;
   classDef store fill:#2a2110,stroke:#d9a441,color:#f4dfa8;
   classDef skip fill:#20222a,stroke:#8b8f9b,color:#c3c6cd;
-  class P1,P2,P3,INGEST tool
+  class P1,P2,FILLB,INGEST tool
+  class P3,SNAPB agentv
+  class PACE gate
   class HUMAN,MD human
   class CLAIM store
   class NONE skip
 </pre>
         </div>
-        <div class="caption"><span class="key">Governs</span><span class="refs">architecture.md §2 · D-039 · D-043 · D-049 — the dashboard is generated after Phase 2; it never waits on the human.</span></div>
+        <div class="caption"><span class="key">Governs</span><span class="refs">architecture.md §2 · D-039 · D-043 · D-049 · D-064 · D-065 — the dashboard is generated after Phase 2; it never waits on the browser or the human.</span></div>
+      </section>
+
+      <section class="map" id="browser-tier">
+        <div class="map-head"><span class="map-code">MAP 07</span><h2>Browser tier — the D-064/D-065 recipe, page by page</h2></div>
+        <p class="purpose">The exact loop for every browser page. Raw HTML/DOM never enters the agent's context — extraction happens in-page and in Python; the agent handles only file paths, byte counts, and one-line results. A browser page is just another snapshot.</p>
+        <div class="diagram"><span class="expand">Expand ⤢</span>
+<pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif,system-ui,sans-serif','fontSize':'14px','background':'#16181d','primaryColor':'#20232b','primaryTextColor':'#e9eaed','primaryBorderColor':'#d9a441','lineColor':'#858994','secondaryColor':'#1b1e25','tertiaryColor':'#181a20','clusterBkg':'#131519','clusterBorder':'#31353f','edgeLabelBackground':'#16181d','textColor':'#d0d2d8'}}}%%
+flowchart TD
+  NEXT["next page to fetch"]
+  WARM{"fresh in the warm cache?"}
+  SKIPF["reuse the cache — no fetch"]
+  PACE{"pace --host<br/>exit 0 = allow · 3 = deny"}
+  DENY["sleep the printed wait= and re-check,<br/>or skip the host on cap/abort"]
+  POLICY["policy in code (D-065)<br/>x/twitter/linkedin 45–120 s · 15 pages/session<br/>scholar.google.* 60–180 s · 5/session, profiles only<br/>advertised profile URLs only — never people-search"]
+  CHR["Chrome via chrome-devtools-mcp<br/>headful · persistent profile<br/>one-time user login on first run"]
+  EXT["evaluate_script(page_extract.js)<br/>main text capped at 60 KiB in-page<br/>scroll mode = human-like jittered scroll"]
+  STAGE["staging file<br/>NEVER read into agent context"]
+  ING["ingest-page --url FINAL --file STAGING<br/>+ --entity kind:ref --run id to fill a target"]
+  SNAP["content-addressed snapshot<br/>tier agent_browser · final-URL provenance"]
+  FILL["browser-fill — the pipeline's own extractors<br/>D-010 quote-verified claims<br/>never clobbers a human-assisted value"]
+  GAPS["awaiting_human gap tasks close<br/>run status recomputed"]
+  REEXP["reexport — dashboard regenerated"]
+  ABORT["pace --abort — host latched for the session<br/>field = blocked → classic human rung"]
+  NEXT --> WARM
+  WARM -->|"yes"| SKIPF
+  WARM -->|"no"| PACE
+  PACE -->|"0 — allow"| CHR
+  PACE -->|"3 — deny"| DENY
+  PACE -.-> POLICY
+  CHR --> EXT --> STAGE --> ING --> SNAP --> FILL --> GAPS --> REEXP
+  CHR -.->|"captcha · soft-block · login redirect"| ABORT
+  classDef tool fill:#182338,stroke:#5f8fd9,color:#cfe0ff;
+  classDef agentv fill:#221a33,stroke:#a478e8,color:#e6d6fa;
+  classDef human fill:#2c1620,stroke:#e06a83,color:#ffd0da;
+  classDef gate fill:#0f2723,stroke:#3fbdad,color:#bff0e6;
+  classDef store fill:#2a2110,stroke:#d9a441,color:#f4dfa8;
+  classDef skip fill:#20222a,stroke:#8b8f9b,color:#c3c6cd;
+  class NEXT,ING,SNAP,FILL,GAPS,REEXP tool
+  class CHR,EXT agentv
+  class PACE,POLICY gate
+  class STAGE store
+  class SKIPF,DENY skip
+  class ABORT human
+</pre>
+        </div>
+        <div class="caption"><span class="key">Governs</span><span class="refs">SKILL.md (browser recipe) · fetch/browser_rung.py · fetch/browser_fill.py · ethics/pacing.py · D-009 · D-010 · D-064 · D-065 — the Python layer stays LLM-free; pacing state lives at ~/.supervisorly/pacing_state.json.</span></div>
       </section>
 
       <section class="map" id="sources">
-        <div class="map-head"><span class="map-code">MAP 05</span><h2>Sources — where recruiting signal comes from</h2></div>
-        <p class="purpose">Verified 2026-07-23. Recruiting status lives in prose on the professor's own channels. Everything reachable feeds one generated recruiting-signal read.</p>
+        <div class="map-head"><span class="map-code">MAP 08</span><h2>Sources — where recruiting signal comes from</h2></div>
+        <p class="purpose">Recruiting status lives in prose on the professor's own channels. Everything reachable feeds one generated recruiting-signal read; the walled profiles are read through your own paced session.</p>
         <div class="diagram"><span class="expand">Expand ⤢</span>
 <pre class="mermaid">
 %%{init:{'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif,system-ui,sans-serif','fontSize':'14px','background':'#16181d','primaryColor':'#20232b','primaryTextColor':'#e9eaed','primaryBorderColor':'#d9a441','lineColor':'#858994','secondaryColor':'#1b1e25','tertiaryColor':'#181a20','clusterBkg':'#131519','clusterBorder':'#31353f','edgeLabelBackground':'#16181d','textColor':'#d0d2d8'}}}%%
@@ -443,33 +609,39 @@ flowchart LR
   BSKY["Bluesky<br/>public API — verified"]
   MASTO["Mastodon<br/>public API — verified"]
   GH["GitHub READMEs"]
-  X["X / Twitter<br/>no 2026 public path"]
-  LI["LinkedIn<br/>ToS + login wall"]
-  GS["Google Scholar<br/>robots Disallow"]
+  X["X / Twitter<br/>advertised profile only"]
+  LI["LinkedIn<br/>advertised profile only"]
+  GS["Google Scholar<br/>profile pages only — minimal use"]
   RS["recruiting-signal read<br/>buckets generated per field + intent"]
-  HUMAN["human rung"]
+  BTIER["browser tier — your session<br/>paced per D-065"]
+  HUMAN["classic human rung<br/>(fallback)"]
+  NEVER["people-search · bulk enumeration<br/>NEVER"]
   OWN --> RS
   BSKY --> RS
   MASTO --> RS
   GH --> RS
-  X --> HUMAN --> RS
-  LI --> HUMAN
-  GS -.->|"skip"| RS
+  X --> BTIER
+  LI --> BTIER
+  GS --> BTIER
+  BTIER --> RS
+  BTIER -.->|"challenge → abort"| HUMAN --> RS
   classDef tool fill:#182338,stroke:#5f8fd9,color:#cfe0ff;
   classDef verified fill:#12281d,stroke:#4bbd7f,color:#c5f0d6;
+  classDef agentv fill:#221a33,stroke:#a478e8,color:#e6d6fa;
   classDef human fill:#2c1620,stroke:#e06a83,color:#ffd0da;
   classDef skip fill:#20222a,stroke:#8b8f9b,color:#c3c6cd;
   class OWN,GH tool
   class BSKY,MASTO verified
-  class X,LI,HUMAN human
-  class GS skip
+  class X,LI,GS,BTIER agentv
+  class HUMAN human
+  class NEVER skip
 </pre>
         </div>
-        <div class="caption"><span class="key">Governs</span><span class="refs">research/social-sources.md · D-038 · D-044 — the reading method is generated, never a hardcoded keyword list.</span></div>
+        <div class="caption"><span class="key">Governs</span><span class="refs">research/social-sources.md · D-038 · D-044 · D-065 — only the profile URL the professor themselves advertised is ever visited; on any challenge the field goes blocked and routes to the human rung.</span></div>
       </section>
 
       <section class="map" id="data">
-        <div class="map-head"><span class="map-code">MAP 06</span><h2>Data — the core of the model</h2></div>
+        <div class="map-head"><span class="map-code">MAP 09</span><h2>Data — the core of the model</h2></div>
         <p class="purpose">The spine that lets facts join, dedupe and diff — the thing the corpus's prose files could not do. 31 entities in total; the core is shown.</p>
         <div class="diagram"><span class="expand">Expand ⤢</span>
 <pre class="mermaid">
@@ -526,13 +698,13 @@ flowchart TD
       </section>
 
       <section class="map" id="provenance">
-        <div class="map-head"><span class="map-code">MAP 07</span><h2>Provenance — how a value becomes a trusted claim</h2></div>
-        <p class="purpose">Every fact carries its source, its quote, and its confidence. Verification is structural — the model's quote must be found in the stored snapshot — not a prose promise.</p>
+        <div class="map-head"><span class="map-code">MAP 10</span><h2>Provenance — how a value becomes a trusted claim</h2></div>
+        <p class="purpose">Every fact carries its source, its quote, and its confidence. Verification is structural — the model's quote must be found in the stored snapshot — not a prose promise. A browser-tier page is just another snapshot: same gate.</p>
         <div class="diagram"><span class="expand">Expand ⤢</span>
 <pre class="mermaid">
 %%{init:{'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif,system-ui,sans-serif','fontSize':'14px','background':'#16181d','primaryColor':'#20232b','primaryTextColor':'#e9eaed','primaryBorderColor':'#d9a441','lineColor':'#858994','secondaryColor':'#1b1e25','tertiaryColor':'#181a20','edgeLabelBackground':'#16181d','textColor':'#d0d2d8'}}}%%
 flowchart LR
-  F["fetch"] --> SNAP["snapshot<br/>content-hashed"]
+  F["fetch — httpx or the browser seam"] --> SNAP["snapshot<br/>content-hashed"]
   SNAP --> EX{"extract"}
   EX -->|"deterministic"| VAL["value + quote"]
   EX -->|"LLM — may answer NOT_FOUND"| VAL
@@ -551,23 +723,24 @@ flowchart LR
   class REJ skip
 </pre>
         </div>
-        <div class="caption"><span class="key">Governs</span><span class="refs">architecture.md §3 · D-010 · D-047 — verification proves fidelity, not truth; the page itself can still be wrong.</span></div>
+        <div class="caption"><span class="key">Governs</span><span class="refs">architecture.md §3 · D-010 · D-047 · D-064 — verification proves fidelity, not truth; a browser page is stored under tier agent_browser with final-URL provenance, same quote gate.</span></div>
       </section>
 
       <section class="map" id="rules">
-        <div class="map-head"><span class="map-code">MAP 08</span><h2>Rules — where each rule actually bites</h2></div>
+        <div class="map-head"><span class="map-code">MAP 11</span><h2>Rules — where each rule actually bites</h2></div>
         <p class="purpose">Rules are enforced in code at specific points, not asserted in a preamble. This is the map of enforcement gates.</p>
         <div class="diagram"><span class="expand">Expand ⤢</span>
 <pre class="mermaid">
 %%{init:{'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif,system-ui,sans-serif','fontSize':'14px','background':'#16181d','primaryColor':'#20232b','primaryTextColor':'#e9eaed','primaryBorderColor':'#d9a441','lineColor':'#858994','secondaryColor':'#1b1e25','tertiaryColor':'#181a20','clusterBkg':'#131519','clusterBorder':'#31353f','textColor':'#d0d2d8'}}}%%
 flowchart TD
   subgraph FETCH["at fetch"]
-    R1["robots.txt checked — fail closed"]
+    R1["robots.txt checked — fail closed<br/>incl. redirect final-URL re-check"]
     R2["public vs walled routing"]
     R3["no login, no bot-wall defeat"]
+    R10["pace gate before every browser page<br/>abort-on-challenge latch"]
   end
   subgraph BUILD["at build"]
-    R4["optout.txt filter — with a test"]
+    R4["optout.txt filter — with a test<br/>re-checked at re-export and mid-scan"]
   end
   subgraph RANK["at ranking"]
     R5["hard gates use reliable claims only"]
@@ -582,20 +755,20 @@ flowchart TD
   end
   CORPUS["corpus = methodology only<br/>never a runtime data input"]
   classDef gate fill:#0f2723,stroke:#3fbdad,color:#bff0e6;
-  class R1,R2,R3,R4,R5,R6,R7,R8,R9,CORPUS gate
+  class R1,R2,R3,R4,R5,R6,R7,R8,R9,R10,CORPUS gate
 </pre>
         </div>
-        <div class="caption"><span class="key">Governs</span><span class="refs">ethics-and-compliance.md · D-005 · D-023 · D-032 · D-035 · D-053 — nationality never gates visibility.</span></div>
+        <div class="caption"><span class="key">Governs</span><span class="refs">ethics-and-compliance.md · D-005 · D-023 · D-032 · D-035 · D-053 · D-065 — nationality never gates visibility; a pacing deny or abort latch is never retried harder.</span></div>
       </section>
 
       <section class="map" id="decisions">
-        <div class="map-head"><span class="map-code">MAP 09</span><h2>Decisions — how the 56 cluster</h2></div>
-        <p class="purpose">Every decision belongs to one of seven themes. This shows the shape of the design space, and the one cluster that still carries accepted risk.</p>
+        <div class="map-head"><span class="map-code">MAP 12</span><h2>Decisions — how the 67 cluster</h2></div>
+        <p class="purpose">Every decision belongs to one of eight themes. This shows the shape of the design space, and the one cluster that still carries accepted risk.</p>
         <div class="diagram"><span class="expand">Expand ⤢</span>
 <pre class="mermaid">
 %%{init:{'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif,system-ui,sans-serif','fontSize':'14px','background':'#16181d','primaryColor':'#20232b','primaryTextColor':'#e9eaed','primaryBorderColor':'#d9a441','lineColor':'#858994','secondaryColor':'#1b1e25','tertiaryColor':'#181a20','clusterBkg':'#131519','clusterBorder':'#31353f','textColor':'#d0d2d8'}}}%%
 flowchart TD
-  ROOT["56 decisions"]
+  ROOT["67 decisions"]
   ROOT --> SCOPE["Scope &amp; identity"]
   ROOT --> SRC["Data sources"]
   ROOT --> DATA["Data model"]
@@ -603,20 +776,23 @@ flowchart TD
   ROOT --> DASH["Dashboard"]
   ROOT --> ETH["Ethics"]
   ROOT --> COST["Cost &amp; perf"]
+  ROOT --> FRONT["Browser tier &amp; front door<br/>D-064 · D-065 · D-066 · D-067"]
   SCOPE --> RISK["accepted risk:<br/>generic v1, no golden fixture<br/>D-34 + D-11 + D-35"]
   classDef tool fill:#182338,stroke:#5f8fd9,color:#cfe0ff;
+  classDef agentv fill:#221a33,stroke:#a478e8,color:#e6d6fa;
   classDef human fill:#2c1620,stroke:#e06a83,color:#ffd0da;
   class SCOPE,SRC,DATA,PROD,DASH,ETH,COST tool
+  class FRONT agentv
   class RISK human
 </pre>
         </div>
-        <div class="caption"><span class="key">Governs</span><span class="refs">DECISIONS.md — managed by fail-loud coverage, per-value confidence, and cassette + synthetic tests.</span></div>
+        <div class="caption"><span class="key">Governs</span><span class="refs">DECISIONS.md — the risk is managed by fail-loud coverage, per-value confidence, and cassette + synthetic tests.</span></div>
       </section>
 
     </div>
 
     <footer>
-      This atlas is a view over the design documents, not a replacement for them. When a diagram and a document disagree, the document wins. · Supervisorly design phase — 56 decisions, 31 entities, none open.
+      This atlas is a view over the design documents, not a replacement for them. When a diagram and a document disagree, the document wins. · Supervisorly build phase — 67 decisions, 31 entities, suite green.
     </footer>
   </main>
 </div>
@@ -645,6 +821,7 @@ flowchart TD
     var DECISIONS = {
       "005":"Scan output is never committed — it holds personal data about real people.",
       "008":"Curation is first-class; a spreadsheet beat every automated competitor.",
+      "009":"Deterministic collection, LLM interpretation — the Python layer stays LLM-free; a browser page is just another snapshot through the ingest seam.",
       "010":"Every field carries provenance and confidence — no bare values.",
       "011":"No golden fixture from the corpus; validate with cassettes + synthetic data.",
       "021":"Three-tier pipeline; the shortlist forms on research fit, not recruiting status.",
@@ -657,13 +834,13 @@ flowchart TD
       "035":"The corpus is a methodology reference only — never a runtime data input.",
       "037":"Per-professor capture is dynamic; a professor is never dropped for missing data.",
       "038":"Queries and keywords are generated per search, never looked up.",
-      "039":"Three-phase fetch: structured → automated browse → human rung.",
+      "039":"Three-phase fetch: structured → automated browse → the browser tier (agent-driven Chrome), with the classic human rung as fallback.",
       "042":"The deliverable is the skill/agent/tool package; the README is the interface.",
-      "043":"Human-assisted retrieval: generated MD prompt in, parsed Markdown out, run resumes.",
+      "043":"Human-assisted retrieval: generated MD prompt in, parsed Markdown out, run resumes — now the fallback behind the browser tier.",
       "044":"The professor's own channels are a first-class recruiting-signal source.",
       "045":"Intent + query generation are orchestrator-inline, producing a SearchPlan.",
       "047":"One canonical confidence model; hard gates fire only on quoted/derived facts.",
-      "049":"Terminal states: the dashboard is generated after Phase 2, never blocked on the human.",
+      "049":"Terminal states: the dashboard is generated after Phase 2, never blocked on the browser or the human.",
       "053":"opt-out matches on homepage URL, ORCID, or institutional email.",
       "055":"One orchestration vocabulary: Stages 0–4, Phases 1–3, tools by name.",
       "056":"The shortlist gate — 'never dropped' is display; 'deep-dive' is the ~40 shortlist.",
@@ -671,7 +848,7 @@ flowchart TD
       "036":"Intent interpretation is Stage 0 — understand the purpose before searching.",
       "051":"One shared Markdown grammar for the human rung — the prompt-generator emits it, the ingester parses it.",
       "046":"The JSON export contract — a four-state value envelope (value / searched-absent / never-attempted / blocked).",
-      "048":"Dashboard = pre-transpiled JSX + vendored React inline; no build toolchain, works offline.",
+      "048":"Dashboard delivery: ONE self-contained offline HTML — no build toolchain, no external requests. Shipped as hand-written JS in the Atlas 'Living' language; the vendored-React/JSX mechanism was never built.",
       "050":"Recruiting classification is normalised against the student's target cycle, per-country intake calendar.",
       "052":"The human rung also enumerates login-walled faculty directories, not just single fields.",
       "054":"The community overlay is structural and local — never a shared personal-data set.",
@@ -681,51 +858,81 @@ flowchart TD
       "060":"A country-source preflight tells the student up front what will be thin, before the expensive run.",
       "061":"A deadline / urgency view — cross-professor 'what closes soon', domestic vs international split.",
       "062":"former_doctoral_students is per-registry, advisor-verified — France works, most registries lack advisors, Canada unverified.",
-      "063":"The eval set is hand-labelled cassettes (≥3 shapes / ≥3 countries) — a named deliverable, not raw recordings."
+      "063":"The eval set is hand-labelled cassettes (≥3 shapes / ≥3 countries) — a named deliverable, not raw recordings.",
+      "064":"Browser-primary live fetch: agent-driven Chrome; page content enters only through the ingest-page snapshot seam — raw HTML/DOM never enters the agent's context.",
+      "065":"Social pacing policy as code: jittered intervals per host class, per-session page caps, human-like scroll, abort-on-challenge latch, advertised profiles only.",
+      "066":"The subject-map stage: the free-text field is mapped to an OpenAlex topic hierarchy (domain → field → subfield) and user-confirmed before anything expensive runs.",
+      "067":"Scan Studio: the rich front-end is one self-contained, offline Atlas-language plan wizard; the conversational numbered multi-select remains the fallback."
     };
 
     // Node meaning, keyed by a distinctive substring of the node's label.
     var NODE_INFO = {
-      "supervisorly skill":{t:"The skill package",b:"The whole deliverable: SKILL.md plus its agents and tools, run inside Claude Code. A student points Claude at the repo and it installs and drives everything.",d:["042"]},
-      "searchplan":{t:"SearchPlan",b:"The interpreted intent — country, field, need, generated topic terms and venues, university mode — that every downstream tool consumes. Nothing expensive runs until the student confirms it.",d:["045","036"]},
-      "interpret intent":{t:"Intent + query generation",b:"Done by the orchestrator (Claude) inline, not a deterministic tool: understand the purpose behind the input, then generate the search vocabulary for this field. Produces the SearchPlan.",d:["045","038"]},
+      "supervisorly skill":{t:"The skill package",b:"The whole deliverable: SKILL.md plus its agents and tools, run inside an MCP-capable agent host (Kimi Code, Claude Code — the recipe is host-portable). A student points the agent at the repo and it installs and drives everything.",d:["042","064"]},
+      "searchplan":{t:"SearchPlan",b:"The interpreted intent — country, field, need, generated topic terms and venue, university mode, and the resolved_topic_ids confirmed via the subject map — that every downstream tool consumes. Nothing expensive runs until the student confirms it.",d:["045","036","066"]},
+      "interpret intent":{t:"Intent + query generation",b:"Done by the orchestrator inline, not a deterministic tool: understand the purpose behind the input, then generate the search vocabulary for this field. Produces the SearchPlan.",d:["045","038"]},
+      "map field":{t:"subject-map — map-field",b:"Maps the free-text field to a hierarchical subject map built from the OpenAlex API — topics grouped domain → field → subfield, works-count sorted, truncation-honest. Never a hardcoded keyword dictionary.",d:["066","038"]},
+      "scan studio":{t:"Scan Studio — studio",b:"One self-contained, offline HTML plan wizard in the Atlas 'Living' language: intent picker, country, universities + mode chips, the tri-state subject tree, named professors, contact email. Validates inline and downloads supervisorly_plan.json via a Blob — a static file cannot write to disk, so you move it out of Downloads.",d:["067","048"]},
+      "subject tree":{t:"The tri-state subject tree",b:"The subject map rendered as a domain → field → subfield → topic checkbox tree with tri-state parents. The topics you keep become the plan's resolved_topic_ids — so research-fit is deterministic ID-overlap, not string match.",d:["066","058"]},
+      "conversational fallback":{t:"Conversational multi-select",b:"The numbered-list fallback in chat: the same subject map, the same confirmation, usable in every agent host even where opening HTML is awkward.",d:["066","067"]},
+      "named professors":{t:"Named professors",b:"A direct deep-dive list — [{name, affiliation?}] or OpenAlex author URLs via scan --targets. Each match carries an identity_resolution honesty label (verified / unverified / unchecked) that reaches the export and the dashboard badge; unresolved names are reported as skips, never silently dropped.",d:["066","010"]},
+      "supervisorly plan":{t:"supervisorly_plan.json",b:"The validated plan the Studio exports (Blob download) — scope, universities + mode, resolved_topic_ids, named professors, email. Explicit CLI flags override its values.",d:["067","066"]},
+      "targets json":{t:"targets JSON",b:"The named-professor input to scan --targets — plain names with optional affiliation, or OpenAlex author URLs.",d:["066"]},
+      "scan plan":{t:"scan --plan / --targets",b:"The confirmed plan (or named targets) drives the live scan: ROR + OpenAlex discovery, the fetch ladder, scoring, and the dashboard. --resume makes a re-scan cheap (warm cache + a what-changed delta).",d:["066","058"]},
+      "offline demo":{t:"Offline demo — scan --demo",b:"A full pipeline run against a synthetic cassette fixture — three directory shapes across three countries, all synthetic. No keys, no network, no corpus. It doubles as the genericity fixture.",d:["011","035"]},
+      "live scan":{t:"Live mode",b:"scan --country (name or ISO) --field …: ROR v2 (keyless) + the OpenAlex discovery ladder, plus the browser tier for walled pages. Only a contact email is required; an OpenAlex key just raises limits.",d:["064"]},
+      "contact email":{t:"Contact email",b:"The one credential a live scan needs (SUPERVISORLY_CONTACT_EMAIL) — it puts the API clients in the polite pools. No other keys are required.",d:["064"]},
       "discovery-ladder":{t:"discovery-ladder",b:"Finds professors without per-site scraping: CRIS portals → sitemaps → JSON-LD → certificate-transparency → OpenAlex/ROR → a per-institution adapter only as a last resort.",d:["028","039"]},
-      "fetcher":{t:"fetcher — 3 phases",b:"Runs the escalation ladder: structured sources, then automated browsing of what failed, then the human rung for what's still walled.",d:["039","043"]},
+      "fetcher":{t:"fetcher — 3 phases",b:"Runs the escalation ladder: structured sources, then automated browsing of what failed, then the browser tier for what's walled — falling back to the classic MD human rung.",d:["039","064","043"]},
       "deep-dive":{t:"deep-dive collector",b:"For each shortlisted professor: papers, recency, availability, contact, people around them — dynamically, filling 'no data found' rather than dropping anyone.",d:["037","056"]},
-      "gap-queue":{t:"gap-queue",b:"Tracks the exact (entity, field) pairs still missing after automated phases, so the human is asked for the minimum.",d:["043"]},
-      "chrome-prompt-generator":{t:"chrome-prompt-generator",b:"Generates the ready-to-paste prompt you run in Claude for Chrome, embedding the one shared Markdown output contract.",d:["043","051"]},
+      "gap-queue":{t:"gap-queue",b:"Tracks the exact (entity, field) pairs still missing after automated phases, so the browser tier or the human is asked for the minimum.",d:["043","064"]},
+      "pacing gate":{t:"pacing gate — pace",b:"The anti-ban policy as deterministic code, run before every browser page: jittered per-host intervals (x/twitter/linkedin 45–120 s, scholar 60–180 s), per-session page caps (15 / 5), an abort-on-challenge latch. Exit 0 = allow, 3 = deny; state at ~/.supervisorly/pacing_state.json.",d:["065"]},
+      "browser rung":{t:"browser-rung + browser-fill",b:"The two deterministic halves of the browser seam: browser_rung stores the in-page-extracted text as a content-addressed snapshot (tier agent_browser, final-URL provenance); browser_fill runs the pipeline's own extractors over it, records D-010 quote-verified claims, closes awaiting_human gap tasks, and recomputes the run status.",d:["064","010"]},
+      "chrome-prompt-generator":{t:"chrome-prompt-generator",b:"The classic human rung's first half: generates the ready-to-paste prompt you run in Claude for Chrome, embedding the one shared Markdown output contract. Now the fallback when the browser tier is denied or challenged.",d:["043","051","064"]},
       "md-ingester":{t:"md-ingester",b:"Parses the Markdown you return into Claims (extractor = human-assisted) and resumes the run from where it paused.",d:["043"]},
       "scorer":{t:"scorer — gates + weights",b:"Hard eligibility gates first — and which gates apply depends on your intent (a pre-PhD/RA seeker isn't gated on PhD-admission rules). Then a transparent weighted score you can re-weight; research-fit matches on OpenAlex topic IDs, and author-disambiguation risk lowers score confidence, never activity.",d:["059","047","058","057","023"]},
-      "exporter":{t:"exporter — JSON + HTML",b:"Writes the four-state JSON interchange and the self-contained dashboard (pre-transpiled JSX, vendored inline). Judgements about people and bare emails are excluded from exports.",d:["046","048","049"]},
+      "exporter":{t:"exporter — JSON + HTML",b:"Writes the four-state JSON interchange and the dashboard — ONE self-contained offline HTML file in the Atlas 'Living' language (hand-written JS; no React/JSX was ever shipped). Judgements about people and bare emails are excluded from exports.",d:["046","048","049"]},
       "recruiting-analyst":{t:"recruiting-analyst",b:"Classifies recruiting state from verbatim quotes in the original language, normalised against your target cycle via a per-country intake calendar. Negation and cycle-dating handled before translation.",d:["044","050","022"]},
       "eligibility-analyst":{t:"eligibility-analyst",b:"Extracts admissions rules, degree routes, language bands and funding conditions into structured fields, with quote verification.",d:["047","023"]},
       "profile-synthesist":{t:"profile-synthesist",b:"Writes the per-professor narrative for the shortlist — from verified claims only, never invented facts.",d:["037","010"]},
       "evidence-auditor":{t:"evidence-auditor",b:"Adversarially re-verifies claims; risk-weighted sampling (100% only for facts that flip an eligibility gate or a deadline), not everything.",d:["010"]},
       "adapter-author":{t:"adapter-author",b:"Proposes a DirectoryAdapter YAML when the generic discovery paths fail for an institution.",d:["039"]},
       "phase 1":{t:"Phase 1 — structured",b:"APIs, CRIS portals, sitemaps, JSON-LD. Fast, cheap, reliable. Anything that 404s or errors is marked and handed to Phase 2.",d:["039"]},
-      "phase 2":{t:"Phase 2 — automated browse",b:"The tool navigates the marked pages directly. Whatever it still can't resolve is marked for the human rung.",d:["039"]},
-      "phase 3":{t:"Phase 3 — human rung",b:"The tool generates a prompt you run in Claude for Chrome; your own session reaches walled pages the tool can't — including whole login-walled faculty directories, not just single fields. You return Markdown; the tool ingests it.",d:["043","044","052"]},
+      "phase 2":{t:"Phase 2 — automated browse",b:"The tool navigates the marked pages directly. Whatever it still can't resolve is marked for the browser tier.",d:["039","064"]},
+      "phase 3":{t:"Phase 3 — browser tier",b:"The default walled path: agent-driven Chrome in your own logged-in session, paced per D-065. Only on a pacing deny or an abort-on-challenge latch does the gap route to the classic MD human rung.",d:["064","065","043"]},
+      "pace gate":{t:"pace gate",b:"Run before every browser page. Exit 0 = allow, 3 = deny — then you sleep the printed wait= and re-check, or skip the host entirely on a cap/abort deny. Never a fixed metronome; never retried harder.",d:["065"]},
+      "pace abort":{t:"pace --abort",b:"Any captcha, soft-block, or unexpected login redirect latches the host aborted for the session; the field becomes blocked and routes to the classic human rung. Never retry harder.",d:["065","043"]},
+      "policy in code":{t:"The pacing policy",b:"x/twitter/linkedin: 45–120 s jittered, 15 pages/session. scholar.google.*: 60–180 s, 5/session, profile pages only — no search pagination. Only advertised profile URLs are ever visited — never people-search enumeration.",d:["065"]},
+      "warm cache":{t:"Warm-cache skip",b:"A page already fresh in the warm cache needs no fetch at all — and API endpoints never get one; ROR/OpenAlex JSON stays on the Python/httpx side.",d:["064"]},
+      "chrome via":{t:"Agent-driven Chrome",b:"Launched and driven by the agent through the chrome-devtools MCP server — headful, on a persistent profile. On the first browser run you log into the walled sites once, yourself; after that the session persists.",d:["064","065"]},
+      "evaluate script":{t:"page_extract.js",b:"The in-page extractor: cleaned main text, capped at 60 KiB in-page, with a human-like jittered scroll mode for social pages. Only the returned text is written to the staging file.",d:["064","065"]},
+      "staging file":{t:"The staging file",b:"The one-way valve of the browser seam: the extracted text is written to disk WITHOUT being read into the agent's context — the agent handles paths and byte counts, never raw page content. A cost rule and a hygiene rule.",d:["064"]},
+      "ingest page":{t:"ingest-page",b:"The deterministic seam: stores the staging text as a normal content-addressed snapshot under the final URL (tier agent_browser). With --entity + --run it also fills that target's fields and closes its awaiting_human gap tasks.",d:["064","010"]},
+      "browser fill":{t:"browser-fill",b:"The pipeline's own extractors run over the browser snapshot — D-010 quote-verified claims, a human-assisted value never clobbered, gap tasks closed, run status recomputed, dashboard re-exported.",d:["064","010"]},
+      "reexport":{t:"reexport",b:"Rebuilds the dashboard from the persisted store — no fetching — so browser-tier fills show up. Enforces the opt-out list again at export time.",d:["064","053"]},
       "we looked":{t:"'We looked, found nothing'",b:"An honest terminal state, distinct from a never-attempted blank. The professor is still shown.",d:["037","049"]},
       "own pages":{t:"The professor's own pages",b:"Homepage, an openings/'joining my lab' page, lab News, a pinned banner — the #1 place recruiting status appears in plain text. Fully tool-fetchable.",d:["044"]},
       "bluesky":{t:"Bluesky",b:"AT Protocol has a genuinely public API — verified reachable with no login. Academics who left X often post recruiting calls here.",d:["044"]},
       "mastodon":{t:"Mastodon",b:"Public per-instance REST API — verified reachable. Tool-fetchable.",d:["044"]},
-      "x / twitter":{t:"X / Twitter",b:"No public path exists in 2026 (syndication dead, Nitter dead, API ~$10k/mo, ToS forbids scraping). Delivered by the human rung only.",d:["044","043"]},
-      "linkedin":{t:"LinkedIn",b:"Login-walled and ToS-restricted (hiQ took a $500k judgment). The tool never touches it.",d:["044"]},
-      "google scholar":{t:"Google Scholar",b:"robots.txt Disallow: /scholar. Skipped — and it rarely carries recruiting signal anyway.",d:["044"]},
+      "x / twitter":{t:"X / Twitter",b:"No public API path — but the advertised profile is reachable through your own logged-in session via the browser tier, paced (45–120 s, 15 pages/session). Only the profile the professor advertised; on any challenge the field goes blocked and routes to the human rung.",d:["044","065"]},
+      "linkedin":{t:"LinkedIn",b:"Login-walled and ToS-restricted — reached the same way: your own session via the browser tier, advertised profiles only, paced. Never scraped, never enumerated.",d:["044","065"]},
+      "google scholar":{t:"Google Scholar",b:"Minimal-use through the browser tier: profile pages only (60–180 s, 5/session), no search pagination — it is the most aggressive blocker.",d:["044","065"]},
+      "browser tier — your session":{t:"The browser tier",b:"Agent-driven Chrome in your own logged-in session — the primary walled path (D-064), paced per D-065. The classic MD human rung remains as the fallback.",d:["064","065","043"]},
+      "people search":{t:"Never: people-search / bulk",b:"Search/graph enumeration of people is never done — only the specific advertised profile URL the professor themselves published is ever visited.",d:["065"]},
       "sqlite":{t:"SQLite — source of truth",b:"Real joins, full-text search, an append-only claim history in one zero-install file. JSON is the export; snapshots live on disk, addressed by content hash.",d:["026"]},
       "claim":{t:"Claim",b:"Every field is a Claim: value, verbatim quote, source URL, snapshot hash, timestamp, confidence. The quote must be found in the stored snapshot or the claim is rejected.",d:["010","047"]},
-      "snapshot":{t:"Snapshot",b:"A content-hashed capture of the fetched page. Verification re-opens the snapshot, not the live page — which is how quotes stay checkable after a page changes.",d:["010"]},
+      "snapshot":{t:"Snapshot",b:"A content-hashed capture of the fetched page — whether it arrived over httpx or through the browser seam. Verification re-opens the snapshot, not the live page — which is how quotes stay checkable after a page changes.",d:["010","064"]},
       "conflict":{t:"Conflict",b:"When two sources disagree, both claims are kept and the disagreement is recorded with a resolution state — not silently overwritten.",d:["010"]},
       "shortlist gate":{t:"The shortlist gate",b:"Promotes ~40 professors to the deep dive on research-fit signal (topic-ID overlap), available cheaply before the deep dive. Works are reconciled first so non-Western names aren't wrongly dropped. 'Never dropped' is about display; 'deep-dive' is about this shortlist.",d:["056","021","058","057"]},
       "signal tier":{t:"Signal tier",b:"One polite, cached fetch of each professor's own homepage over the full roster — regex, no LLM — so the shortlist decision is informed.",d:["021","056"]},
-      "robots":{t:"robots.txt gate",b:"Checked in the fetch layer and obeyed, failing closed. A promise in code, not in a README.",d:["039"]},
-      "optout":{t:"opt-out filter",b:"A build-time filter that drops any record matching an opted-out homepage URL, ORCID or institutional email — with a test that fails if one survives.",d:["053","005"]},
+      "robots":{t:"robots.txt gate",b:"Checked in the fetch layer and obeyed, failing closed — including a re-check of the final URL when a redirect lands somewhere robots never vetted. A promise in code, not in a README.",d:["039"]},
+      "optout":{t:"opt-out filter",b:"A filter that drops any record matching an opted-out homepage URL, ORCID or institutional email — enforced at build, re-checked at re-export and mid-scan, with a test that fails if one survives.",d:["053","005"]},
       "corpus":{t:"Corpus = methodology only",b:"The research files teach the method — filters, keywords, layout — but supply no content about real people. Never a runtime input.",d:["035","005"]},
       "accepted risk":{t:"The one accepted risk",b:"Fully-generic v1 with no corpus-sourced fixture. Managed by fail-loud per-country coverage, per-value confidence, and cassette + synthetic tests.",d:["034","011","035"]},
       "scope":{t:"Scope & identity",b:"Decisions about what the project is and is named.",d:["042","035","034"]},
       "data sources":{t:"Data sources",b:"How the tool finds and fetches data across the world.",d:["039","044","038"]},
       "data model":{t:"Data model",b:"How facts are stored so they join, dedupe and diff.",d:["026","010","030"]},
       "product":{t:"Product & flow",b:"The student's journey and the actions the tool models.",d:["021","036","056"]},
+      "browser tier & front door":{t:"Browser tier & front door",b:"The 2026-07-25 round: agent-driven browser fetch through the ingest-page seam (D-064), pacing as code (D-065), the user-confirmed subject map (D-066), and the Scan Studio plan wizard (D-067).",d:["064","065","066","067"]},
       "ethics":{t:"Ethics",b:"The compliance posture and the enforcement gates.",d:["005","023","032","035"]}
     };
 

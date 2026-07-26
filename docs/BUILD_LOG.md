@@ -1026,3 +1026,26 @@ docs/BROWSER_COMPLETION_REPORT.md §5.
 
 **State: GOAL 3 COMPLETE.** Suite green at **377 passed** on `build/browser`; audit closed
 with zero open findings; clean-room green; DoD checked in docs/BROWSER_COMPLETION_REPORT.md.
+
+## round B7 — design-atlas artifacts brought up to date with the shipped reality (this commit)
+
+- `docs/design-atlas.md` + `docs/atlas.html` — audited against the codebase, stale claims fixed
+  ("56 decisions" -> 67 everywhere; "Dashboard HTML + JSX" / the D-048 drawer summary replaced
+  with what actually ships: ONE self-contained offline HTML, hand-written JS in the Atlas
+  'Living' language — the vendored-React/JSX mechanism was never built; the human-rung-only
+  fetch/source maps redrawn). Three new maps in both files: **MODES** (offline demo vs live),
+  **SCAN SETUP** (free text -> map-field subject map -> multi-select in the Scan Studio or
+  conversation -> plan -> scan --plan/--targets -> dashboard), and **BROWSER TIER** (the
+  D-064/D-065 recipe: pace gate -> Chrome via MCP -> in-page extract -> staging file never
+  read into context -> ingest-page -> snapshot -> extractors -> D-010 claims -> gap tasks
+  close -> reexport). New violet "agent-browser" class in the colour key. COMPONENTS map gains
+  subject-map/studio/pacing/browser-rung+fill; FETCH map shows Phase 3 = browser tier with the
+  classic MD rung as fallback; RULES gains the pace gate; DECISIONS cluster -> 67 with the new
+  browser-tier/front-door theme; atlas.html drawer data gains the D-064..D-067 summaries and
+  the new node details.
+- `src/supervisorly/export/dashboard.py` — the dashboard's own how-it-works diagram updated:
+  the walled path now shows the browser tier (your session) via ingest-page, with the MD human
+  rung as the on-challenge fallback (data + caption only, no engine changes).
+- Verified: every command/flag/module/decision-id/count grepped against the code; all 24
+  Mermaid diagrams render (mermaid-cli + system Chrome); inline JS passes node --check; the
+  demo-fixture "3 shapes / 3 countries" claim confirmed in demo.py; suite green at **377**.

@@ -217,14 +217,16 @@ function closeDetail(){var pn=document.getElementById("panel");pn.classList.add(
 
 /* ── the diagram engine: glowing cells + curved animated filaments ── */
 var SPEC={ title:"How Supervisorly works — plan → discover → verify → rank → dashboard",
-  caption:"GOVERNS · public-source ladder · quote-verified claims · human rung for the walled",
+  caption:"GOVERNS · public-source ladder · quote-verified claims · browser tier (your session) for the walled, MD rung as fallback",
   nodes:[
     ["plan","Search plan","core",11,50],["discover","Discover (ROR + OpenAlex)","tool",30,26],
     ["fetch","Fetch public pages","tool",30,74],["verify","Verify quote in snapshot","verified",53,50],
-    ["human","Human rung (walled)","human",53,90],["score","Score & rank","rule",74,30],
+    ["browser","Browser tier (your session)","human",53,80],["human","MD human rung (fallback)","human",74,90],
+    ["score","Score & rank","rule",74,30],
     ["dash","Dashboard","core",91,55]],
   edges:[["plan","discover","intent"],["discover","fetch","targets"],["fetch","verify","snapshot"],
-    ["verify","score","claims"],["score","dash","ranked"],["fetch","human","robots/login wall"],
+    ["verify","score","claims"],["score","dash","ranked"],["fetch","browser","robots/login wall"],
+    ["browser","verify","ingest-page snapshot"],["browser","human","on challenge"],
     ["human","verify","pasted MD"]] };
 function diam(kind){return kind==="core"?76:(kind==="skip"?52:62);}
 function drawDiagram(){
@@ -348,7 +350,7 @@ def build_dashboard(export_obj: dict) -> str:
   <div id="deadlines" class="hidden"></div>
   <div id="how" class="hidden">
     <div class="stagewrap"><div class="stage" id="stage"></div></div>
-    <div class="dcap">GOVERNS · public-source ladder · quote-verified claims · human rung for the walled</div>
+    <div class="dcap">GOVERNS · public-source ladder · quote-verified claims · browser tier (your session) for the walled, MD rung as fallback</div>
   </div>
 </div>
 <div id="panel" class="hidden"></div>
