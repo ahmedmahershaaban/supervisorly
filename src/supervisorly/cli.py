@@ -305,6 +305,9 @@ def cmd_map_field(args: argparse.Namespace) -> int:
     # ASCII-only console output (cp1252 convention — see _write_result)
     suffix = " (PARTIAL)" if smap["truncated"] else ""
     print(f"mapped {n_topics} topics in {len(smap['groups'])} groups{suffix} -> {out}")
+    if smap.get("relaxed_from"):
+        print(f"note: no exact topics for '{smap['relaxed_from']}'; broadened to per-word "
+              "search over the OpenAlex topic index")
     return 0
 
 

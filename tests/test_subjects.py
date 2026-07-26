@@ -143,3 +143,172 @@ def test_map_field_requires_a_contact_email(tmp_path, monkeypatch, capsys):
     assert rc == 2
     assert "SUPERVISORLY_CONTACT_EMAIL" in capsys.readouterr().out
     assert not (tmp_path / "m.json").exists()
+
+
+# ── query relaxation (genuine-empty fallback) ─────────────────────────────────
+
+class _Counting:
+    """Wraps a CassetteTransport, recording the requested URLs (dedupe assertions)."""
+
+    def __init__(self, tp):
+        self.tp, self.urls = tp, []
+
+    def get(self, url):
+        self.urls.append(url)
+        return self.tp.get(url)
+
+
+def test_subject_map_genuine_empty_relaxes_to_per_word_union():
+    # live-verified shape: the full phrase matches no topic display name, but single
+    # words hit the right neighborhood (mechanistic interpretability -> XAI & co.)
+    tp = CassetteTransport()
+    tp.record(openalex.topics_url("mechanistic interpretability", EMAIL), 200, _page([]))
+    tp.record(openalex.topics_url("mechanistic", EMAIL), 200, _page([
+        _topic(9, "Mechanistic modeling", 100, "Physical Sciences", "Physics", "Mechanics"),
+        _topic(5, "Mechanistic interpretability of Transformers", 50,
+               "Physical Sciences", "Computer Science", "AI"),
+        # word-boundary: "Mechanisms" does NOT contain the word "mechanistic" -> overlap 0
+        _topic(7, "Mechanisms of action", 9999, "Health Sciences", "Medicine", "Pharma"),
+    ]))
+    tp.record(openalex.topics_url("interpretability", EMAIL), 200, _page([
+        _topic(1, "Explainable Artificial Intelligence (XAI)", 800,
+               "Physical Sciences", "Computer Science", "AI"),
+        _topic(2, "Interpretability methods", 300,
+               "Physical Sciences", "Computer Science", "AI"),
+        _topic(5, "Mechanistic interpretability of Transformers", 50,  # dup id -> unioned
+               "Physical Sciences", "Computer Science", "AI"),
+    ]))
+    smap = subjects.subject_map("mechanistic interpretability", tp, email=EMAIL)
+    assert smap["relaxed_from"] == "mechanistic interpretability"
+    assert smap["truncated"] is False and smap["truncated_sources"] == []
+    flat = [t for g in smap["groups"] for t in g["topics"]]
+    # deduped by topic id (T5 once); global rank is word overlap desc then works_count desc
+    # (T5: 2 words; T2/T9: 1 word, 300 > 100; T7/T1: 0 words, 9999 > 800), and groups keep
+    # their topics in that rank order — so the AI group lists T5, T2, T1
+    assert [(t["topic_id"], t["works_count"]) for t in flat] == [
+        ("T5", 50), ("T2", 300), ("T1", 800), ("T9", 100), ("T7", 9999)]
+    # grouping/capping still applied: AI holds the top-ranked topic -> the first group
+    assert smap["groups"][0]["subfield"] == "AI"
+    assert [t["topic_id"] for t in smap["groups"][0]["topics"]] == ["T5", "T2", "T1"]
+
+
+def test_subject_map_relaxation_ranks_keyword_matches_above_works_count():
+    # live-verified shape (2026-07-25): XAI's display name contains neither query word,
+    # but its OpenAlex keywords carry "Machine Learning Interpretability" — a name-only
+    # overlap would rank the off-target mega-topic (Hermeneutics, 1M works) above it.
+    xai = _topic(1, "Explainable Artificial Intelligence (XAI)", 800,
+                 "Physical Sciences", "Computer Science", "AI")
+    xai["keywords"] = ["Machine Learning Interpretability", "Model Interpretability"]
+    tp = CassetteTransport()
+    tp.record(openalex.topics_url("mechanistic interpretability", EMAIL), 200, _page([]))
+    tp.record(openalex.topics_url("mechanistic", EMAIL), 200, _page([]))
+    tp.record(openalex.topics_url("interpretability", EMAIL), 200, _page([
+        _topic(2, "Hermeneutics and Narrative Identity", 1019564,
+               "Arts and Humanities", "Philosophy", "Philosophy"),
+        xai,
+    ]))
+    smap = subjects.subject_map("mechanistic interpretability", tp, email=EMAIL)
+    flat = [t for g in smap["groups"] for t in g["topics"]]
+    assert [t["topic_id"] for t in flat] == ["T1", "T2"]   # keyword overlap beats works_count
+
+
+def test_subject_map_relaxation_dedupes_words_case_insensitively():
+    tp = CassetteTransport()
+    tp.record(openalex.topics_url("Causal CAUSAL models", EMAIL), 200, _page([]))
+    tp.record(openalex.topics_url("Causal", EMAIL), 200,
+              _page([_topic(1, "Causal inference", 900)]))
+    tp.record(openalex.topics_url("models", EMAIL), 200,
+              _page([_topic(2, "Statistical models", 700)]))
+    counting = _Counting(tp)
+    smap = subjects.subject_map("Causal CAUSAL models", counting, email=EMAIL)
+    assert smap["relaxed_from"] == "Causal CAUSAL models"
+    assert [t["topic_id"] for g in smap["groups"] for t in g["topics"]] == ["T1", "T2"]
+    # "Causal"/"CAUSAL" collapse to ONE per-word search (first casing kept)
+    assert counting.urls == [
+        openalex.topics_url("Causal CAUSAL models", EMAIL),
+        openalex.topics_url("Causal", EMAIL),
+        openalex.topics_url("models", EMAIL),
+    ]
+
+
+def test_subject_map_relaxation_finding_nothing_is_honest_empty():
+    tp = CassetteTransport()
+    tp.record(openalex.topics_url("zztop nothingness", EMAIL), 200, _page([]))
+    tp.record(openalex.topics_url("zztop", EMAIL), 200, _page([]))
+    tp.record(openalex.topics_url("nothingness", EMAIL), 200, _page([]))
+    smap = subjects.subject_map("zztop nothingness", tp, email=EMAIL)
+    assert smap["groups"] == [] and smap["truncated"] is False
+    assert smap["truncated_sources"] == []
+    assert "relaxed_from" not in smap                    # same honest empty as a direct miss
+
+
+def test_subject_map_short_words_are_not_searched():
+    # every word < 4 chars -> no per-word searches at all -> plain honest empty
+    tp = CassetteTransport()
+    tp.record(openalex.topics_url("AI for X", EMAIL), 200, _page([]))
+    counting = _Counting(tp)
+    smap = subjects.subject_map("AI for X", counting, email=EMAIL)
+    assert smap["groups"] == [] and smap["truncated"] is False
+    assert "relaxed_from" not in smap
+    assert counting.urls == [openalex.topics_url("AI for X", EMAIL)]
+
+
+def test_subject_map_failure_on_original_query_never_relaxes():
+    tp = CassetteTransport()
+    tp.record(openalex.topics_url("quantum", EMAIL), 500, "boom")
+    smap = subjects.subject_map("quantum", tp, email=EMAIL)
+    assert smap["groups"] == []
+    assert smap["truncated"] is True
+    assert smap["truncated_sources"] == ["topics@quantum"]  # no topics@<word> markers
+    assert "relaxed_from" not in smap
+
+
+def test_subject_map_failure_during_relaxation_is_partial_naming_the_word():
+    tp = CassetteTransport()
+    tp.record(openalex.topics_url("mechanistic interpretability", EMAIL), 200, _page([]))
+    tp.record(openalex.topics_url("mechanistic", EMAIL), 200, _page([
+        _topic(9, "Mechanistic modeling", 100, "Physical Sciences", "Physics", "Mechanics"),
+    ]))
+    tp.record(openalex.topics_url("interpretability", EMAIL), 500, "boom")
+    smap = subjects.subject_map("mechanistic interpretability", tp, email=EMAIL)
+    assert smap["relaxed_from"] == "mechanistic interpretability"
+    assert smap["truncated"] is True
+    # the marker names the FAILING word-query; the kept partial groups are still returned
+    assert smap["truncated_sources"] == ["topics@interpretability"]
+    flat = [t for g in smap["groups"] for t in g["topics"]]
+    assert [t["topic_id"] for t in flat] == ["T9"]
+
+
+def test_map_field_prints_relaxation_note(tmp_path, monkeypatch, capsys):
+    tp = CassetteTransport()
+    tp.record(openalex.topics_url("mechanistic interpretability", EMAIL), 200, _page([]))
+    tp.record(openalex.topics_url("mechanistic", EMAIL), 200,
+              _page([_topic(9, "Mechanistic modeling", 100)]))
+    tp.record(openalex.topics_url("interpretability", EMAIL), 200, _page([
+        _topic(1, "Explainable Artificial Intelligence (XAI)", 800),
+        _topic(2, "Interpretability methods", 300),
+    ]))
+    monkeypatch.setattr(transport_mod, "httpx_transport", lambda **kw: tp)
+    out = tmp_path / "map.json"
+    rc = cli.main(["map-field", "--field", "mechanistic interpretability",
+                   "--email", EMAIL, "--out", str(out)])
+    assert rc == 0
+    printed = capsys.readouterr().out
+    assert "mapped 3 topics in 1 groups" in printed and printed.isascii()
+    assert ("note: no exact topics for 'mechanistic interpretability'; broadened to "
+            "per-word search over the OpenAlex topic index") in printed
+    smap = json.loads(out.read_text(encoding="utf-8"))
+    assert smap["relaxed_from"] == "mechanistic interpretability"
+
+
+def test_map_field_no_note_on_honest_empty(tmp_path, monkeypatch, capsys):
+    tp = CassetteTransport()
+    tp.record(openalex.topics_url("AI for X", EMAIL), 200, _page([]))
+    monkeypatch.setattr(transport_mod, "httpx_transport", lambda **kw: tp)
+    out = tmp_path / "map.json"
+    rc = cli.main(["map-field", "--field", "AI for X", "--email", EMAIL, "--out", str(out)])
+    assert rc == 0
+    printed = capsys.readouterr().out
+    assert "mapped 0 topics in 0 groups" in printed
+    assert "note:" not in printed
+    assert "relaxed_from" not in json.loads(out.read_text(encoding="utf-8"))
