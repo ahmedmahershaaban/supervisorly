@@ -25,8 +25,9 @@ def _topic(n, name, works, domain=None, field=None, subfield=None):
     return t
 
 
-def _page(topics):
-    return json.dumps({"results": topics})
+def _page(topics, count=None):
+    return json.dumps({"meta": {"count": count if count is not None else len(topics)},
+                       "results": topics})
 
 
 def test_subject_map_groups_by_domain_field_subfield():
@@ -210,6 +211,34 @@ def test_subject_map_relaxation_ranks_keyword_matches_above_works_count():
     smap = subjects.subject_map("mechanistic interpretability", tp, email=EMAIL)
     flat = [t for g in smap["groups"] for t in g["topics"]]
     assert [t["topic_id"] for t in flat] == ["T1", "T2"]   # keyword overlap beats works_count
+
+
+def test_subject_map_relaxation_ranks_distinctive_words_above_generic_ones():
+    # live-verified motivation (2026-07-25): "causal machine learning" relaxed per-word and
+    # "Machine Learning in Healthcare" (2 generic matches) outranked the causal-inference
+    # topics (1 distinctive match). idf-weighting fixes the vote: causal (27 hits) is
+    # ~1000x more distinctive than machine (2_000) or learning (50_000).
+    tp = CassetteTransport()
+    tp.record(openalex.topics_url("causal machine learning", EMAIL), 200, _page([], count=0))
+    tp.record(openalex.topics_url("causal", EMAIL), 200, _page([
+        _topic(1, "Advanced Causal Inference Techniques", 300,
+               "Physical Sciences", "Mathematics", "Statistics"),
+    ], count=27))
+    tp.record(openalex.topics_url("machine", EMAIL), 200, _page([
+        _topic(2, "Machine Learning in Healthcare", 900000,
+               "Physical Sciences", "Computer Science", "AI"),
+    ], count=2000))
+    tp.record(openalex.topics_url("learning", EMAIL), 200, _page([
+        _topic(2, "Machine Learning in Healthcare", 900000,   # same id -> unioned
+               "Physical Sciences", "Computer Science", "AI"),
+        _topic(3, "Online and Blended Learning", 700000,
+               "Social Sciences", "Education", "Education"),
+    ], count=50000))
+    smap = subjects.subject_map("causal machine learning", tp, email=EMAIL)
+    flat = [t for g in smap["groups"] for t in g["topics"]]
+    # T1 matches only "causal" (score 1/28) but outranks T2 (machine+learning ≈ 0.0005)
+    # and T3 (learning ≈ 0.00002) despite their far bigger works_count
+    assert [t["topic_id"] for t in flat] == ["T1", "T2", "T3"]
 
 
 def test_subject_map_relaxation_dedupes_words_case_insensitively():

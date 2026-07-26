@@ -93,18 +93,30 @@ def _relax_words(query: str) -> list[str]:
     return words
 
 
-def _word_overlap(topic: dict, words: list[str]) -> int:
-    """How many of the original query words appear in the topic's display name OR its
-    OpenAlex keywords (case-insensitive, word-boundary). Keywords matter: the canonical
-    topic for a niche phrase often names itself differently ("Explainable Artificial
-    Intelligence (XAI)" carries the keyword "Machine Learning Interpretability"), so a
-    name-only score ranks off-target mega-topics above it."""
+def _topic_matches(topic: dict, word: str) -> bool:
+    """True if ``word`` appears in the topic's display name OR its OpenAlex keywords
+    (case-insensitive, word-boundary). Keywords matter: the canonical topic for a niche
+    phrase often names itself differently ("Explainable Artificial Intelligence (XAI)"
+    carries the keyword "Machine Learning Interpretability"), so a name-only match ranks
+    off-target mega-topics above it."""
     haystack = " ".join(
         [topic.get("display_name") or ""] + [k for k in (topic.get("keywords") or []) if k])
-    if not haystack.strip():
-        return 0
-    return sum(1 for w in words
-               if re.search(rf"\b{re.escape(w)}\b", haystack, re.IGNORECASE))
+    return bool(haystack.strip()) and bool(
+        re.search(rf"\b{re.escape(word)}\b", haystack, re.IGNORECASE))
+
+
+def _word_overlap(topic: dict, words: list[str]) -> int:
+    """How many of the original query words match the topic (see ``_topic_matches``)."""
+    return sum(1 for w in words if _topic_matches(topic, w))
+
+
+def _overlap_score(topic: dict, words: list[str], idf: dict[str, float]) -> float:
+    """Distinctiveness-weighted overlap: each matched word contributes its idf —
+    1 / (1 + total hits for that word's own search). A rare word ("causal") outweighs
+    generic ones ("machine", "learning") whose searches flood the topic index, so the
+    distinctive half of a query ranks above the generic half instead of being outvoted
+    one-word-each."""
+    return sum(idf.get(w.casefold(), 1.0) for w in words if _topic_matches(topic, w))
 
 
 def subject_map(query: str, transport: Transport, *, email: str | None = None,
@@ -120,8 +132,9 @@ def subject_map(query: str, transport: Transport, *, email: str | None = None,
     a false "complete" (D-037). Empty query / no results -> honest empty ``groups``.
 
     A GENUINE empty (200, zero results — never a failure) relaxes the query: each query
-    word is searched individually, the hits are unioned by topic id and ranked by
-    query-word overlap (word-boundary, case-insensitive) then ``works_count``; the result
+    word is searched individually, the hits are unioned by topic id and ranked by a
+    distinctiveness-weighted overlap (each matched word weighs 1/(1+its own API hit
+    count), so a rare word outranks generic ones) then ``works_count``; the result
     then carries ``relaxed_from: <original query>``. A word search that FAILS keeps the
     partial union and is marked PARTIAL with a ``topics@<word>`` marker, exactly like a
     direct-path page failure. Relaxation finding nothing is the same honest empty as a
@@ -143,6 +156,7 @@ def subject_map(query: str, transport: Transport, *, email: str | None = None,
         # direct failure path above returns PARTIAL without ever reaching this branch)
         words = _relax_words(q)
         by_id: dict[str, dict] = {}
+        idf: dict[str, float] = {}
         for w in words:
             data = _get_json(transport, topics_url(w, email, key))
             if data is None:
@@ -151,13 +165,17 @@ def subject_map(query: str, transport: Transport, *, email: str | None = None,
                 truncated = True
                 truncated_sources.append(f"topics@{w}")
                 continue
+            # distinctiveness of this word = inverse of its own hit count (missing meta
+            # -> 1.0, so every word weighs the same — the word-count ranking falls back)
+            total = int(((data.get("meta") or {}).get("count")) or 0)
+            idf[w.casefold()] = 1.0 / (1.0 + total)
             for t in data.get("results") or []:
                 if t.get("id"):
                     by_id.setdefault(t["id"], t)        # union, deduped by topic id
         if by_id:
             result["relaxed_from"] = q
             topics = sorted(by_id.values(),
-                            key=lambda t: (-_word_overlap(t, words),
+                            key=lambda t: (-_overlap_score(t, words, idf),
                                            -int(t.get("works_count") or 0)))
     else:
         topics = sorted(topics, key=lambda t: int(t.get("works_count") or 0),
