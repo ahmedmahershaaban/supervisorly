@@ -82,6 +82,7 @@
   .sw.human    { background:#2c1620; border-color:#e06a83; }
   .sw.store    { background:#2a2110; border-color:#d9a441; }
   .sw.gate     { background:#0f2723; border-color:#3fbdad; }
+  .sw.web      { background:#161c33; border-color:#6f86e8; }
   .sw.skip     { background:#20222a; border-color:#8b8f9b; }
 
   /* ---------- main ---------- */
@@ -228,20 +229,21 @@
     </div>
 
     <div>
-      <div class="nav-label">Twelve maps</div>
+      <div class="nav-label">Thirteen maps</div>
       <nav id="nav">
         <a href="#context"><span class="idx">01</span> Context</a>
         <a href="#modes"><span class="idx">02</span> Modes</a>
         <a href="#components"><span class="idx">03</span> Components</a>
         <a href="#scan-setup"><span class="idx">04</span> Scan setup</a>
         <a href="#pipeline"><span class="idx">05</span> Pipeline</a>
-        <a href="#fetch"><span class="idx">06</span> Fetch &amp; browser tier</a>
-        <a href="#browser-tier"><span class="idx">07</span> Browser tier</a>
-        <a href="#sources"><span class="idx">08</span> Sources</a>
-        <a href="#data"><span class="idx">09</span> Data model</a>
-        <a href="#provenance"><span class="idx">10</span> Provenance</a>
-        <a href="#rules"><span class="idx">11</span> Rules</a>
-        <a href="#decisions"><span class="idx">12</span> Decisions</a>
+        <a href="#web"><span class="idx">06</span> Hosted web tier</a>
+        <a href="#fetch"><span class="idx">07</span> Fetch &amp; browser tier</a>
+        <a href="#browser-tier"><span class="idx">08</span> Browser tier</a>
+        <a href="#sources"><span class="idx">09</span> Sources</a>
+        <a href="#data"><span class="idx">10</span> Data model</a>
+        <a href="#provenance"><span class="idx">11</span> Provenance</a>
+        <a href="#rules"><span class="idx">12</span> Rules</a>
+        <a href="#decisions"><span class="idx">13</span> Decisions</a>
       </nav>
     </div>
 
@@ -252,6 +254,7 @@
       <div class="row"><span class="sw human"></span> Human rung — the MD fallback</div>
       <div class="row"><span class="sw store"></span> Data store / orchestrator</div>
       <div class="row"><span class="sw gate"></span> Rule / enforcement gate</div>
+      <div class="row"><span class="sw web"></span> Hosted web tier — page, API, job</div>
       <div class="row"><span class="sw skip"></span> Skipped on purpose</div>
     </div>
   </aside>
@@ -259,9 +262,9 @@
   <main>
     <header class="hero">
       <div class="hero-inner">
-        <div class="eyebrow">Architecture bible · 67 decisions · 31 entities</div>
+        <div class="eyebrow">Architecture bible · 70 decisions · 32 entities</div>
         <h1>Everything, connected.</h1>
-        <p>One place that ties together the skill, its agents and tools, the two run modes, the scan setup from free text to a confirmed plan, the pipeline, the fetch ladder with its browser tier and human-rung fallback, the data model, how a value becomes a trusted claim, and where every rule bites. Click any diagram to open it full-size.</p>
+        <p>One place that ties together the two entry surfaces — the skill and the hosted web app — its agents and tools, the two run modes, the scan setup from free text to a confirmed plan, the pipeline, the hosted job lifecycle, the fetch ladder with its browser tier and human-rung fallback, the data model, how a value becomes a trusted claim, and where every rule bites. Click any diagram to open it full-size.</p>
         <div class="meta">
           <span class="chip"><b>Skill-first</b> · any MCP host</span>
           <span class="chip"><b>Any country</b> · generated, not looked up</span>
@@ -503,8 +506,56 @@ flowchart TD
         <div class="caption"><span class="key">Governs</span><span class="refs">product-flow.md · D-021 · D-022 · D-037 · D-056 · D-066 — "never dropped" is display; "deep-dive" is the shortlist; the subject map is the plan review.</span></div>
       </section>
 
+      <section class="map" id="web">
+        <div class="map-head"><span class="map-code">MAP 06</span><h2>Hosted web tier — one job, watched and stoppable</h2></div>
+        <p class="purpose">The same pipeline, for a student who will not open a terminal (D-069). The wizard assembles a plan, the API starts a <b>job</b>, a worker runs the identical scan, and the page narrates it. Every terminal state is resumable, so there is no dead end.</p>
+        <div class="diagram"><span class="expand">Expand ⤢</span>
+<pre class="mermaid">
+%%{init:{'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif,system-ui,sans-serif','fontSize':'14px','background':'#16181d','primaryColor':'#20232b','primaryTextColor':'#e9eaed','primaryBorderColor':'#d9a441','lineColor':'#858994','secondaryColor':'#1b1e25','tertiaryColor':'#181a20','clusterBkg':'#131519','clusterBorder':'#31353f','edgeLabelBackground':'#16181d','textColor':'#d0d2d8'}}}%%
+flowchart TD
+  W1["1 You — intent · country · email<br/>the email is not a login"]
+  W2["2 Field — Understand"]
+  EXP["/api/expand — phrasing variants<br/>fail-closed: no key → your own words"]
+  MAP["/api/map — once per phrasing<br/>merged in the browser (D-070)"]
+  W3["3 Topics — checkbox tree<br/>or name professors directly"]
+  W4["4 Scope — universities · shortlist<br/>cost stated BEFORE it is spent"]
+  START["POST /api/scan"]
+  IDEM{"same email + plan<br/>already running?"}
+  JOB["job: queued<br/>the id IS the access token"]
+  RUN["worker runs the SAME pipeline"]
+  POLL["5 Progress — poll every 4 s<br/>real phase · partial warnings"]
+  CAN{"Cancel?"}
+  STOP["cancelling → cancelled<br/>keeps everything gathered"]
+  STALL["watchdog: stale heartbeat<br/>→ failed, safe to resume"]
+  DONE["done"]
+  RES["/api/result → 15-min signed URL"]
+  DASH["the same dashboard"]
+  W1 --> W2 --> EXP --> MAP --> W3 --> W4 --> START --> IDEM
+  IDEM -->|"yes — return the EXISTING job"| POLL
+  IDEM -->|"no"| JOB --> RUN --> POLL
+  POLL --> CAN
+  CAN -->|"no"| DONE --> RES --> DASH
+  CAN -->|"yes"| STOP
+  RUN -.->|"no heartbeat"| STALL
+  STOP -.->|"resume — same job id"| JOB
+  STALL -.->|"resume"| JOB
+  classDef web fill:#161c33,stroke:#6f86e8,color:#d5ddff;
+  classDef tool fill:#182338,stroke:#5f8fd9,color:#cfe0ff;
+  classDef gate fill:#0f2723,stroke:#3fbdad,color:#bff0e6;
+  classDef store fill:#2a2110,stroke:#d9a441,color:#f4dfa8;
+  classDef skip fill:#20222a,stroke:#8b8f9b,color:#c3c6cd;
+  class W1,W2,W3,W4,POLL,START,RES web
+  class EXP,MAP,JOB,RUN tool
+  class IDEM,CAN gate
+  class DASH,DONE store
+  class STOP,STALL skip
+</pre>
+        </div>
+        <div class="caption"><span class="key">Governs</span><span class="refs">architecture.md §11 · product-flow.md · D-005 · D-037 · D-068 · D-069 · D-070 — jobs are never listable; cancel is cooperative, not a kill; results are personal data behind short-lived signed URLs.</span></div>
+      </section>
+
       <section class="map" id="fetch">
-        <div class="map-head"><span class="map-code">MAP 06</span><h2>Fetch — three phases, the browser tier, and the fallback</h2></div>
+        <div class="map-head"><span class="map-code">MAP 07</span><h2>Fetch — three phases, the browser tier, and the fallback</h2></div>
         <p class="purpose">Each phase runs across the target set, marks its failures, and hands only the residual to the next. Phase 3 is now the agent-driven browser tier (D-064); the original MD human rung remains as the fallback when the browser is denied or challenged.</p>
         <div class="diagram"><span class="expand">Expand ⤢</span>
 <pre class="mermaid">
@@ -552,7 +603,7 @@ flowchart TD
       </section>
 
       <section class="map" id="browser-tier">
-        <div class="map-head"><span class="map-code">MAP 07</span><h2>Browser tier — the D-064/D-065 recipe, page by page</h2></div>
+        <div class="map-head"><span class="map-code">MAP 08</span><h2>Browser tier — the D-064/D-065 recipe, page by page</h2></div>
         <p class="purpose">The exact loop for every browser page. Raw HTML/DOM never enters the agent's context — extraction happens in-page and in Python; the agent handles only file paths, byte counts, and one-line results. A browser page is just another snapshot.</p>
         <div class="diagram"><span class="expand">Expand ⤢</span>
 <pre class="mermaid">
@@ -599,7 +650,7 @@ flowchart TD
       </section>
 
       <section class="map" id="sources">
-        <div class="map-head"><span class="map-code">MAP 08</span><h2>Sources — where recruiting signal comes from</h2></div>
+        <div class="map-head"><span class="map-code">MAP 09</span><h2>Sources — where recruiting signal comes from</h2></div>
         <p class="purpose">Recruiting status lives in prose on the professor's own channels. Everything reachable feeds one generated recruiting-signal read; the walled profiles are read through your own paced session.</p>
         <div class="diagram"><span class="expand">Expand ⤢</span>
 <pre class="mermaid">
@@ -641,7 +692,7 @@ flowchart LR
       </section>
 
       <section class="map" id="data">
-        <div class="map-head"><span class="map-code">MAP 09</span><h2>Data — the core of the model</h2></div>
+        <div class="map-head"><span class="map-code">MAP 10</span><h2>Data — the core of the model</h2></div>
         <p class="purpose">The spine that lets facts join, dedupe and diff — the thing the corpus's prose files could not do. 31 entities in total; the core is shown.</p>
         <div class="diagram"><span class="expand">Expand ⤢</span>
 <pre class="mermaid">
@@ -698,7 +749,7 @@ flowchart TD
       </section>
 
       <section class="map" id="provenance">
-        <div class="map-head"><span class="map-code">MAP 10</span><h2>Provenance — how a value becomes a trusted claim</h2></div>
+        <div class="map-head"><span class="map-code">MAP 11</span><h2>Provenance — how a value becomes a trusted claim</h2></div>
         <p class="purpose">Every fact carries its source, its quote, and its confidence. Verification is structural — the model's quote must be found in the stored snapshot — not a prose promise. A browser-tier page is just another snapshot: same gate.</p>
         <div class="diagram"><span class="expand">Expand ⤢</span>
 <pre class="mermaid">
@@ -727,7 +778,7 @@ flowchart LR
       </section>
 
       <section class="map" id="rules">
-        <div class="map-head"><span class="map-code">MAP 11</span><h2>Rules — where each rule actually bites</h2></div>
+        <div class="map-head"><span class="map-code">MAP 12</span><h2>Rules — where each rule actually bites</h2></div>
         <p class="purpose">Rules are enforced in code at specific points, not asserted in a preamble. This is the map of enforcement gates.</p>
         <div class="diagram"><span class="expand">Expand ⤢</span>
 <pre class="mermaid">
@@ -762,13 +813,13 @@ flowchart TD
       </section>
 
       <section class="map" id="decisions">
-        <div class="map-head"><span class="map-code">MAP 12</span><h2>Decisions — how the 67 cluster</h2></div>
-        <p class="purpose">Every decision belongs to one of eight themes. This shows the shape of the design space, and the one cluster that still carries accepted risk.</p>
+        <div class="map-head"><span class="map-code">MAP 13</span><h2>Decisions — how the 70 cluster</h2></div>
+        <p class="purpose">Every decision belongs to one of nine themes. This shows the shape of the design space, the one cluster that still carries accepted risk, and the one accepted cost.</p>
         <div class="diagram"><span class="expand">Expand ⤢</span>
 <pre class="mermaid">
 %%{init:{'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif,system-ui,sans-serif','fontSize':'14px','background':'#16181d','primaryColor':'#20232b','primaryTextColor':'#e9eaed','primaryBorderColor':'#d9a441','lineColor':'#858994','secondaryColor':'#1b1e25','tertiaryColor':'#181a20','clusterBkg':'#131519','clusterBorder':'#31353f','textColor':'#d0d2d8'}}}%%
 flowchart TD
-  ROOT["67 decisions"]
+  ROOT["70 decisions"]
   ROOT --> SCOPE["Scope &amp; identity"]
   ROOT --> SRC["Data sources"]
   ROOT --> DATA["Data model"]
@@ -777,22 +828,26 @@ flowchart TD
   ROOT --> ETH["Ethics"]
   ROOT --> COST["Cost &amp; perf"]
   ROOT --> FRONT["Browser tier &amp; front door<br/>D-064 · D-065 · D-066 · D-067"]
+  ROOT --> WEBT["Hosted web product<br/>D-068 · D-069 · D-070"]
   SCOPE --> RISK["accepted risk:<br/>generic v1, no golden fixture<br/>D-34 + D-11 + D-35"]
+  WEBT --> WRISK["accepted cost:<br/>client-side merge spends up to 8<br/>of the 30/h map budget — D-070"]
   classDef tool fill:#182338,stroke:#5f8fd9,color:#cfe0ff;
   classDef agentv fill:#221a33,stroke:#a478e8,color:#e6d6fa;
   classDef human fill:#2c1620,stroke:#e06a83,color:#ffd0da;
+  classDef web fill:#161c33,stroke:#6f86e8,color:#d5ddff;
   class SCOPE,SRC,DATA,PROD,DASH,ETH,COST tool
   class FRONT agentv
-  class RISK human
+  class WEBT web
+  class RISK,WRISK human
 </pre>
         </div>
-        <div class="caption"><span class="key">Governs</span><span class="refs">DECISIONS.md — the risk is managed by fail-loud coverage, per-value confidence, and cassette + synthetic tests.</span></div>
+        <div class="caption"><span class="key">Governs</span><span class="refs">DECISIONS.md · BLOCKERS.md — the risk is managed by fail-loud coverage, per-value confidence, and cassette + synthetic tests; the D-070 cost has a written revisit trigger (B-001).</span></div>
       </section>
 
     </div>
 
     <footer>
-      This atlas is a view over the design documents, not a replacement for them. When a diagram and a document disagree, the document wins. · Supervisorly build phase — 67 decisions, 31 entities, suite green.
+      This atlas is a view over the design documents, not a replacement for them. When a diagram and a document disagree, the document wins. · Supervisorly — 70 decisions, 32 entities, suite green; the engine and the hosted web app both shipped.
     </footer>
   </main>
 </div>
@@ -2896,7 +2951,10 @@ Expecting `+Ze.join(", ")+", got '"+(this.terminals_[Ne]||Ne)+"'":Dt="Parse erro
       "064":"Browser-primary live fetch: agent-driven Chrome; page content enters only through the ingest-page snapshot seam — raw HTML/DOM never enters the agent's context.",
       "065":"Social pacing policy as code: jittered intervals per host class, per-session page caps, human-like scroll, abort-on-challenge latch, advertised profiles only.",
       "066":"The subject-map stage: the free-text field is mapped to an OpenAlex topic hierarchy (domain → field → subfield) and user-confirmed before anything expensive runs.",
-      "067":"Scan Studio: the rich front-end is one self-contained, offline Atlas-language plan wizard; the conversational numbered multi-select remains the fallback."
+      "067":"Scan Studio: the rich front-end is one self-contained, offline Atlas-language plan wizard; the conversational numbered multi-select remains the fallback.",
+      "068":"The LLM may generate queries, never claims: field text may be expanded into search strings, fail-closed (no key → the student's own words), and every fact still passes the D-010 quote gate.",
+      "069":"The hosted web product: rate-limited read-only endpoints, job ids that are unguessable access tokens and never listable, results as personal data (private bucket, short-lived signed URLs, 7-day delete), and a safe stop — every terminal state resumable, never a dead end.",
+      "070":"The multi-phrasing subject-map merge is client-side: /api/map takes ONE field and the page merges per-phrasing results, so one failing phrasing cannot fail the click. The cost — up to 8 of the 30/h map budget per Understand — is accepted, with a revisit trigger in BLOCKERS.md B-001."
     };
 
     // Node meaning, keyed by a distinctive substring of the node's label.
@@ -2967,7 +3025,21 @@ Expecting `+Ze.join(", ")+", got '"+(this.terminals_[Ne]||Ne)+"'":Dt="Parse erro
       "data model":{t:"Data model",b:"How facts are stored so they join, dedupe and diff.",d:["026","010","030"]},
       "product":{t:"Product & flow",b:"The student's journey and the actions the tool models.",d:["021","036","056"]},
       "browser tier & front door":{t:"Browser tier & front door",b:"The 2026-07-25 round: agent-driven browser fetch through the ingest-page seam (D-064), pacing as code (D-065), the user-confirmed subject map (D-066), and the Scan Studio plan wizard (D-067).",d:["064","065","066","067"]},
-      "ethics":{t:"Ethics",b:"The compliance posture and the enforcement gates.",d:["005","023","032","035"]}
+      "hosted web product":{t:"Hosted web product",b:"The 2026-07-27 round: query expansion that produces searches and never claims (D-068), the hosted product's honesty/privacy/control contract (D-069), and the client-side multi-phrasing merge (D-070). Live at supervisorly.web.app.",d:["068","069","070"]},
+      "ethics":{t:"Ethics",b:"The compliance posture and the enforcement gates.",d:["005","023","032","035"]},
+
+      /* --- MAP 06, the hosted web tier --- */
+      "the email is not a login":{t:"Step 1 — you",b:"Intent, country and a contact email. The email is NOT an account: it joins the OpenAlex polite pool so fetches are identifiable, and it bounds you to one active scan at a time. Nothing about you is kept in the browser.",d:["069","019"]},
+      "api/expand":{t:"/api/expand — phrasing variants",b:"The one sanctioned LLM call: it turns your words into search strings, never into facts. Fail-closed — no key, a timeout or a malformed reply all mean your literal words are used instead, never an error. The endpoint and model are server config; a request cannot redirect them.",d:["068","009"]},
+      "api/map":{t:"/api/map — the subject map",b:"Maps one phrasing to the OpenAlex topic hierarchy. The page calls it once PER phrasing and merges the results in the browser, tagging each topic with the phrasings that found it — so one failing phrasing degrades the click instead of failing it.",d:["066","070"]},
+      "cost stated before":{t:"Step 4 — scope",b:"Universities, shortlist size and institution cap, with a live estimate of how long the scan will take. The wait is stated BEFORE it is spent, and the caps are enforced server-side too.",d:["069","021"]},
+      "already running":{t:"Idempotent start",b:"The start key is (email, plan). A double-click, a refresh or a retry returns the EXISTING job rather than launching a second scan — so the expensive thing cannot be started twice by accident.",d:["069"]},
+      "the id is the access token":{t:"The job id IS the credential",b:"A random 128-bit id. Jobs are never listable and Firestore denies client reads outright, so the id opens our filtering endpoint — not the raw document, which holds the email and the plan. Anyone with the id can watch the scan; nobody without it can find one.",d:["069","005"]},
+      "worker runs the same pipeline":{t:"The worker",b:"A Cloud Run job running the SAME run_live the CLI runs. The web tier is a wrapper, not a second engine: it adds no new way for a fact to enter the system, and the quote gate is untouched.",d:["069","009","010"]},
+      "poll every 4":{t:"Step 5 — progress",b:"The page polls status every 4 s and narrates the real phase — discovering, enumerated, deep dive n of m, scoring, exported — surfacing partial warnings as they happen rather than at the end.",d:["069","037"]},
+      "keeps everything gathered":{t:"Cancel is cooperative",b:"Not a kill. The engine checks the cancel flag between units of work, stops after the current page and exports what it already has. Cancelling costs you nothing you had already paid for.",d:["069"]},
+      "safe to resume":{t:"The stuck-job watchdog",b:"Every progress event stamps a heartbeat. A stale one flips the job to failed with 'worker stalled; safe to resume', so a dead worker becomes an honest state instead of a job spinning forever. Verified in production on a job stranded by a real permission failure.",d:["069","037"]},
+      "15-min signed url":{t:"The result handover",b:"Results are personal data: a private bucket, no public objects, and a fresh 15-minute signed URL minted per request — so an expired link is never a dead end. Everything is deleted after seven days.",d:["005","069"]}
     };
 
     /* ---------- helpers ---------- */

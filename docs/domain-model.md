@@ -462,6 +462,11 @@ D-043 and D-045 but had no field tables, so the SQLite schema for the state mach
 be written. `Confidence` is not meaningful for these (they are internal state, not harvested
 facts), so the column is omitted.
 
+`Job` (last in this section) was added 2026-07-27 with the hosted web tier
+([D-069](DECISIONS.md#d-069--the-hosted-web-product-honesty-privacy-and-user-control)). It is
+the only entity here that does not exist on the CLI surface, and it is stored in Firestore
+rather than SQLite — the scan's own state still lives in the run database exactly as before.
+
 ## SearchPlan
 
 The interpreted intent that drives a search — produced by the orchestrator inline
@@ -576,7 +581,35 @@ Keyed to a program, because the student buys *applications*, not professors (D-0
 | `reference_state[]` | array | per-letter: requested / received / submitted |
 | `deadline / status` | date + enum(planned\|in_progress\|submitted\|decision) | |
 
-> **Entity count:** 24 world-model + 7 pipeline/user (SearchPlan, Run, Task, Checkpoint,
-> ExtractionCache, Outreach, Application) = **31 entities**. Earlier docs saying "24" refer to
-> the world-model subset only; the total is 31.
+## Job
+
+One hosted scan, from *Start scan* to a downloadable dashboard
+([D-069](DECISIONS.md#d-069--the-hosted-web-product-honesty-privacy-and-user-control)). Exists
+only on the web surface — the CLI runs the same pipeline in the foreground and needs no Job. It
+wraps a `Run`; it does not replace one.
+
+The **`job_id` is the access token**: a random 128-bit id, readable only by whoever holds it,
+never listable. The document therefore carries personal data (`email`, the plan) and is deleted
+seven days after its last write.
+
+| Field | Type | Notes |
+|---|---|---|
+| `job_id` | pk (uuid4 hex) | unguessable *by design* — it is the bearer credential (D-069) |
+| `job_key` | string | idempotency key over (email, plan): a double-click or refresh returns the EXISTING job, never a duplicate |
+| `status` | enum(queued\|running\|cancelling\|done\|failed\|cancelled) | `cancelling` is transitional; the three terminal states are all **resumable** |
+| `plan` | object | the confirmed SearchPlan the student assembled in the wizard |
+| `email` / `email_ci` | string | polite-pool contact + case-folded form enforcing one active job per person |
+| `cancel_requested` | bool | cooperative stop — the engine checks it between units of work, so a cancel keeps everything already gathered |
+| `progress[]` | array | phase events (`ts`, `phase`, `data`) driving the live narration; capped to the most recent entries so the doc stays small |
+| `heartbeat_at` | datetime | stall watchdog: a stale heartbeat flips the job to `failed` with *"safe to resume"* rather than leaving it spinning |
+| `result` | object | pointers to the exported dashboard (HTML/JSON), served via short-lived signed URLs — never a public object |
+| `error` | text | honest, stack-free failure reason shown to the student |
+| `created_at / updated_at` | datetime | `updated_at` also drives the 7-day TTL delete |
+
+**Relationships:** `Job 1—1 Run` (a resume re-invokes the worker with the same `job_id`, and the
+engine's checkpoints continue the existing Run rather than starting over).
+
+> **Entity count:** 24 world-model + 8 pipeline/user (SearchPlan, Run, Task, Checkpoint,
+> ExtractionCache, Outreach, Application, Job) = **32 entities**. Earlier docs saying "24" refer
+> to the world-model subset only, and ones saying "31" predate the hosted web tier (D-069).
 

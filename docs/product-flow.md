@@ -4,10 +4,27 @@ The end-to-end experience, in the student's terms. This is the authoritative sta
 *what Supervisorly does when a student uses it*. The architecture
 ([architecture.md](architecture.md)) is how; this is what and in what order.
 
-**The deliverable is a Claude Code skill + agents + tools, not a hosted product.** A
-student points Claude at this repo — "read the README and add these skills" — and Claude
-installs the tools, reads `SKILL.md`, and runs the whole flow below. There is no server,
-no account, no site. Everything is generated fresh, per student, per search.
+**There are two surfaces over one engine**
+([D-069](DECISIONS.md#d-069--the-hosted-web-product-honesty-privacy-and-user-control)).
+
+1. **The Claude Code skill + agents + tools.** A student points Claude at this repo — "read
+   the README and add these skills" — and Claude installs the tools, reads `SKILL.md`, and runs
+   the whole flow below. Nothing is hosted; everything is generated fresh, per student, per
+   search.
+2. **The hosted web app** — a 5-step wizard at `supervisorly.web.app` for students who will not
+   open a terminal. It runs the *same* pipeline as a background job you can watch, cancel and
+   resume, and hands back the *same* dashboard.
+
+The engine underneath is identical: the web tier adds a job wrapper and an HTTP surface, and
+changes nothing about how a fact becomes a claim. Every rule below — the quote gate, honest
+emptiness, the ethics gates — applies unchanged to both. Where they differ is only *how the
+student states the plan and receives the result*, described in
+[The hosted web surface](#the-hosted-web-surface--supervisorlywebapp).
+
+> This document said, until Goal 4 shipped, "not a hosted product… there is no server, no
+> account, no site." The first two of those are still true in spirit — there is no account, and
+> a scan is still generated fresh per student — but there is now a site, and pretending
+> otherwise would be exactly the kind of stale claim this project treats as a defect.
 
 ---
 
@@ -162,6 +179,41 @@ sort is an annotation, not a judgement that leaves the machine.
 
 ---
 
+## The hosted web surface — supervisorly.web.app
+
+The same flow, for a student who will not open a terminal
+([D-069](DECISIONS.md#d-069--the-hosted-web-product-honesty-privacy-and-user-control)). Five
+steps, in the Atlas design language, on one self-contained page — no CDN, no tracking, no
+account, and nothing about the plan or the email kept in the browser.
+
+1. **You** — intent (PhD / master's / postdoc / mentor), country, contact email. The email is
+   not a login; it joins the OpenAlex polite pool and bounds you to one active scan at a time.
+2. **Field** — free text, then *Understand*. The page asks the server to expand the phrasing
+   into search-string variants
+   ([D-068](DECISIONS.md#d-068--the-llm-may-generate-queries-never-claims)) and maps **each
+   variant** to the OpenAlex subject index, merging the results in the browser by topic and
+   tagging each with the phrasings that found it
+   ([D-070](DECISIONS.md#d-070--the-multi-phrasing-subject-map-merge-is-client-side)). If
+   expansion is unavailable, the student's literal words are mapped instead — never an error.
+3. **Topics** — the merged subject map as a checkbox tree; or skip it and name professors
+   directly. Nothing is preselected.
+4. **Scope** — universities (all / prioritise / only), shortlist size and institution cap, with
+   a live cost estimate so the wait is stated *before* it is spent.
+5. **Progress** — the scan runs as a background job. The page polls it and narrates the real
+   phase (discovering → enumerated → deep dive *n* of *m* → scoring → exported), shows partial
+   warnings as they happen, and offers **Cancel** at every moment. Cancel is graceful: it stops
+   after the current page and keeps everything gathered. Every terminal state — done, failed,
+   cancelled — is **resumable**, and a stalled worker is detected and marked resumable rather
+   than left spinning. When it finishes, the dashboard opens through a short-lived signed URL.
+
+**The job id is the access token** and jobs are never listable, so a scan is reachable only by
+someone holding its id; results live in a private bucket and are deleted after seven days
+([D-069](DECISIONS.md#d-069--the-hosted-web-product-honesty-privacy-and-user-control)). The
+pipeline, the quote gate and the ethics gates are untouched — the web tier only changes how the
+plan arrives and how the result is handed back.
+
+---
+
 ## The dashboard
 
 **Generated after Phase 2 — never blocked waiting on you**
@@ -188,7 +240,9 @@ assuming a fixed column set.
 - Delivered as a **single self-contained HTML file with embedded JSX/React**
   ([D-033](DECISIONS.md#d-033--dashboard-technology)) — a component model and virtualised
   lists (so thousands of rows stay smooth) without a separate build project. One file the
-  student can open, keep, and share.
+  student can open, keep, and share. From the web surface it is the *same* file, handed over
+  through a short-lived signed URL rather than written to disk — self-contained either way, so
+  what the student keeps does not depend on which surface produced it.
 
 **The dashboard is Claude-interactive**
 ([D-041](DECISIONS.md#d-041--the-dashboard-is-claude-interactive)). The scan also writes the
@@ -208,3 +262,11 @@ research are recorded in
 [D-039](DECISIONS.md#d-039--agent-driven-web-navigation-is-first-class-apis-are-the-fast-path)
 (how the agent actually fetches) and the students guardrail above — both resolved in a way
 that keeps the vision intact.
+
+The hosted surface does not move that centre of gravity: it is a **wrapper, not a second
+engine**. It adds a job lifecycle, an HTTP boundary and a page — and deliberately no new way
+for a fact to enter the system. The deterministic layer stays LLM-free apart from the one
+sanctioned query-expansion exception
+([D-068](DECISIONS.md#d-068--the-llm-may-generate-queries-never-claims)), which produces
+*searches, never claims*. If a change to the web tier would require relaxing the quote gate or
+the honest-emptiness states, that is the signal it is the wrong change.

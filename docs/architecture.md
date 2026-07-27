@@ -11,10 +11,19 @@ points recorded there.
 ## 1. The shape of the thing
 
 ```
+   ┌───────────────────────────────────────────────────────────────────────────┐
+   │  TWO ENTRY SURFACES, ONE ENGINE (D-069)                                   │
+   │    A. Claude Code skill / CLI  — runs the pipeline in the foreground      │
+   │    B. hosted web app           — 5-step wizard -> background scan job     │
+   │       page + /api/** (Functions) -> job doc (Firestore) -> Cloud Run      │
+   │       worker runs the SAME pipeline; result via short-lived signed URL    │
+   └───────────────────────────────┬───────────────────────────────────────────┘
+                                   ▼
                        ┌──────────────────────────────────────────┐
    country +           │            ORCHESTRATOR                  │
-   universities   ───▶ │  (Claude Code skill, or plain CLI)       │
-   + priorities        │  owns: run state, budget, tier gating    │
+   universities   ───▶ │  (Claude Code skill, plain CLI, or the   │
+   + priorities        │   scan worker on the hosted surface)     │
+                       │  owns: run state, budget, tier gating    │
                        └───────────────┬──────────────────────────┘
                                        │  never sees per-professor prose
         ┌──────────────────────────────┼──────────────────────────────┐
@@ -240,10 +249,18 @@ The deterministic tools, named canonically ([D-055](DECISIONS.md#d-055--one-orch
 | `md-ingester` | `extract/` | parses the returned Markdown into Claims; resumes the run |
 | `scorer` | `score/` | hard gates + weighted components (§5) |
 | `exporter` | `export/` | the four-state JSON ([D-046](DECISIONS.md#d-046--the-json-export-contract-is-the-systems-interchange-format-with-a-four-state-value-envelope)) + the self-contained dashboard |
+| `subject-map` | `discover/subjects.py` | free text → hierarchical OpenAlex subject map for topic multi-select ([D-066](DECISIONS.md#d-066--the-subject-map-stage-field-understanding-is-api-derived-and-user-confirmed)) |
+| `query-expander` | `discover/expand.py` | the one sanctioned LLM call — *queries, never claims*, fail-closed ([D-068](DECISIONS.md#d-068--the-llm-may-generate-queries-never-claims)) |
+| `job-store` | `jobs.py` | the hosted scan lifecycle (§11) — idempotent start, cooperative cancel, stall watchdog |
+| `web-api` | `webapi.py` | the HTTP surface (§11) shared by the dev server and the Functions |
 
 Intent interpretation and query generation are **not** tools — they are done by the
 orchestrator (Claude) inline, producing the `SearchPlan`
 ([D-045](DECISIONS.md#d-045--intent-interpretation-and-query-generation-are-orchestrator-inline-producing-a-searchplan)).
+On the hosted surface there is no orchestrator to do it, so the wizard assembles the same
+`SearchPlan` from explicit student choices, assisted by `subject-map` and `query-expander`
+— which produce *searches*, never facts, so the boundary D-045 draws is preserved rather than
+crossed.
 
 ---
 
@@ -323,12 +340,22 @@ supervisorly/                     # name locked — D-012 (was profscout)
 │  └─ agents/*.md                 # the five agents above
 ├─ src/supervisorly/
 │  ├─ discover/                   # the ladder: cris, sitemap, jsonld, ct, openalex, adapter
+│  │  └─ expand.py                # D-068 query expansion — the ONE sanctioned LLM call
 │  ├─ fetch/                      # robots, rate limit, cache, snapshot store
 │  ├─ extract/                    # deterministic parsers + LLM extraction w/ verification
 │  ├─ model/                      # entities, claims, conflicts, migrations
 │  ├─ score/                      # gates + weighted components
-│  ├─ export/                     # four-state JSON (§10) + self-contained dashboard
+│  ├─ ethics/                     # optout + robots enforcement — D-053, D-023
+│  ├─ export/                     # four-state JSON (§10), dashboard, studio, webapp page
+│  ├─ pipeline.py                 # run_live: the staged scan, progress events, safe stop
+│  ├─ jobs.py                     # §11 async scan jobs: lifecycle, idempotency, watchdog
+│  ├─ webapi.py                   # §11 HTTP surface + local dev server
+│  ├─ preflight.py / ingest.py    # credential gate; agent-browser snapshot seam (D-064)
 │  └─ cli.py                      # every stage independently runnable
+├─ firebase/                      # §11 the hosted deployment — NOT imported by the engine
+│  ├─ main.py / _core.py          # Functions wrappers; Firestore store, throttles, bridge
+│  ├─ worker.py + Dockerfile.*    # the Cloud Run scan worker
+│  └─ *.rules, firebase.json      # rules + hosting config; README.md is the runbook
 ├─ adapters/<country>/<inst>.yaml # data, not code — the contribution surface
 ├─ dashboard/                     # single self-contained HTML + JSX — D-033, D-048
 ├─ tests/fixtures/                # recorded cassettes + synthetic records — D-011
@@ -340,6 +367,11 @@ supervisorly/                     # name locked — D-012 (was profscout)
 are. That is what makes the pipeline debuggable, testable, and portable to other hosts:
 the deterministic layer has no LLM in it at all, and the LLM layer sits behind one
 provider adapter ([D-007 in the synthesis](requirements.md)).
+
+The dependency direction is one-way and load-bearing: **`firebase/` imports the engine; the
+engine never imports `firebase/`.** That is what lets the entire hosted surface be tested
+offline with stubbed cloud SDKs, and it is why `jobs.py` ships a local `JsonJobStore` twin of
+the Firestore one — the same lifecycle runs with no cloud at all.
 
 ---
 
@@ -460,3 +492,50 @@ returns the Phase-3 Markdown — the common case — the run reaches `finalized_
 and stays resumable; if the MD arrives later, ingestion fills the gaps and re-exports. A
 zero-result run short-circuits Stages 2–4 and renders a coverage/empty-state dashboard that
 distinguishes "no professors matched the field" from "the country's sources returned nothing."
+
+---
+
+## 11. The hosted web tier — job, API, page
+
+Everything above describes one process running a scan to completion. The hosted surface
+([D-069](DECISIONS.md#d-069--the-hosted-web-product-honesty-privacy-and-user-control)) adds
+exactly three things around that, and changes nothing inside it.
+
+**1. The job (`jobs.py`).** A scan the student watches instead of waits for. Lifecycle
+`queued → running → done | failed | cancelled`, with `cancelling` as a transitional state. Four
+properties carry the honesty guarantees:
+
+- **Idempotent start** — the key is `(email, plan)`, so a double-click or a refresh returns the
+  *existing* job rather than launching a second scan.
+- **Cooperative cancel** — the engine checks a flag between units of work, so stopping keeps
+  everything already gathered and exports it. It is not a kill.
+- **Stall watchdog** — every progress event stamps a heartbeat; a stale one flips the job to
+  `failed` with *"safe to resume"*, so a dead worker surfaces as an honest state rather than a
+  job spinning forever.
+- **Resume** — every terminal state is resumable, and resuming reuses the same job id so the
+  engine's checkpoints continue the run rather than restarting it.
+
+**2. The HTTP surface (`webapi.py`).** `/api/expand`, `/api/map`, `/api/scan`,
+`/api/scan/<id>` + `/cancel` + `/resume`, `/api/result/<id>`. Every route is method-checked and
+rate-limited per client; every error is JSON and stack-free. The same module backs the local
+dev server and the deployed Functions, so there is one semantics, not two.
+
+**3. The page (`export/webapp.py`).** A generated, self-contained 5-step wizard in the Atlas
+design language — no CDN, no tracking, nothing about the plan or email kept client-side. It
+merges multi-phrasing subject maps in the browser
+([D-070](DECISIONS.md#d-070--the-multi-phrasing-subject-map-merge-is-client-side)) so one
+failing phrasing cannot fail the click.
+
+**Deployment** (`firebase/`) maps those onto Hosting + Functions + Firestore + a Cloud Run
+worker; the runbook is `firebase/README.md`. Two properties are architectural rather than
+operational:
+
+- **The job id is the access token.** Jobs are never listable and Firestore denies client reads
+  outright, so the id is a bearer credential for *our* filtering endpoint, not for the raw
+  document — which carries the email and the plan.
+- **Results are personal data.** They live in a private bucket, are handed over as short-lived
+  signed URLs re-minted per request, and are deleted after seven days along with the job doc.
+
+The engine is untouched by all of this: `firebase/` imports `supervisorly`, never the reverse,
+and the worker runs the *same* `run_live` the CLI runs. The web tier is a wrapper, not a second
+engine — and deliberately adds no new way for a fact to enter the system.

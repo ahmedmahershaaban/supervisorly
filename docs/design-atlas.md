@@ -1,10 +1,10 @@
 # Supervisorly — Design Atlas
 
-One place that connects everything: the skill, its agents and tools, the two run modes, the
-scan-setup flow from free text to a confirmed plan, the pipeline, the fetch ladder with its
-browser tier and human-rung fallback, the data model, the claim/provenance lifecycle, the
-rules, and how the 67 decisions cluster. Each map ends with the documents and decisions that
-govern it.
+One place that connects everything: the two entry surfaces (the skill and the hosted web app),
+its agents and tools, the two run modes, the scan-setup flow from free text to a confirmed plan,
+the pipeline, the fetch ladder with its browser tier and human-rung fallback, the hosted job
+lifecycle, the data model, the claim/provenance lifecycle, the rules, and how the 70 decisions
+cluster. Each map ends with the documents and decisions that govern it.
 
 **Colour key** — the diagrams use one consistent scheme:
 
@@ -17,6 +17,7 @@ govern it.
 | **Amber** | a data store or artifact |
 | **Green** | verified / reliable |
 | **Teal** | a rule / enforcement gate |
+| **Blue-violet** | the hosted web tier — page, API, job (D-069) |
 
 ---
 
@@ -133,9 +134,11 @@ else.* — demo.py · preflight.py · SKILL.md · D-064
 
 ## COMPONENTS — skill, tools, and agents
 
-The deliverable is a skill package. `SKILL.md` orchestrates deterministic **tools** (no LLM)
-and, where genuine judgement is needed, **agents** (LLM). Everything writes to SQLite; nothing
-returns prose to the orchestrator.
+The deliverable is a skill package — plus, since D-069, a hosted web surface over the same
+tools. `SKILL.md` orchestrates deterministic **tools** (no LLM) and, where genuine judgement is
+needed, **agents** (LLM). Everything writes to SQLite; nothing returns prose to the
+orchestrator. The web tier (violet-blue) wraps the identical tool chain in a job and an HTTP
+boundary; it adds no new way for a fact to enter the system.
 
 ```mermaid
 %%{init:{'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif,system-ui,sans-serif','fontSize':'14px','primaryColor':'#e6edfb','primaryBorderColor':'#3f5bc4','primaryTextColor':'#18203a','lineColor':'#95a0b5','secondaryColor':'#eef1f6','tertiaryColor':'#f6f8fb','clusterBkg':'#f6f8fb','clusterBorder':'#cbd3e2','edgeLabelBackground':'#ffffff'}}}%%
@@ -170,6 +173,13 @@ flowchart TD
     A5["adapter-author"]
   end
 
+  subgraph WEB["Hosted web tier — D-069 (wrapper, not a second engine)"]
+    PG["wizard page — webapp.py"]
+    API["HTTP surface — webapi.py"]
+    JOB["scan job — jobs.py<br/>idempotent · cancel · watchdog"]
+    XP["query-expander — expand.py<br/>queries, never claims"]
+  end
+
   SK --> INT
   INT --> SM --> PLAN
   ST --> PLAN
@@ -185,24 +195,38 @@ flowchart TD
   D -.->|"on failed fetch"| A5
   SCR -->|"sample claims"| A4
 
+  PG --> API
+  API --> XP
+  XP -.->|"variants — fail-closed"| SM
+  API --> SM
+  API --> JOB
+  JOB -->|"runs the SAME pipeline"| PLAN
+  JOB -.->|"progress · cancel · resume"| PG
+  EXP -.->|"signed URL, 15 min"| PG
+
   classDef tool fill:#e6edfb,stroke:#3f5bc4,color:#16203c;
   classDef agentv fill:#efe7fa,stroke:#7c4fc4,color:#2a1544;
   classDef agent fill:#e4f2e9,stroke:#2f9767,color:#123626;
   classDef gate fill:#e3f2ef,stroke:#1e8c78,color:#0d362e;
   classDef orch fill:#fdf2e0,stroke:#c58a1a,color:#3a2b0e;
+  classDef web fill:#e7ecfb,stroke:#4a5fd0,color:#161d3c;
   class D,FE,DD,GQ,SM,ST,CP,MI,SCR,EXP tool
   class BR agentv
   class PACE gate
   class A1,A2,A3,A4,A5 agent
   class SK,INT,PLAN orch
+  class PG,API,JOB,XP web
 ```
 
 *Intent interpretation and query generation are done by the orchestrator inline — they are the
 "generate, don't look up" judgement — producing a SearchPlan the deterministic tools consume.
 The browser seam (pace → browser-rung → browser-fill) is the default walled path; the
 chrome-prompt-generator + md-ingester pair is the classic human rung it falls back to. Agents
-are defined by what needs judgement; workers return a task id and status, never prose.* —
-architecture.md §4 · D-042 · D-045 · D-055 · D-064 · D-065 · D-066 · D-067
+are defined by what needs judgement; workers return a task id and status, never prose. On the
+hosted surface there is no orchestrator to interpret intent, so the wizard assembles the same
+SearchPlan from explicit choices — assisted by subject-map and the query-expander, which
+produce searches, never facts, so D-045's boundary is preserved rather than crossed.* —
+architecture.md §4, §11 · D-042 · D-045 · D-055 · D-064 · D-065 · D-066 · D-067 · D-068 · D-069
 
 ---
 
@@ -298,6 +322,65 @@ flowchart TD
 *A professor is never dropped for missing data — the gap is shown, not hidden. Stage 0's plan
 confirmation is now concrete: the subject map (SCAN SETUP map) is the review.* —
 product-flow.md · D-021 · D-022 · D-037 · D-066
+
+---
+
+## WEB — the hosted surface: one job, watched and stoppable
+
+The same pipeline, for a student who will not open a terminal (D-069). The wizard assembles a
+plan, the API starts a **job**, a worker runs the identical scan, and the page narrates it. Every
+terminal state is resumable, so there is no dead end.
+
+```mermaid
+%%{init:{'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif,system-ui,sans-serif','fontSize':'14px','primaryColor':'#e6edfb','primaryBorderColor':'#3f5bc4','primaryTextColor':'#18203a','lineColor':'#95a0b5','secondaryColor':'#eef1f6','tertiaryColor':'#f6f8fb','clusterBkg':'#f6f8fb','clusterBorder':'#cbd3e2','edgeLabelBackground':'#ffffff'}}}%%
+flowchart TD
+  W1["1 You — intent · country · email<br/>email is not a login"]
+  W2["2 Field — Understand"]
+  EXP["/api/expand — variants<br/>fail-closed: no key → your own words"]
+  MAP["/api/map — once per phrasing<br/>merged in the browser (D-070)"]
+  W3["3 Topics — checkbox tree<br/>or name professors directly"]
+  W4["4 Scope — universities · shortlist<br/>cost stated BEFORE it is spent"]
+  START["POST /api/scan"]
+  IDEM{"same email + plan<br/>already running?"}
+  JOB["job: queued<br/>id = the access token"]
+  RUN["worker runs the SAME pipeline"]
+  POLL["5 Progress — poll every 4 s<br/>real phase · partial warnings"]
+  CAN{"Cancel?"}
+  STOP["cancelling → cancelled<br/>keeps everything gathered"]
+  STALL["watchdog: stale heartbeat<br/>→ failed, safe to resume"]
+  DONE["done"]
+  RES["/api/result → 15-min signed URL"]
+  DASH["the same dashboard"]
+
+  W1 --> W2 --> EXP --> MAP --> W3 --> W4 --> START --> IDEM
+  IDEM -->|"yes — return the EXISTING job"| POLL
+  IDEM -->|"no"| JOB --> RUN --> POLL
+  POLL --> CAN
+  CAN -->|"no"| DONE --> RES --> DASH
+  CAN -->|"yes"| STOP
+  RUN -.->|"no heartbeat"| STALL
+  STOP -.->|"resume — same job id"| JOB
+  STALL -.->|"resume"| JOB
+
+  classDef web fill:#e7ecfb,stroke:#4a5fd0,color:#161d3c;
+  classDef tool fill:#e6edfb,stroke:#3f5bc4,color:#16203c;
+  classDef gate fill:#e3f2ef,stroke:#1e8c78,color:#0d362e;
+  classDef store fill:#fdf2e0,stroke:#c58a1a,color:#3a2b0e;
+  classDef skip fill:#edeff3,stroke:#98a2b4,color:#565f6e;
+  class W1,W2,W3,W4,POLL,START,RES web
+  class EXP,MAP,JOB,RUN tool
+  class IDEM,CAN gate
+  class DASH,DONE store
+  class STOP,STALL skip
+```
+
+*The job id is the access token — jobs are never listable, and Firestore denies client reads
+outright, so the id opens our filtering endpoint, not the raw document (which holds the email and
+the plan). Cancel is cooperative, not a kill: the engine stops between units of work and exports
+what it has. A double-click cannot start a second scan, and a dead worker becomes an honest
+`failed` rather than a job spinning forever. Results are personal data: private bucket, 15-minute
+signed URLs re-minted per request, deleted after seven days.* —
+architecture.md §11 · product-flow.md · D-005 · D-037 · D-068 · D-069 · D-070
 
 ---
 
@@ -468,7 +551,8 @@ the human rung.* — research/social-sources.md · D-038 · D-044 · D-065
 ## DATA — the core of the model
 
 The spine that lets facts join, dedupe and diff — the thing the corpus's prose files could not
-do. 31 entities in total (24 world-model + 7 pipeline/user-action); the core is shown.
+do. 32 entities in total (24 world-model + 8 pipeline/user-action, the eighth being the hosted
+`Job`, D-069); the core is shown.
 
 ```mermaid
 flowchart TD
@@ -591,16 +675,16 @@ ethics-and-compliance.md · D-005 · D-023 · D-024 · D-032 · D-035 · D-065
 
 ---
 
-## DECISIONS — how the 67 cluster
+## DECISIONS — how the 70 cluster
 
-Every decision belongs to one of eight themes. This shows the shape of the design space, and
-which clusters still carry the most risk. (67 decisions after the browser-tier round; the map
+Every decision belongs to one of nine themes. This shows the shape of the design space, and
+which clusters still carry the most risk. (70 decisions after the hosted-web round; the map
 names representative ones per theme, not all.)
 
 ```mermaid
 %%{init:{'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif,system-ui,sans-serif','fontSize':'14px','primaryColor':'#e6edfb','primaryBorderColor':'#3f5bc4','primaryTextColor':'#18203a','lineColor':'#95a0b5','secondaryColor':'#eef1f6','tertiaryColor':'#f6f8fb','clusterBkg':'#f6f8fb','clusterBorder':'#cbd3e2'}}}%%
 flowchart TD
-  ROOT["67 decisions"]
+  ROOT["70 decisions"]
   ROOT --> SCOPE["Scope & identity<br/>D-001·02·04·06·07·12·34·42"]
   ROOT --> SRC["Data sources<br/>D-013·14·15·16·20·25·28·39·44"]
   ROOT --> DATA["Data model<br/>D-009·10·26·29·30·37"]
@@ -609,20 +693,26 @@ flowchart TD
   ROOT --> ETH["Ethics<br/>D-005·19·23·24·32·35·43"]
   ROOT --> COST["Cost & perf<br/>D-011"]
   ROOT --> FRONT["Browser tier & front door<br/>D-064·65·66·67"]
+  ROOT --> WEBT["Hosted web product<br/>D-068·69·70"]
 
   SCOPE --> RISK["risk accepted:<br/>generic v1 with no golden fixture<br/>D-34 + D-11"]
+  WEBT --> WRISK["cost accepted:<br/>client-side merge spends up to 8<br/>of the 30/h map budget — D-070"]
 
   classDef tool fill:#e6edfb,stroke:#3f5bc4,color:#16203c;
   classDef agentv fill:#efe7fa,stroke:#7c4fc4,color:#2a1544;
   classDef human fill:#fbe7ef,stroke:#bd4a66,color:#3a1120;
+  classDef web fill:#e7ecfb,stroke:#4a5fd0,color:#161d3c;
   class SCOPE,SRC,DATA,PROD,DASH,ETH,COST tool
   class FRONT agentv
-  class RISK human
+  class WEBT web
+  class RISK,WRISK human
 ```
 
 *The one flagged risk: fully-generic v1 (D-034) without a corpus-sourced regression fixture
 (D-011/D-035). Managed by fail-loud coverage, per-value confidence, and cassette + synthetic
-tests.* — DECISIONS.md
+tests. The hosted round added one accepted cost rather than a risk: the client-side merge
+(D-070) trades throttle budget for honest per-phrasing failure, with the revisit trigger written
+down in BLOCKERS.md B-001.* — DECISIONS.md · BLOCKERS.md
 
 ---
 

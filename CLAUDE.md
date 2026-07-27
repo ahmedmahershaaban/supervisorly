@@ -1,16 +1,20 @@
 # CLAUDE.md — working in the Supervisorly repo
 
-Supervisorly is a **Claude-Code skill + agents + tools** that helps a student find a research
-supervisor (PhD / master's / postdoc) in **any country**, with every fact backed by a citable
-source. This file orients any Claude instance working here.
+Supervisorly helps a student find a research supervisor (PhD / master's / postdoc) in **any
+country**, with every fact backed by a citable source. It has **two surfaces over one engine**:
+the **Claude-Code skill + agents + tools**, and a **hosted web app** (D-069) — deployed at
+`supervisorly.web.app`, a 5-step wizard that runs the same scan as a background job. This file
+orients any Claude instance working here.
 
 ## Read first
 - `docs/HANDOVER.md` — the map of everything.
-- `docs/DECISIONS.md` — **binding.** 63 numbered decisions (D-001…D-063). Never contradict a
+- `docs/DECISIONS.md` — **binding.** 70 numbered decisions (D-001…D-070). Never contradict a
   locked decision; if you think one is wrong, record it in `docs/BLOCKERS.md`, don't silently
   deviate.
 - `docs/IMPLEMENTATION_GOAL.md` — the build/self-test/refine/completion contract.
 - `docs/architecture.md`, `docs/product-flow.md`, `docs/domain-model.md` — how it works.
+- `docs/FIREBASE_WEB_PLAN.md` + `firebase/README.md` — the web product and its deploy runbook;
+  `docs/WEB_COMPLETION_REPORT.md` §4b lists the defects that only a real deploy could find.
 
 ## Governing constraints (violating any is a defect, not a choice)
 - **Generate, don't look up** (D-038): no embedded university list, no keyword dictionary; the
@@ -20,7 +24,15 @@ source. This file orients any Claude instance working here.
   `C:\Users\ahmed\Documents\Downloads` as data, seed, or fixture. Every real fact must be one the
   tool fetched itself, live, from a citable public source.
 - **Deterministic layer has no LLM** (D-009): `src/supervisorly/{discover,fetch,model,score,export}`
-  contain zero model calls. The LLM judgement lives in `.claude/agents/`.
+  contain zero model calls. The LLM judgement lives in `.claude/agents/`. **One sanctioned
+  exception** (D-068): `discover/expand.py` may ask an LLM for *search queries, never claims* —
+  it is fail-closed (no key → the student's own words), and every fact still passes the D-010
+  quote gate, so a bad expansion can only cost topics, never mint a professor or a deadline.
+- **The web tier is honest, private, and stoppable** (D-069/D-070): endpoints are rate-limited;
+  a job id is an unguessable access token and jobs are never listable; results are personal data
+  (private bucket, short-lived signed URLs, 7-day delete); cancel is graceful and every terminal
+  state is resumable — never a dead end. The multi-phrasing subject-map merge lives client-side
+  (D-070) so one failing phrasing cannot fail the click.
 - **Every field is a Claim with a verified quote** (D-010, D-047): a claim whose quote is not
   found in its snapshot is rejected in code. `NOT_FOUND` is a real value; never guess.
 - **Honest emptiness** (D-022/037/046): the four states `value / searched_absent /
@@ -33,7 +45,12 @@ source. This file orients any Claude instance working here.
 
 ## How to work here
 - Use the project **`.venv`**; run the CLI as `python -m supervisorly …`; run tests with
-  `python -m pytest`.
+  `python -m pytest`. Set `TMPDIR` **outside the repo** first, or the D-005 guard correctly
+  fires on pytest's `tmp_path` and one CLI test fails for the wrong reason.
+- The web app locally is two commands: `python -m supervisorly.webapi --port 8765` serves the
+  **API only**, and the page is generated separately with
+  `build_webapp(api_base='http://localhost:8765')`. Deploying is `firebase/README.md`, run from
+  the `firebase/` folder.
 - Work on `build/v1` (or a feature branch), never `master` directly.
 - **One tracked commit per round** with a real message (what changed, what you ran, the result) —
   see `docs/IMPLEMENTATION_GOAL.md §8`. Each commit leaves the suite green.
