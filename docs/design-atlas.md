@@ -718,3 +718,163 @@ down in BLOCKERS.md B-001.* — DECISIONS.md · BLOCKERS.md
 
 *This atlas is a view over the design documents, not a replacement for them. When a diagram and
 a document disagree, the document wins — tell me and I'll fix the diagram.*
+
+## WHERE IT LIVES — every node, mapped to the code
+
+Every map above is a picture of something that exists. This is the index from the picture to the code — **machine-verified**: the build checks that each file exists and that each symbol is really defined in it, so a rename breaks the check rather than quietly rotting the atlas. `atlas.html` shows the same mapping in its side panel when you click a node.
+
+### Plan & setup
+
+| Node | Lives in | Note |
+|---|---|---|
+| **supervisorly skill** | `.claude/skills/supervisorly/SKILL.md` — | the orchestrator skill |
+|  | `tests/test_skill_contracts.py` — | asserts the skill contract |
+| **searchplan** | `src/supervisorly/cli.py` `PLAN_REQUIRED_KEYS` | the required keys |
+|  | `src/supervisorly/cli.py` `_plan_value_errors` | fail-loud validation |
+|  | `src/supervisorly/cli.py` `_load_plan` | load, never silently default |
+| **interpret intent** | `src/supervisorly/cli.py` `PLAN_INTENT_KINDS` | the accepted intents |
+|  | `src/supervisorly/score/scorer.py` `gates_for` | intent selects the hard gates |
+| **map field** | `src/supervisorly/cli.py` `cmd_map_field` | the map-field command |
+|  | `src/supervisorly/discover/subjects.py` `subject_map` | builds the topic hierarchy |
+| **scan studio** | `src/supervisorly/export/studio.py` `build_studio` | the self-contained wizard |
+|  | `src/supervisorly/cli.py` `cmd_studio` | the studio command |
+| **subject tree** | `src/supervisorly/discover/subjects.py` `subject_map` | domain to field to subfield |
+|  | `src/supervisorly/export/studio.py` `build_studio` | renders it as a checkbox tree |
+| **named professors** | `src/supervisorly/cli.py` `_resolve_named_targets` | names to OpenAlex authors |
+| **targets json** | `src/supervisorly/cli.py` `_load_target_specs` | the --targets file |
+| **scan plan** | `src/supervisorly/cli.py` `cmd_scan` | merges plan, targets and flags |
+| **supervisorly plan** | `src/supervisorly/cli.py` `_load_plan` | the plan JSON contract |
+| **offline demo** | `src/supervisorly/demo.py` `demo_fixture` | cassettes + a synthetic plan |
+|  | `src/supervisorly/pipeline.py` `run_offline` | the offline path |
+| **live scan** | `src/supervisorly/pipeline.py` `run_live` | the live run entry point |
+|  | `src/supervisorly/cli.py` `cmd_scan` | builds the plan, calls run_live |
+| **contact email** | `src/supervisorly/preflight.py` `CONTACT_EMAIL_ENV` | SUPERVISORLY_CONTACT_EMAIL |
+|  | `src/supervisorly/preflight.py` `require_credentials` | refuses to run without it |
+
+### Discovery & fetch
+
+| Node | Lives in | Note |
+|---|---|---|
+| **discovery-ladder** | `src/supervisorly/discover/ladder.py` `build_targets` | one round, end to end |
+|  | `src/supervisorly/discover/ladder.py` `enumerate_professors` | authors per institution |
+|  | `src/supervisorly/discover/ladder.py` `select_institutions` | honours university_mode |
+| **fetcher** | `src/supervisorly/fetch/fetcher.py` `Fetcher` | robots-gated, paced, snapshotting |
+|  | `src/supervisorly/fetch/fetcher.py` `FetchResult` | allowed / status / snapshot hash |
+| **deep-dive** | `src/supervisorly/pipeline.py` `_deep_dive_one` | one target: fetch, extract, claim |
+|  | `src/supervisorly/pipeline.py` `_process_targets` | the loop over targets |
+| **gap-queue** | `src/supervisorly/model/runs.py` `incomplete_tasks` | open gap tasks per run |
+|  | `src/supervisorly/pipeline.py` `_target_open_gap` | derives gaps from claims |
+| **signal tier** | `src/supervisorly/pipeline.py` `run_signal_extractors` | one cheap page each |
+|  | `src/supervisorly/pipeline.py` `extract_recruiting_signal` | regex, no LLM |
+| **shortlist gate** | `src/supervisorly/pipeline.py` `_apply_shortlist` | top-N on research fit |
+|  | `src/supervisorly/pipeline.py` `DEFAULT_SHORTLIST_SIZE` | 40 by default |
+| **warm cache** | `src/supervisorly/model/extraction_cache.py` `lookup` | the four-tuple cache key |
+|  | `src/supervisorly/model/runs.py` `target_stage_done` | resume skips finished work |
+| **phase 1** | `src/supervisorly/model/runs.py` `TASK_PHASES` | the canonical phase enum |
+|  | `src/supervisorly/fetch/fetcher.py` `Fetcher` | structured/API + direct fetch |
+| **phase 2** | `src/supervisorly/fetch/browser_fill.py` `fill_from_browser_page` | the browser tier consumer |
+| **phase 3** | `src/supervisorly/extract/chrome_prompt.py` `generate_prompt` | the human-rung emitter |
+|  | `src/supervisorly/ingest.py` `ingest_md` | parses the returned MD |
+
+### Browser tier & human rung
+
+| Node | Lives in | Note |
+|---|---|---|
+| **pacing gate** | `src/supervisorly/ethics/pacing.py` `check` | allow or deny, per host |
+|  | `src/supervisorly/ethics/pacing.py` `POLICY` | intervals and caps as data |
+|  | `src/supervisorly/cli.py` `cmd_pace` | exit 3 means wait or deny |
+| **pace gate** | `src/supervisorly/ethics/pacing.py` `check` | the gate itself |
+|  | `src/supervisorly/ethics/pacing.py` `classify` | host class by suffix |
+| **pace abort** | `src/supervisorly/ethics/pacing.py` `abort` | latches the host, never retried |
+| **policy in code** | `src/supervisorly/ethics/pacing.py` `POLICY` | the rules are data, not vibes |
+|  | `src/supervisorly/ethics/pacing.py` `_record_fetch` | pins the jittered instant |
+| **ingest page** | `src/supervisorly/fetch/browser_rung.py` `ingest_page` | agent text becomes a snapshot |
+|  | `src/supervisorly/fetch/browser_rung.py` `SOURCE_TIER` | the agent_browser tier |
+|  | `src/supervisorly/cli.py` `cmd_ingest_page` | the CLI seam |
+| **browser rung** | `src/supervisorly/fetch/browser_rung.py` `ingest_page` | the snapshot seam |
+|  | `src/supervisorly/fetch/browser_fill.py` `fill_from_browser_page` | the consumer half |
+| **browser fill** | `src/supervisorly/fetch/browser_fill.py` `fill_from_browser_page` | runs the real extractors |
+|  | `src/supervisorly/pipeline.py` `BROWSER_FILL_FIELDS` | what a browser page may fill |
+| **reexport** | `src/supervisorly/pipeline.py` `reexport` | rebuild with no fetching |
+|  | `src/supervisorly/cli.py` `cmd_reexport` | the reexport command |
+| **chrome-prompt-generator** | `src/supervisorly/extract/chrome_prompt.py` `generate_prompt` | the shared MD grammar |
+| **md-ingester** | `src/supervisorly/ingest.py` `ingest_md` | MD back into claims |
+|  | `src/supervisorly/extract/md_grammar.py` — | the shared MD grammar |
+
+### Model, claims & export
+
+| Node | Lives in | Note |
+|---|---|---|
+| **sqlite** | `src/supervisorly/model/schema.sql` — | the schema — source of truth |
+|  | `src/supervisorly/model/db.py` `open_db` | connect and migrate |
+| **claim** | `src/supervisorly/model/claims.py` `record_claim` | the quote gate lives here |
+|  | `src/supervisorly/fetch/normalize.py` `quote_in_snapshot` | the actual quote check |
+| **snapshot** | `src/supervisorly/fetch/snapshot.py` `SnapshotStore` | content-addressed on disk |
+|  | `src/supervisorly/fetch/normalize.py` `content_hash` | volatile chrome masked first |
+| **conflict** | _not built_ | Half-built: the `conflict` table exists in model/schema.sql and claims.py supersede_prior keeps history, but no code writes conflict rows yet. |
+| **scorer** | `src/supervisorly/score/scorer.py` `score_professor` | weighted components |
+|  | `src/supervisorly/score/scorer.py` `evaluate_eligibility` | the hard gates |
+| **exporter** | `src/supervisorly/export/json_export.py` `build_export` | the four-state envelope |
+|  | `src/supervisorly/export/dashboard.py` `build_dashboard` | the self-contained HTML |
+| **we looked** | `src/supervisorly/export/json_export.py` `build_export` | searched_absent is a real value |
+
+### Ethics
+
+| Node | Lives in | Note |
+|---|---|---|
+| **robots** | `src/supervisorly/fetch/robots.py` `is_allowed` | rule matching, fail-closed |
+|  | `src/supervisorly/fetch/fetcher.py` `Fetcher` | re-checks the redirect target |
+| **optout** | `src/supervisorly/ethics/optout.py` `filter_targets` | drops opted-out records |
+|  | `src/supervisorly/ethics/optout.py` `load_optout` | reads optout.txt |
+| **corpus** | `tests/test_ethics.py` `CORPUS_MARKERS` | the forbidden path markers |
+|  | `tests/test_ethics.py` `test_corpus_path_is_never_referenced_in_code` | the enforcing test |
+
+### Agents
+
+| Node | Lives in | Note |
+|---|---|---|
+| **recruiting-analyst** | `.claude/agents/recruiting-analyst.md` — | the agent contract |
+| **eligibility-analyst** | `.claude/agents/eligibility-analyst.md` — | the agent contract |
+| **profile-synthesist** | `.claude/agents/profile-synthesist.md` — | the agent contract |
+| **evidence-auditor** | `.claude/agents/evidence-auditor.md` — | the agent contract |
+| **adapter-author** | `.claude/agents/adapter-author.md` — | the agent contract |
+
+### Hosted web tier
+
+| Node | Lives in | Note |
+|---|---|---|
+| **the email is not a login** | `src/supervisorly/export/webapp.py` `build_webapp` | step 1 of the wizard |
+|  | `src/supervisorly/webapi.py` `handle_scan_start` | one active job per email |
+| **api/expand** | `src/supervisorly/discover/expand.py` `expand_query` | fail-closed by construction |
+|  | `src/supervisorly/webapi.py` `handle_expand` | key from server config only |
+|  | `firebase/_core.py` `handle_expand` | adds the cache + throttle |
+| **api/map** | `src/supervisorly/webapi.py` `handle_subject_map` | takes ONE field |
+|  | `src/supervisorly/export/webapp.py` `build_webapp` | mergeMaps merges in the page |
+| **cost stated before** | `src/supervisorly/export/webapp.py` `build_webapp` | costEstimate in the page |
+|  | `src/supervisorly/webapi.py` `_plan_cap_errors` | the server-side caps |
+| **already running** | `src/supervisorly/jobs.py` `new_job_key` | the idempotency key |
+|  | `src/supervisorly/webapi.py` `handle_scan_start` | returns the existing job |
+|  | `firebase/_core.py` `FirestoreJobStore` | the create race, transactional |
+| **the id is the access token** | `src/supervisorly/webapi.py` `handle_scan_status` | by id, never listable |
+|  | `firebase/firestore.rules` — | clients get no read at all |
+| **worker runs the same pipeline** | `firebase/worker.py` `main` | the Cloud Run entrypoint |
+|  | `src/supervisorly/jobs.py` `run_scan_job` | wraps the same run_live |
+|  | `src/supervisorly/pipeline.py` `run_live` | the identical engine |
+| **poll every 4** | `src/supervisorly/export/webapp.py` `build_webapp` | POLL_MS, renderStatus |
+|  | `src/supervisorly/webapi.py` `handle_scan_status` | status + rich progress |
+| **keeps everything gathered** | `src/supervisorly/jobs.py` `request_cancel` | sets the cooperative flag |
+|  | `src/supervisorly/pipeline.py` `run_live` | checks should_stop between units |
+| **safe to resume** | `src/supervisorly/jobs.py` `STALL_MESSAGE` | the honest failure text |
+|  | `src/supervisorly/webapi.py` `handle_scan_status` | the watchdog fires here |
+|  | `src/supervisorly/webapi.py` `handle_scan_resume` | terminal states are resumable |
+| **15-min signed url** | `firebase/_core.py` `signed_result_url` | fresh URL every request |
+|  | `firebase/_core.py` `handle_scan_result` | 302, and 409 until done |
+|  | `firebase/lifecycle.json` — | the 7-day delete |
+
+### Other
+
+| Node | Lives in | Note |
+|---|---|---|
+| **people search** | _not built_ | Designed, not built. Stage 4 exists in SKILL.md prose only — no module implements it yet. |
+
+*Two entries say **not built** on purpose. The maps draw the designed system; where the code has not caught up, the atlas says so rather than quietly omitting the node — the gap is the honest part, and hiding it would make this index a nicer lie.*
