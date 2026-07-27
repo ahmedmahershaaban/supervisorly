@@ -8,7 +8,14 @@ Plan of record: `docs/FIREBASE_WEB_PLAN.md` (§7 is the 8-step build order). The
 `WEB_IMPLEMENTATION_GOAL.md`; the plan plays that role, and the completion contract is the
 one in `docs/IMPLEMENTATION_GOAL.md` §5–§8.
 
-**Status: steps 1–8 complete and verified offline. NOT DEPLOYED — see §6.**
+**Status: steps 1–8 complete, and DEPLOYED — live at https://supervisorly.web.app,
+verified end to end against real GCP (§4b). Suite green at 569.**
+
+> This line previously read *"NOT DEPLOYED — see §6"*, and §6 called the untested cloud
+> surface "the single biggest untested surface, and no test in this repo can close it."
+> That prediction was exactly right: the first real deploy produced **seven** defects that
+> 566 passing offline tests could not have caught. They are catalogued in §4b, which is the
+> most useful section of this report.
 
 ---
 
@@ -152,6 +159,46 @@ dependency on dev state), because the suite ran entirely inside it.
 
 ---
 
+## 4b — Production deploy (2026-07-27): seven defects no offline test could catch
+
+Deployed to Firebase project `supervisorly` (number 1040155948868, `us-central1`, Blaze).
+Every defect below survived a green 566-test suite, an eight-finding adversarial audit and
+a clean-room pass. Each is fixed, and `firebase/README.md` now states the reason.
+
+| # | Defect | What it would have cost |
+|---|---|---|
+| 1 | `firestore.Client()` implicitly targeted `(default)`; a project created today can get a **named** database instead | Every Firestore call 404s |
+| 2 | Runbook said `--no-public-access-prevention`, commented *"keep it PRIVATE"* — the flag **lifts** the protection | A bucket of personal data left exposable (D-005/D-069c) |
+| 3 | `gcloud run jobs create --source` — `create` takes only a prebuilt `--image` | Deploy stops dead |
+| 4 | `supervisorly @ git+https://…` on `python:3.11-slim`, which ships no `git` | Container build fails |
+| 5 | IAM step named `<project>@appspot.gserviceaccount.com`, which **does not exist** here (404 Unknown service account), and omitted three required roles | *Start scan* and *Open dashboard* both broken |
+| 6 | `public/index.html` shadowed the `webapp` function — Hosting serves **static files before rewrites**, the opposite of what that file's own text claimed | Visitors got a 664-byte stub instead of the 54 KB app |
+| 7 | v4 signing needs `service_account_email` + `access_token` to route through IAM signBlob; the `serviceAccountTokenCreator` grant alone is **not** sufficient | `/api/result/<id>` 500s: *"you need a private key to sign credentials"* |
+
+Defects 2, 5, 6 and 7 all **deployed successfully**. A green deploy was never evidence the
+thing worked — which is the transferable lesson here.
+
+### Verified live, not simulated
+
+| Check | Result |
+|---|---|
+| `GET /` | 200, 54,312 bytes — byte-size identical to a local `build_webapp()`, **zero external URLs** (D-069.4 holds in production) |
+| `GET /api/map?field=…` | 200, 13 groups / 25 topics from live OpenAlex |
+| `GET /api/scan/<unknown>` | 404, the honest "never listable" message (D-069b) |
+| `POST /api/scan` | 202, Cloud Run worker launched (`run.invoker` correct) |
+| Job lifecycle | `queued → running → done`, phase `exported` |
+| **Cancel** | 202 → `cancelling` → `cancelled` |
+| **Resume** | 202 → `queued` → `done` — §3.4 safe-exit/resume proven |
+| `GET /api/result/<id>` | 302 → `GOOG4-RSA-SHA256`, 900 s, signed by the runtime SA |
+| The signed URL | 200, 21,890-byte dashboard, `searched_absent` / `never_attempted` rendering |
+| **Same object, unsigned** | **403** — the bucket is genuinely private; the signature does the work |
+
+One false alarm, recorded because being wrong loudly matters: a cancelled *queued* job
+appeared stuck in `cancelling`, and I called it a dead-end bug. Reading the Firestore
+document directly showed `cancelled`, written ~130 s in — the Cloud Run container simply
+had to cold-start before it could observe the flag, and my poll window was 100 s. Not a
+defect; an impatient test.
+
 ## 5 — Definition of Done
 
 | DoD item (contract §6) | Status |
@@ -165,19 +212,19 @@ dependency on dev state), because the suite ran entirely inside it.
 | Docs updated — `BUILD_LOG.md` | ✅ backfilled W0–W6 (never written at the time) + W8 |
 | Docs updated — `DECISIONS.md` | ✅ D-070 |
 | Completion report with honest limitations | ✅ this file |
-| **Deployed and verified against real GCP** | ❌ **not done — §6** |
+| **Deployed and verified against real GCP** | ✅ §4b — live, full lifecycle exercised |
 
 ---
 
 ## 6 — Known limitations (honest)
 
-1. **Nothing has ever been deployed.** No Firebase project, no Cloud Run job, no emulator
-   run against real credentials. Every deploy placeholder (`<FIREBASE_PROJECT_ID>`,
-   `<REGION>`, `<RESULTS_BUCKET>`, `<RELEASE_TAG>`, `<API_BASE_URL>`, the secrets) is
-   still unfilled *by design* (plan §8) — they need Ahmed's own project. So the Firestore
-   rules, the signed-URL flow, the IAM binding and the Cloud Run bridge are verified
-   **only against fakes and the stubbed SDK**, never against Google. That is the single
-   biggest untested surface, and no test in this repo can close it.
+1. ~~Nothing has ever been deployed.~~ **Resolved 2026-07-27** — deployed and exercised end
+   to end (§4b). The prediction that this was "the single biggest untested surface" was
+   correct: it yielded seven defects, four of which deployed green.
+   **What remains untested even now:** the 6-hour task timeout, the stuck-job watchdog
+   (§3.2), the 7-day Firestore/bucket TTLs (they need seven days to prove), throttle
+   behaviour under genuine concurrent load, and any scan large enough to hit the OpenAlex
+   daily budget. The scans run were deliberately tiny (2 institutions, shortlist 3).
 2. **F1's fix encodes an assumption about the hosting front end** — that GCP appends
    `<client>, <lb>` to `X-Forwarded-For`. It is correct for Cloud Functions/Run behind
    Google's front end and is the documented behaviour, but it is *hosting-specific*: put

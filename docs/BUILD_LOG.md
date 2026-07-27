@@ -1156,8 +1156,39 @@ tree still carried no database, snapshot or scan output (D-005). One deviation r
 `docs/WEB_COMPLETION_REPORT.md` §4: the existing `.venv` was kept and a *separate* fresh venv
 used, rather than deleting the machine's only working environment.
 
-**State: GOAL 4 COMPLETE OFFLINE — NOT DEPLOYED.** Suite green at **566** on `build/web`;
-audit closed with zero open findings; clean-room green; DoD checked in
-`docs/WEB_COMPLETION_REPORT.md`. The Firestore rules, signed URLs, IAM binding and Cloud Run
-bridge are verified **only against fakes** — nothing has ever run against a real GCP project,
-and no test in this repo can close that gap (report §6).
+## round W9 — first production deploy (commits `def587b`…`b9804e9`)
+
+Deployed to Firebase project `supervisorly` (`us-central1`, Blaze), live at
+**https://supervisorly.web.app**. The round W8 report called the untested cloud surface
+"the single biggest untested surface, and no test in this repo can close it". It yielded
+**seven defects**, and — the part worth remembering — **four of them deployed green**:
+
+1. `firestore.Client()` implicitly targeted `(default)`; this project got a *named*
+   database, so every call 404'd. The id is now deploy-time config.
+2. The runbook's `--no-public-access-prevention` was commented "keep it PRIVATE" and does
+   the opposite. A bucket of personal data would have been left exposable (D-005).
+3. `gcloud run jobs create --source` does not exist — it is `jobs deploy`.
+4. `git+https://` requirement on `python:3.11-slim`, which ships no `git`. Now a tag
+   tarball, which also pre-empts the same failure in the Functions buildpack.
+5. The IAM step named `<project>@appspot.gserviceaccount.com` — **404 Unknown service
+   account** here — and omitted three roles. Step 6 now *reads* the runtime SA.
+6. `public/index.html` shadowed the `webapp` function: Hosting serves static files
+   **before** rewrites, the reverse of what that placeholder's own text claimed. The site
+   served a 664-byte stub while every function was healthy.
+7. v4 signing needs `service_account_email` + `access_token` to use IAM signBlob; the
+   `serviceAccountTokenCreator` grant alone is not enough. `/api/result/<id>` 500'd with
+   "you need a private key to sign credentials" — the last step of the product.
+
+Verified live: the real 54 KB page with zero external URLs; `/api/map` against live
+OpenAlex; a full `queued → running → done` scan; **cancel → cancelled** and
+**resume → done** (§3.4 proven); `/api/result` 302 → signed URL → 21,890-byte dashboard;
+and the same object unsigned → **403**.
+
+One false alarm, recorded on purpose: a cancelled queued job looked stuck in `cancelling`
+and was called a dead-end bug. The document actually said `cancelled` ~130 s in — a Cloud
+Run cold start, and a 100 s poll window. Not a defect, an impatient test.
+
+**State: GOAL 4 COMPLETE AND DEPLOYED.** Suite green at **569** on `build/web`; audit
+closed; clean-room green; live lifecycle exercised. Still unproven by anything: the 6 h
+task timeout, the §3.2 watchdog, the 7-day TTLs (they need seven days), throttles under
+real concurrency, and any scan large enough to meet the OpenAlex daily budget.
