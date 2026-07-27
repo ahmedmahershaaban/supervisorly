@@ -1,7 +1,7 @@
 # Build log
 
 One short entry per milestone: what was built, what was run, what passed, what changed.
-Newest at the bottom. Branch: `build/v1`.
+Newest at the bottom. Branches, in order: `build/v1` → `build/browser` → `build/web`.
 
 ---
 
@@ -1049,3 +1049,94 @@ with zero open findings; clean-room green; DoD checked in docs/BROWSER_COMPLETIO
 - Verified: every command/flag/module/decision-id/count grepped against the code; all 24
   Mermaid diagrams render (mermaid-cli + system Chrome); inline JS passes node --check; the
   demo-fixture "3 shapes / 3 countries" claim confirmed in demo.py; suite green at **377**.
+
+---
+
+# GOAL 4 — the hosted web product (`build/web`)
+
+> **Backfill notice.** Rounds W0–W6 below were written **after the fact**, during the W8
+> verification round, by reading `git log` — the build log was not kept current while that
+> work happened, which is a contract violation (`IMPLEMENTATION_GOAL.md` §8) worth naming
+> rather than papering over. The commit hashes, file lists and behaviour are read from the
+> commits themselves and are accurate. **Per-round test counts were never recorded and are
+> not reconstructable, so they are omitted rather than guessed**; the first trustworthy
+> figure is 534 at `744c016`, corroborated in W8 (566 today minus the 32 tests W8 added).
+
+## round W0 — groundwork before the web build (commits `fb9781b`…`224207b`)
+
+Pre-web fixes and the plan itself: `docs/atlas.html` bundled Mermaid inline (truly
+standalone) and its lightbox fixed; `map-field` learned to relax zero-hit subject queries
+per-word with idf-weighted ranking so distinctive words outrank generic ones; `run_live`
+gained topic-filtered enumeration, the D-056 shortlist gate and an ORCID deep-dive fallback;
+the first `subject_map` HTTP endpoint (`webapi.py`) + its Functions wrapper landed. Then
+`docs/FIREBASE_WEB_PLAN.md` in three passes — v1, a hardening edge-case review (v2), and v3
+adding the progress UX, scale controls, safe-exit/resume and the safety matrix.
+
+## round W1 — D-068/D-069 + query expansion (commits `9688d72`, `e8d1b91`)
+
+- `docs/DECISIONS.md` — **D-068** (the LLM may generate queries, never claims) and **D-069**
+  (the hosted web product: honesty, privacy, user control) locked before any code.
+- `src/supervisorly/discover/expand.py` — the expansion call, fail-closed: no key → no
+  expansion → the student's own words, never an error and never a leaked key.
+- `discover/subjects.py` — `subject_map_multi` (merge by `topic_id`, best rank, `found_by`
+  tags, ≤8 queries). **Never wired in** — see round W8 and D-070.
+- `discover/ladder.py` + `pipeline.py` + `cli.py` — `max_institutions`, the §4.3 scale
+  control, with an honest "capped at N of M" warning rather than a silent truncation.
+
+## round W2 — progress events + graceful cancel (commit `4b4068b`)
+
+`pipeline.py run_live` emits rich progress events and honours a `should_stop` hook, so a
+scan can be stopped between units of work and still export what it gathered; `model/db.py`
++ `schema.sql` persist the events; CLI gains `--progress`. Default CLI behaviour unchanged.
+
+## round W3 — the job layer (commit `125d6cc`)
+
+`src/supervisorly/jobs.py` (lifecycle `queued → running → done|failed|cancelled`, the §3.3
+idempotency key, the §3.2 stall watchdog, `JsonJobStore` guarded by a lock) and the scan
+endpoints in `webapi.py` (start/status/cancel/resume/result) with a local threaded worker,
+so the whole flow runs offline on cassettes before any cloud existed.
+
+## round W4 — the one dynamic page (commit `7ef3b21`)
+
+`src/supervisorly/export/webapp.py` — the 5-step Atlas wizard as a single self-contained
+page (1140 lines): you → field (*Understand*) → topics → scope → progress. Escapes every
+API string, degrades honestly, and merges the D-068 phrasings **client-side** (the choice
+that round W8 later had to put on the record as D-070).
+
+## round W5+W6 — Firebase wrappers + deploy files (commit `744c016`)
+
+`firebase/_core.py` (Firestore job store mirroring `jobs.py` one-for-one, per-IP throttles,
+the expansion cache, the Cloud Run Job bridge, signed result URLs), `firebase/main.py`
+(thin Functions wrappers), `firebase/worker.py` (the Cloud Run Job entrypoint), and the
+step-7 deploy artifacts: `firebase.json`, `.firebaserc`, `firestore.rules`, `storage.rules`,
+`lifecycle.json` (7-day TTL), `Dockerfile.worker` and an 8-step `README.md` runbook incl.
+the `roles/run.invoker` IAM binding. Every `google.cloud.*` import is lazy so the module
+loads with no SDKs and the suite stubs `sys.modules` instead of installing them.
+→ **534 passed.** Deploy placeholders left unfilled by design (plan §8).
+
+## round W8 — verification round (commits `bcc370d`, `3308b90`, `ab8bac2`)
+
+Plan §7 step 8. Three green waves:
+
+- **Wave 1 (`bcc370d`) — adversarial audit of the new surface, 8 findings, all fixed with a
+  regression test each.** **HIGH:** `_ip` keyed the throttles on the *leftmost*
+  X-Forwarded-For entry, which GCP appends to rather than replaces — a fresh header per
+  request bought an unlimited source budget; the job endpoints were unthrottled entirely, so
+  cancel→resume in a loop re-invoked the Cloud Run Job without limit; `firestore.rules`
+  `allow get: if true` returned the whole job doc (email, plan) to anyone with an id while
+  the HTTP handler filters; `set_status` was a non-transactional full-document overwrite that
+  silently reverted a concurrent cancel and dropped progress events. **MED/LOW:** the named
+  wrappers ran on any method (`GET /scan_cancel?id=…` was CSRF-able), the legacy
+  `subject_map` alias skipped the throttle, `/api/map` matched on path alone, `esc()` left
+  `'` unescaped. Also made `firebase/main.py`'s wrappers testable offline for the first time
+  — they sat behind `if https_fn is not None` and were wholly untested, which is how two of
+  these survived review. → **556 passed**.
+- **Wave 2 (`3308b90`) — the click-through.** No real-Chrome harness exists in this repo (B7's
+  Chrome check was manual and uncommitted), so this extends the Node `vm` + mini-DOM pattern
+  from `test_studio.py` that plan step 8 actually names, driving the page's own unmodified JS
+  through all five steps and a **cancel + resume** pass, asserting the exact request sequence,
+  the honest-state text and the button visibility at each stage. → **565 passed**.
+- **Wave 3 (`ab8bac2`) — D-070 + `docs/BLOCKERS.md` created.** `subject_map_multi` was correct,
+  tested and unreachable. Recorded as a decision with both sides of the trade-off (client-side
+  keeps per-phrasing failure honest; server-side would cost 1 throttle unit instead of 8)
+  rather than silently deleted or silently refactored. → **566 passed**.
