@@ -61,6 +61,9 @@ WEBAPP_API_BASE_ENV = "WEBAPP_API_BASE"
 #: database. Newer Firebase projects can hand you a NAMED database instead, in which case
 #: this must carry that name or every call 404s (see ``_firestore_client``).
 FIRESTORE_DATABASE_ENV = "FIRESTORE_DATABASE"
+#: Optional override for the account used to mint signed URLs. Normally resolved from the
+#: runtime credentials; set it only when signing as a different service account.
+SIGNING_SA_ENV = "SIGNING_SERVICE_ACCOUNT"
 
 #: the Cloud Run Job that executes scans (§3.6).
 WORKER_JOB_NAME = "supervisorly-scan-worker"
@@ -505,13 +508,51 @@ def handle_scan_resume(job_id: str, *, store=None, client=None, environ=None,
 
 # ── the result redirect (D-069(c): private bucket + 15-min signed URLs) ──────
 
+def _signing_kwargs(environ=None) -> dict:
+    """Extra ``generate_signed_url`` arguments so v4 signing works on Cloud Run/Functions.
+
+    There is no key file in a serverless runtime: the ambient credentials are
+    ``compute_engine.Credentials``, a bearer token with no private key, and asking the
+    storage library to sign with them raises
+
+        AttributeError: you need a private key to sign credentials.
+
+    Handing it the service-account email plus a live access token makes it sign through
+    the IAM ``signBlob`` API instead — which is what the
+    ``roles/iam.serviceAccountTokenCreator`` self-binding exists to permit. Note that the
+    IAM binding alone is NOT enough; the library only takes that path when given these
+    arguments.
+
+    Returns ``{}`` whenever the credentials can already sign unaided (a real key file) or
+    cannot be resolved at all (tests, local dev) — so nothing outside the cloud changes.
+    """
+    environ = os.environ if environ is None else environ
+    try:
+        import google.auth
+        from google.auth.transport import requests as _grequests
+
+        creds, _ = google.auth.default()
+        if getattr(creds, "signer", None) is not None:
+            return {}                       # has a private key — sign directly
+        creds.refresh(_grequests.Request())  # populates token + the real SA email
+        email = ((environ.get(SIGNING_SA_ENV) or "").strip()
+                 or getattr(creds, "service_account_email", "") or "")
+        token = getattr(creds, "token", None)
+        if email and email != "default" and token:
+            return {"service_account_email": email, "access_token": token}
+    except Exception:
+        pass                                 # fall through: let the library try unaided
+    return {}
+
+
 def signed_result_url(bucket_name: str, job_id: str, *, storage_client=None,
-                      expiration_s: int = 900) -> str:
+                      expiration_s: int = 900, environ=None) -> str:
     """A fresh 15-min v4 signed URL for the job's dashboard — re-issued on every
     request, so an expired URL is never a dead end."""
     client = storage_client if storage_client is not None else _storage_client()
     blob = client.bucket(bucket_name).blob(f"{job_id}/dashboard.html")
-    return blob.generate_signed_url(version="v4", expiration=expiration_s, method="GET")
+    return blob.generate_signed_url(version="v4", expiration=expiration_s, method="GET",
+                                    **_signing_kwargs(environ))
 
 
 def handle_scan_result(job_id: str, *, store=None, client=None, environ=None,

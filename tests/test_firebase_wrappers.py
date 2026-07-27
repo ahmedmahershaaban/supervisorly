@@ -882,6 +882,61 @@ def test_result_is_a_302_with_a_fresh_signed_url_when_done(google):
     assert call["method"] == "GET"
 
 
+def _stub_google_auth(monkeypatch, creds):
+    """Stub ``google.auth`` (+ its transport) for the signing path.
+
+    sys.modules alone is not enough: ``import google.auth`` then ``google.auth.default()``
+    resolves ``auth`` as an ATTRIBUTE of the parent ``google`` package, which the real
+    import system sets and a bare sys.modules insert does not.
+    """
+    auth = types.ModuleType("google.auth")
+    auth.default = lambda: (creds, "supervisorly")
+    transport = types.ModuleType("google.auth.transport")
+    req_mod = types.ModuleType("google.auth.transport.requests")
+    req_mod.Request = lambda: object()
+    transport.requests = req_mod
+    auth.transport = transport
+
+    pkg = sys.modules.get("google") or types.ModuleType("google")
+    monkeypatch.setitem(sys.modules, "google", pkg)
+    monkeypatch.setattr(pkg, "auth", auth, raising=False)
+    for name, mod in (("google.auth", auth), ("google.auth.transport", transport),
+                      ("google.auth.transport.requests", req_mod)):
+        monkeypatch.setitem(sys.modules, name, mod)
+
+
+def test_signing_routes_through_iam_when_the_runtime_has_no_private_key(google, monkeypatch):
+    """Cloud Run/Functions credentials are a bearer token with NO private key, so v4
+    signing raises "you need a private key to sign credentials" — which is exactly how
+    /api/result/<id> failed in production on the first real deploy. Granting
+    roles/iam.serviceAccountTokenCreator is necessary but NOT sufficient: the library only
+    signs via the IAM signBlob API when handed an email + access token."""
+    class _KeylessCreds:                       # what compute_engine.Credentials looks like
+        signer = None
+        token = None
+        service_account_email = "1040155948868-compute@developer.gserviceaccount.com"
+
+        def refresh(self, _request):
+            self.token = "ya29.fake-token"
+
+    _stub_google_auth(monkeypatch, _KeylessCreds())
+    _core.signed_result_url("results-b", "j1", storage_client=google.storage, environ={})
+    (call,) = google.storage.signed_calls
+    assert call["service_account_email"].endswith("-compute@developer.gserviceaccount.com")
+    assert call["access_token"] == "ya29.fake-token"
+
+
+def test_signing_stays_unaided_when_the_credentials_hold_a_real_key(google, monkeypatch):
+    """A key file can sign directly — don't route those through IAM."""
+    class _KeyedCreds:
+        signer = object()                      # a real private key
+
+    _stub_google_auth(monkeypatch, _KeyedCreds())
+    _core.signed_result_url("results-b", "j1", storage_client=google.storage, environ={})
+    (call,) = google.storage.signed_calls
+    assert "access_token" not in call and "service_account_email" not in call
+
+
 def test_result_is_409_until_done_and_404_for_an_unknown_id(google):
     store = _core.FirestoreJobStore(google.firestore)
     _create_job(store)
