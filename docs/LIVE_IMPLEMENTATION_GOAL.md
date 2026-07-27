@@ -4,6 +4,9 @@
 > session in this repo). It is a standing directive to the implementing agent. It is autonomous:
 > it builds, runs itself on recorded cassettes, judges its own output, fixes what's wrong, and
 > only reports complete when a hard Definition of Done is met. Nothing here overrides the design —
+> *(Counts as-written for Goal 2, 2026-07-24, left unedited. The binding set is now
+> D-001…D-070 and the model 32 entities; `DECISIONS.md` and `domain-model.md` win.)*
+>
 > `docs/DECISIONS.md` (D-001…D-063) is binding, and the **already-built, tested offline engine is
 > reused, not rewritten**.
 

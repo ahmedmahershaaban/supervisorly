@@ -5,6 +5,13 @@
 > autonomous: it builds, runs itself, judges its own output, fixes what's wrong, and only
 > reports the goal complete when a hard Definition of Done is met. Nothing here overrides the
 > design — `docs/DECISIONS.md` (D-001…D-063) is binding.
+>
+> **Counts here are as-written (Goal 1, 2026-07-22) and are left unedited so this contract
+> still records what it actually required.** The binding set has since grown to
+> **D-001…D-070** and the model to **32 entities** — later goals are covered by
+> `LIVE_IMPLEMENTATION_GOAL.md`, `BROWSER_IMPLEMENTATION_GOAL.md` and
+> `FIREBASE_WEB_PLAN.md`. Where a count below disagrees with `DECISIONS.md` or
+> `domain-model.md`, those files win.
 
 ---
 

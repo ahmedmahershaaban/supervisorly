@@ -3,6 +3,9 @@
 > **How to use this:** paste everything below the line into an agent's `/goal` (or a fresh
 > session in this repo). It is a standing directive to the implementing agent. It builds on
 > the **completed, green** engine (Goal 1) and live scan (Goal 2) — reused, never rewritten.
+> *(Counts as-written for Goal 3, 2026-07-25, left unedited. The binding set is now
+> D-001…D-070 — the web round added D-068…D-070.)*
+>
 > `docs/DECISIONS.md` (D-001…D-067) is binding; the newest four (D-064…D-067) are the ones
 > this goal implements.
 

@@ -64,9 +64,71 @@ saying plainly that it is currently unused and pointing here — so nobody reads
 live code, and nobody rewrites it from scratch if the throttle cost above ever makes
 the server-side merge worth doing.
 
-### If this is revisited
+### If this is revisited (B-001)
 
 The trigger to revisit is the throttle arithmetic: if students hit the 30/h map cap in
 normal use, move the merge behind `/api/map` (accept `queries[]`, delegate to
 `subject_map_multi`), keep per-variant failure reporting in the response body so the
 page's honest "N phrasings could not be mapped" note survives, and retire the JS merge.
+
+---
+
+## B-002 — Stage 4 ("people around the professor") is unbuilt, and two docs disagree on whether it may be exported
+
+**Status:** OPEN — needs Ahmed. Implementation deliberately **not** started.
+**Found:** 2026-07-28, while closing the last node the atlas code-map showed as unbuilt.
+
+### What is missing
+
+Stage 4 appears in `product-flow.md`, in the PIPELINE map of both atlases, and in
+`SKILL.md` prose. **No module implements any of it.** Two distinct fields are specified:
+
+- **`recent_collaborators`** ([D-016](DECISIONS.md#d-016--students-is-not-obtainable-ship-recent_collaborators-instead)) —
+  frequent recent co-authors at the same institution. The always-available proxy. The
+  naming rule is hard: *collaborators*, never *students*.
+- **`former_doctoral_students`** ([D-025](DECISIONS.md#d-025--past-students-are-obtainable-current-students-still-are-not),
+  [D-062](DECISIONS.md#d-062--former_doctoral_students-is-a-per-registry-advisor-verified-capability--not-a-universal-headline)) —
+  registry-sourced, advisor-verified, only where a national registry confirms an advisor
+  field (France's theses.fr does; most do not; Canada unverified). An honest null elsewhere.
+
+### The contradiction
+
+`product-flow.md` §"Stage 4" says the panel is **"display-only and never exported"**.
+
+[D-024](DECISIONS.md#d-024--evaluative-judgements-about-individuals-stay-local-and-unexported)
+draws the line differently: *"Facts with citations export; judgements do not."* A co-author
+list derived from OpenAlex is a cited fact, not a model judgement, so by D-024 it exports.
+
+Both cannot be followed. And the choice is not cosmetic: the dashboard is **built from the
+export**, so "never exported" effectively means "cannot be shown in the dashboard either",
+which would make the whole stage pointless as specified.
+
+`LabMember` is *not* the ambiguous case — `domain-model.md` marks it display-only and
+never exported explicitly, and that is unambiguous.
+
+### Why this was not resolved by picking the safer reading
+
+The subject is **lists of named third parties** — mostly early-career researchers who never
+asked to appear in a supervisor-search tool and have no right of reply. D-024's own
+rationale is that aggregating claims about identifiable people into a shareable artifact is
+"defamation-adjacent and a guaranteed source of takedown mail"; the same reasoning applies
+to aggregation even when each item is individually factual, and it engages the GDPR posture
+in `ethics-and-compliance.md`.
+
+Choosing an interpretation here decides what personal data the product publishes about
+people who are not its users. That is a product and legal call, not an implementation
+detail, and the contract is explicit: *never contradict a locked decision; record it here
+instead of silently deviating.*
+
+### The decision needed from Ahmed
+
+1. **Does `recent_collaborators` leave the machine?** In the JSON export and the dashboard
+   (D-024's "facts with citations export"), or strictly local like `LabMember`
+   (product-flow's "never exported")? Whichever is chosen, the *other* document must be
+   corrected in the same change so this cannot resurface.
+2. **Is Stage 4 wanted at all in v1?** It is the only stage with no code. The product works
+   without it; the shipped dashboard simply has no people panel.
+3. If yes: **which registries** for `former_doctoral_students`? Only theses.fr is confirmed.
+   Shipping France-only is honest; shipping it as a headline feature would not be.
+
+Until then the atlas keeps `people search` labelled **not built**, which is accurate.
