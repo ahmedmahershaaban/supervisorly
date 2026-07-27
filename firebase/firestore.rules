@@ -2,12 +2,23 @@ rules_version = '2';
 
 // Supervisorly web build (plan §7 step 7): ALL writes go through the Admin SDK
 // (the Functions wrappers and the Cloud Run worker bypass these rules entirely).
-// Clients can only ever GET one scan_jobs doc by its id — the unguessable id IS
-// the access token (D-069(b)) — and can never list.
+//
+// Clients get NOTHING here — not even a read by id (audit W8-F3). The rule used to
+// be `allow get: if true`, on the reasoning that the unguessable job id is itself the
+// access token (D-069(b)). But a Firestore `get` returns the WHOLE document, and a job
+// doc carries `email`, `email_ci` and the full `plan` — while `webapi.handle_scan_status`
+// deliberately returns only the status/progress fields. So the rule handed out strictly
+// more personal data than the endpoint it was meant to mirror, to anyone who ever saw a
+// job id (browser history, a shared URL, a referrer header).
+//
+// The one-page app never talks to Firestore — it only calls /api/** (see
+// export/webapp.py) — so denying client reads outright costs the product nothing and
+// keeps the job id a token for OUR endpoint, which filters, rather than for the raw
+// document, which does not.
 service cloud.firestore {
   match /databases/{database}/documents {
     match /scan_jobs/{jobId} {
-      allow get: if true;
+      allow get: if false;
       allow list: if false;
       allow write: if false;
     }

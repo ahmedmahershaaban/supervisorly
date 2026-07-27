@@ -447,3 +447,16 @@ def test_scan_start_to_status_to_result_round_trip_on_cassettes(tmp_path):
     assert webapi.handle_scan_cancel(job_id, store=store)[0] == 409
     assert webapi.handle_scan_resume(job_id, store=store, worker=worker,
                                      work_root=tmp_path / "jobs", environ={})[0] == 409
+
+
+def test_map_route_checks_its_method_like_every_other_route():
+    """Audit W8-F7: the /api/map branch matched on PATH ALONE, so DELETE/PUT/PATCH all
+    reached the subject-map handler. Every neighbouring route already checked."""
+    for method in ("DELETE", "PUT", "PATCH"):
+        for path in ("/api/map", "/subject_map"):
+            status, body = webapi.route_request(method, path, {"field": "x"})
+            assert status == 404, f"{method} {path} reached a handler"
+            assert "unknown path" in body["error"]
+    # …and the methods it does serve still work
+    for method in ("GET", "POST"):
+        assert webapi.route_request(method, "/api/map", {})[0] == 400   # missing field

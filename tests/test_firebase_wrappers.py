@@ -15,6 +15,7 @@ from __future__ import annotations
 import copy
 import importlib.util
 import json
+import re
 import subprocess
 import sys
 import threading
@@ -33,6 +34,7 @@ import _core                                   # noqa: E402
 import worker as fb_worker                     # noqa: E402
 from supervisorly import jobs, webapi          # noqa: E402
 from supervisorly.discover import openalex, ror  # noqa: E402
+from supervisorly.export.webapp import build_webapp  # noqa: E402
 from supervisorly.fetch.transport import CassetteTransport  # noqa: E402
 
 EMAIL = "me@uni.edu"
@@ -259,13 +261,248 @@ def test_core_imports_with_no_google_packages():
     assert r.returncode == 0 and "ok" in r.stdout, r.stderr
 
 
-def test_main_imports_without_firebase_functions():
+def _load_main():
+    """``firebase/main.py`` imported with no Functions SDK present (as in the suite)."""
     spec = importlib.util.spec_from_file_location("firebase_main_under_test",
                                                   FIREBASE_DIR / "main.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
+    return mod
+
+
+def test_main_imports_without_firebase_functions():
+    mod = _load_main()
     assert mod.https_fn is None                 # guarded import — no SDK locally
-    assert callable(mod.handle_subject_map)     # the original import still works
+    # This used to assert ``main`` re-exported ``handle_subject_map``, because the
+    # ``subject_map`` function called it directly — which was exactly the bug in audit
+    # W8-F6 (that path skipped the 30/h throttle). The import is gone on purpose; what
+    # must still hold is that the module imports SDK-free and keeps the CORS contract.
+    assert not hasattr(mod, "handle_subject_map")
+    assert mod.CORS_HEADERS["Access-Control-Allow-Origin"] == "*"
+
+
+# ══ the Functions wrappers themselves (audit W8: they were untestable before) ══
+#
+# Everything in main.py lives behind ``if https_fn is not None:``, so with no SDK
+# installed the suite could not reach a single wrapper — which is how a CSRF-able
+# method gap and an unthrottled alias both survived review. Stubbing the SDK the same
+# way the google clients are stubbed makes the whole layer reachable offline.
+
+class _FakeResponse:
+    def __init__(self, body="", status=200, headers=None):
+        self.body, self.status, self.headers = body, status, headers or {}
+
+
+class _FakeReq:
+    def __init__(self, method="GET", path="/api", args=None, json=None,
+                 headers=None, remote_addr=""):
+        self.method, self.path = method, path
+        self.args = args or {}
+        self.headers = headers or {}
+        self.remote_addr = remote_addr
+        self._json = json
+
+    def get_json(self, silent=False):
+        return self._json
+
+
+@pytest.fixture
+def main_mod(monkeypatch):
+    """``firebase/main.py`` loaded with a stub Functions SDK, so the wrappers exist."""
+    ff = types.ModuleType("firebase_functions")
+    ff.https_fn = SimpleNamespace(Response=_FakeResponse, Request=object,
+                                  on_request=lambda *a, **k: (lambda fn: fn))
+    monkeypatch.setitem(sys.modules, "firebase_functions", ff)
+    mod = _load_main()
+    assert mod.https_fn is not None
+    return mod
+
+
+# ── W8-F1: the throttle key must not be caller-supplied ──────────────────────
+
+def test_client_ip_uses_the_front_end_entry_not_the_caller_supplied_prefix(main_mod):
+    """GCP APPENDS ``<client>, <lb>`` to whatever X-Forwarded-For it received, so the
+    leftmost entry is attacker-controlled. Keying the §5.2 throttles on it let a caller
+    mint a fresh identity per request and spend an unlimited source budget."""
+    spoofed = _FakeReq(headers={"X-Forwarded-For": "1.2.3.4, 203.0.113.9, 10.0.0.1"})
+    assert main_mod._ip(spoofed) == "203.0.113.9"      # the entry the GFE wrote
+
+    # A caller rotating the prefix cannot change the identity the throttle sees.
+    other = _FakeReq(headers={"X-Forwarded-For": "9.9.9.9, 203.0.113.9, 10.0.0.1"})
+    assert main_mod._ip(other) == main_mod._ip(spoofed)
+
+    # No proxy chain (emulator/direct/tests): the socket peer, which is unspoofable.
+    assert main_mod._ip(_FakeReq(headers={"X-Forwarded-For": "1.2.3.4"},
+                                 remote_addr="198.51.100.5")) == "198.51.100.5"
+    assert main_mod._ip(_FakeReq(remote_addr="198.51.100.5")) == "198.51.100.5"
+    assert main_mod._ip(_FakeReq(headers={"X-Forwarded-For": "1.2.3.4"})) == "1.2.3.4"
+
+
+# ── W8-F5: a wrong method is a 405, never a state change ─────────────────────
+
+@pytest.mark.parametrize("fn_name,handler,bad_method", [
+    ("scan_cancel", "handle_scan_cancel", "GET"),
+    ("scan_resume", "handle_scan_resume", "GET"),
+    ("scan_start", "handle_scan_start", "GET"),
+    ("scan_status", "handle_scan_status", "POST"),
+    ("scan_result", "handle_scan_result", "DELETE"),
+    ("map", "handle_map", "DELETE"),
+    ("expand", "handle_expand", "DELETE"),
+])
+def test_wrappers_reject_a_wrong_method_without_acting(main_mod, monkeypatch,
+                                                       fn_name, handler, bad_method):
+    """``GET /scan_cancel?id=<job id>`` used to cancel the job: the wrappers ran their
+    handler on ANY method, ``_params`` reads the query string on GET, and ``_job_id``
+    falls back to ``params["id"]`` — so a third-party ``<img>`` tag was enough."""
+    called = []
+    monkeypatch.setattr(_core, handler, lambda *a, **k: called.append((a, k)) or (200, {}))
+    resp = getattr(main_mod, fn_name)(_FakeReq(method=bad_method, path=f"/{fn_name}",
+                                               args={"id": "j1"}))
+    assert resp.status == 405
+    assert called == [], "the handler ran despite the method being rejected"
+    assert json.loads(resp.body)["error"].startswith("method not allowed")
+
+
+def test_the_right_method_still_reaches_the_handler(main_mod, monkeypatch):
+    """The guard must not break the real paths (a 405 everywhere would 'pass' too)."""
+    seen = []
+    monkeypatch.setattr(_core, "handle_scan_cancel",
+                        lambda job_id, **k: seen.append(job_id) or (202, {"ok": True}))
+    resp = main_mod.scan_cancel(_FakeReq(method="POST", path="/scan_cancel",
+                                         json={"id": "j1"}))
+    assert resp.status == 202 and seen == ["j1"]
+
+
+# ── W8-F6: the legacy alias must cost the same budget as /api/map ────────────
+
+def test_subject_map_alias_goes_through_the_throttled_path(main_mod, monkeypatch):
+    """``subject_map`` called ``handle_subject_map`` directly — the one subject-map
+    route with no throttle, so the 30/h cap was a rename away from being bypassed."""
+    routed = []
+    monkeypatch.setattr(_core, "handle_map",
+                        lambda params, **k: routed.append(k.get("ip")) or (200, {}))
+    resp = main_mod.subject_map(_FakeReq(method="GET", path="/subject_map",
+                                         args={"field": "x"},
+                                         headers={"X-Forwarded-For": "1.1.1.1, 203.0.113.9, 10.0.0.1"}))
+    assert resp.status == 200
+    assert routed == ["203.0.113.9"], "the alias must throttle on the same IP identity"
+
+
+# ── W8-F4: set_status must not clobber a concurrent write ────────────────────
+
+def test_set_status_does_not_clobber_a_concurrent_cancel(google, monkeypatch):
+    """``set_status`` read the doc, mutated the copy and wrote the WHOLE thing back
+    outside any transaction. A ``request_cancel`` landing in that window was reverted:
+    the user saw 'cancelling', the flag went back to False, and the worker ran on.
+
+    ``_touch`` is called between the read and the write, so patching it reproduces the
+    race deterministically — the cancel commits inside ``set_status``'s window.
+    """
+    store = _core.FirestoreJobStore(google.firestore)
+    _create_job(store)
+    real_touch, fired = _core._touch, []
+
+    def touch_then_cancel(job):
+        if not fired:                       # once, and before the nested _touch calls
+            fired.append(True)
+            store.request_cancel("j1")      # the user hits Cancel at exactly this moment
+        real_touch(job)
+
+    monkeypatch.setattr(_core, "_touch", touch_then_cancel)
+    store.set_status("j1", "running")
+    assert fired == [True], "the race window was never entered — test is not proving anything"
+
+    job = store.get("j1")
+    assert job["cancel_requested"] is True, "the cancel was silently lost"
+    assert job["status"] == "running"       # the flag, not the status, stops the worker
+
+
+def test_set_status_does_not_clobber_concurrently_appended_progress(google, monkeypatch):
+    """The same full-document overwrite also dropped progress events appended mid-write,
+    so the page's live log silently lost entries."""
+    store = _core.FirestoreJobStore(google.firestore)
+    _create_job(store)
+    real_touch, fired = _core._touch, []
+
+    def touch_then_append(job):
+        if not fired:
+            fired.append(True)
+            store.append_event("j1", {"phase": "fetch", "ts": _iso()})
+        real_touch(job)
+
+    monkeypatch.setattr(_core, "_touch", touch_then_append)
+    store.set_status("j1", "running")
+    assert [e["phase"] for e in store.get("j1")["progress"]] == ["fetch"]
+
+
+def test_set_status_on_an_unknown_or_malformed_id_is_still_none(google):
+    store = _core.FirestoreJobStore(google.firestore)
+    assert store.set_status("nope", "running") is None
+    assert store.set_status("../etc/passwd", "running") is None
+
+
+# ── W8-F2: every job endpoint is throttled ───────────────────────────────────
+
+def test_resume_is_throttled_so_a_cancel_resume_loop_cannot_relaunch_forever(google):
+    """Resume launches a Cloud Run Job execution exactly like a scan start, but was
+    unthrottled — so cancel→resume in a loop bought unlimited worker executions and
+    walked straight around the 5/h scan cap. The cap is checked before any work."""
+    kw = dict(store=_core.FirestoreJobStore(google.firestore), environ={},
+              client=google.firestore, jobs_client=google.run, ip="203.0.113.7")
+    seen = [_core.handle_scan_resume("nope", **kw)[0]
+            for _ in range(_core.RESUME_LIMIT_PER_HOUR + 1)]
+    assert seen[:-1] == [404] * _core.RESUME_LIMIT_PER_HOUR
+    assert seen[-1] == 429
+
+
+@pytest.mark.parametrize("bucket,limit_name", [("cancel", "CANCEL_LIMIT_PER_HOUR"),
+                                               ("result", "RESULT_LIMIT_PER_HOUR"),
+                                               ("status", "STATUS_LIMIT_PER_HOUR")])
+def test_each_job_endpoint_has_its_own_throttle_bucket(google, bucket, limit_name):
+    """Separate buckets: exhausting one must not lock a student out of the others
+    (cancelling a runaway scan has to keep working when polling hit its cap)."""
+    limit = getattr(_core, limit_name)
+    assert limit > 0
+    for _ in range(limit):
+        assert _core.check_throttle(bucket, "203.0.113.7", limit,
+                                    client=google.firestore) is True
+    assert _core.check_throttle(bucket, "203.0.113.7", limit,
+                                client=google.firestore) is False
+    assert _core.check_throttle("cancel_other", "203.0.113.7", 1,
+                                client=google.firestore) is True
+
+
+def test_the_status_cap_cannot_bite_a_normally_polling_page():
+    """The page polls every POLL_MS; a cap below that rate would 429 an honest user
+    mid-scan. Tie the constant to the page's real cadence so neither drifts alone."""
+    poll_ms = int(re.search(r"var POLL_MS = (\d+)", build_webapp()).group(1))
+    polls_per_hour_one_tab = 3_600_000 // poll_ms
+    assert _core.STATUS_LIMIT_PER_HOUR >= 3 * polls_per_hour_one_tab
+
+
+# ── W8-F3: the rules must not hand out more than the endpoint does ───────────
+
+def test_firestore_rules_deny_client_reads_of_job_documents():
+    """``allow get: if true`` returned the WHOLE job doc — ``email``, ``email_ci`` and
+    the full ``plan`` — to anyone holding a job id, while ``handle_scan_status`` returns
+    only status/progress. The page never reads Firestore, so this costs nothing."""
+    raw = (FIREBASE_DIR / "firestore.rules").read_text(encoding="utf-8")
+    rules = "\n".join(ln for ln in raw.splitlines()
+                      if not ln.lstrip().startswith("//"))    # the prose explains the
+    body = rules.split("match /scan_jobs/{jobId}", 1)[1].split("}", 1)[0]  # old rule
+    assert "allow get: if false;" in body
+    assert "allow list: if false;" in body
+    assert "allow write: if false;" in body
+    # no collection anywhere may be client-readable
+    assert "if true" not in rules
+
+
+def test_the_page_never_talks_to_firestore_directly():
+    """The justification for denying client reads: every call the page makes is /api/**,
+    so if this ever changes the rules above must be revisited deliberately."""
+    page = build_webapp()
+    for token in ("firebase.initializeApp", "firestore", "onSnapshot", "firebasejs"):
+        assert token not in page
 
 
 # ══ FirestoreJobStore ═════════════════════════════════════════════════════════

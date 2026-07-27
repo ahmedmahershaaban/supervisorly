@@ -330,7 +330,7 @@ def route_request(method: str, path: str, params: dict, *, store=None, worker=No
     itself is covered without a socket. ``/subject_map`` stays as an alias of
     ``/api/map`` so nothing already deployed breaks."""
     path = path.rstrip("/") or "/"
-    if path in ("/api/map", "/subject_map"):
+    if path in ("/api/map", "/subject_map") and method in ("GET", "POST"):
         return handle_subject_map(params, transport=transport, environ=environ)
     if path == "/api/expand" and method in ("GET", "POST"):
         return handle_expand(params, environ=environ, transport=transport)

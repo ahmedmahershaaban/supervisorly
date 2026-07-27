@@ -345,6 +345,17 @@ def test_merge_skips_malformed_topics_and_handles_hostile_strings(tmp_path):
     assert rep["esc"] == ["&lt;img src=x onerror=alert(1)&gt; &lt;/script&gt;"]
 
 
+def test_esc_neutralises_the_single_quote_too(tmp_path):
+    """Audit W8-F8: esc() covered & < > " but not ' — and the page mixes single- and
+    double-quoted attribute markup (e.g. "<span class='jobid'>"+esc(...)), so the next
+    esc()'d value landing in a single-quoted attribute would have broken straight out.
+    Closed while it was still latent rather than after it was reachable."""
+    rep = _run_webapp_js(tmp_path, {"esc": ["' onmouseover='alert(1)",
+                                            "O'Brien & Sons <x>"]})
+    assert rep["esc"] == ["&#39; onmouseover=&#39;alert(1)",
+                          "O&#39;Brien &amp; Sons &lt;x&gt;"]
+
+
 def test_bar_percent_math(tmp_path):
     rep = _run_webapp_js(tmp_path, {"bar": [
         ["done", "exported", {}, ],

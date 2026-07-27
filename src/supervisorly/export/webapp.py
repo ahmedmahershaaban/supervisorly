@@ -224,9 +224,13 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 """
 
 _JS = r"""
-/* the same esc() discipline as the dashboard/studio: every API string is untrusted */
-function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,c=>(
-  {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
+/* the same esc() discipline as the dashboard/studio: every API string is untrusted.
+   The single quote is escaped too (audit W8-F8): this file mixes single- and
+   double-quoted attribute markup, so leaving ' unescaped meant the next esc()'d value
+   dropped into a single-quoted attribute would be an XSS — a latent trap, not a hole
+   we had to hit first. */
+function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,c=>(
+  {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
 
 /* tuning constants (docs/FIREBASE_WEB_PLAN.md §4/§5) */
 var POLL_MS = 4000;            /* status poll interval: every 4 s */

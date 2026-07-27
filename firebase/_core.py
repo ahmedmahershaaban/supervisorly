@@ -29,6 +29,19 @@ EXPAND_LIMIT_PER_HOUR = 10
 MAP_LIMIT_PER_HOUR = 30
 SCAN_LIMIT_PER_HOUR = 5
 
+#: The per-job endpoints were unthrottled entirely (audit W8-F2), so a cancel→resume
+#: loop re-invoked the Cloud Run Job without any limit — bypassing the 5/h scan cap
+#: that exists to protect the shared source budget (§5.2). Sized by real cost:
+#: a resume launches a worker execution, so it gets its own scan-sized bucket (its
+#: own, not the scan one, so a resume is never blocked by unrelated scan starts);
+#: cancel and result are cheap but not free; status is a single Firestore read that
+#: the page polls every ``POLL_MS`` (4 s ≈ 900/h for ONE open tab), so its cap is only
+#: a runaway-bill backstop and is deliberately far above normal use.
+RESUME_LIMIT_PER_HOUR = 5
+CANCEL_LIMIT_PER_HOUR = 60
+RESULT_LIMIT_PER_HOUR = 120
+STATUS_LIMIT_PER_HOUR = 3000
+
 #: §5 — expansion results are cached per normalized field for 30 days.
 CACHE_TTL_DAYS = 30
 
@@ -176,14 +189,39 @@ class FirestoreJobStore:
         _attempt(self._client.transaction())
 
     def set_status(self, job_id: str, status: str, **fields) -> dict | None:
-        job = self.get(job_id)
-        if job is None:
+        """Apply a status (+ fields) to the job — inside a transaction (audit W8-F4).
+
+        This used to read the document, mutate the copy, and write the WHOLE thing back
+        outside any transaction. Every write that landed in between was silently lost,
+        and two of them matter: ``request_cancel``'s ``cancel_requested``/``cancelling``
+        (so the user's cancel was dropped and the worker ran on) and ``append_event``'s
+        ``progress`` (so events vanished from the page mid-scan). Re-reading INSIDE the
+        transaction means the concurrent writer's fields are carried forward and
+        Firestore retries the loser on contention. ``jobs.JsonJobStore`` was always safe
+        this way — it holds ``self._lock`` across its read/write — so this restores the
+        one-for-one semantics the module docstring promises.
+        """
+        if not self._safe(job_id):
             return None
-        job["status"] = status
-        job.update(fields)
-        _touch(job)
-        self._col.document(str(job_id)).set(job)
-        return job
+        fs = _firestore_module()
+        ref = self._col.document(str(job_id))
+        holder: dict = {}
+
+        @fs.transactional
+        def _attempt(tx):
+            snap = ref.get(transaction=tx)
+            if not snap.exists:
+                holder["job"] = None
+                return
+            job = snap.to_dict()
+            job["status"] = status
+            job.update(fields)
+            _touch(job)
+            tx.set(ref, job)
+            holder["job"] = job
+
+        _attempt(self._client.transaction())
+        return holder.get("job")
 
     def request_cancel(self, job_id: str) -> dict | None:
         """Set the cooperative-cancel flag + ``cancelling`` (§3.4); a no-op on terminal."""
@@ -415,20 +453,34 @@ def handle_scan_start(params: dict, *, store=None, client=None, ip: str = "",
                                     transport=transport, environ=environ)
 
 
-def handle_scan_status(job_id: str, *, store=None, client=None) -> tuple[int, dict]:
+def handle_scan_status(job_id: str, *, store=None, client=None,
+                       ip: str = "") -> tuple[int, dict]:
+    """GET /api/scan/<id>: throttle (§5.2, the runaway-bill backstop) → status."""
+    if not check_throttle("status", ip, STATUS_LIMIT_PER_HOUR, client=client):
+        return _throttled(STATUS_LIMIT_PER_HOUR)
     store = store if store is not None else FirestoreJobStore(client)
     return webapi.handle_scan_status(job_id, store=store)
 
 
-def handle_scan_cancel(job_id: str, *, store=None, client=None) -> tuple[int, dict]:
+def handle_scan_cancel(job_id: str, *, store=None, client=None,
+                       ip: str = "") -> tuple[int, dict]:
+    """POST /api/scan/<id>/cancel: throttle (§5.2, 60/h) → cooperative cancel."""
+    if not check_throttle("cancel", ip, CANCEL_LIMIT_PER_HOUR, client=client):
+        return _throttled(CANCEL_LIMIT_PER_HOUR)
     store = store if store is not None else FirestoreJobStore(client)
     return webapi.handle_scan_cancel(job_id, store=store)
 
 
 def handle_scan_resume(job_id: str, *, store=None, client=None, environ=None,
-                       transport=None, jobs_client=None) -> tuple[int, dict]:
-    """Resume re-invokes the Cloud Run Job with the SAME ``JOB_ID`` (§3.4)."""
+                       transport=None, jobs_client=None,
+                       ip: str = "") -> tuple[int, dict]:
+    """POST /api/scan/<id>/resume: throttle (§5.2, 5/h — a resume launches a worker
+    execution exactly like a scan start, and this endpoint was the unthrottled half of
+    the cancel→resume loop, audit W8-F2) → re-invoke the Cloud Run Job with the SAME
+    ``JOB_ID`` (§3.4)."""
     environ = os.environ if environ is None else environ
+    if not check_throttle("resume", ip, RESUME_LIMIT_PER_HOUR, client=client):
+        return _throttled(RESUME_LIMIT_PER_HOUR)
     store = store if store is not None else FirestoreJobStore(client)
     worker = CloudRunWorker(environ=environ, client=jobs_client)
     return webapi.handle_scan_resume(job_id, store=store, worker=worker,
@@ -447,10 +499,13 @@ def signed_result_url(bucket_name: str, job_id: str, *, storage_client=None,
 
 
 def handle_scan_result(job_id: str, *, store=None, client=None, environ=None,
-                       storage_client=None) -> tuple[int, dict]:
-    """GET /api/result/<id>: 302 with a fresh signed URL when done (the body carries the
-    URL so ``main.py`` can set the Location header); 409 until then."""
+                       storage_client=None, ip: str = "") -> tuple[int, dict]:
+    """GET /api/result/<id>: throttle (§5.2, 120/h — each call mints a signed URL) →
+    302 with a fresh signed URL when done (the body carries the URL so ``main.py`` can
+    set the Location header); 409 until then."""
     environ = os.environ if environ is None else environ
+    if not check_throttle("result", ip, RESULT_LIMIT_PER_HOUR, client=client):
+        return _throttled(RESULT_LIMIT_PER_HOUR)
     store = store if store is not None else FirestoreJobStore(client)
     job = store.get(job_id)
     if job is None:
@@ -501,14 +556,15 @@ def route_api(method: str, path: str, params: dict, *, ip: str = "", environ=Non
     if m:
         job_id, action = m.group(1), m.group(2)
         if action is None and method == "GET":
-            return handle_scan_status(job_id, client=client)
+            return handle_scan_status(job_id, client=client, ip=ip)
         if action == "cancel" and method == "POST":
-            return handle_scan_cancel(job_id, client=client)
+            return handle_scan_cancel(job_id, client=client, ip=ip)
         if action == "resume" and method == "POST":
             return handle_scan_resume(job_id, client=client, environ=environ,
-                                      transport=transport, jobs_client=jobs_client)
+                                      transport=transport, jobs_client=jobs_client,
+                                      ip=ip)
     m = re.fullmatch(r"/api/result/([A-Za-z0-9_-]+)", path)
     if m and method == "GET":
         return handle_scan_result(m.group(1), client=client, environ=environ,
-                                  storage_client=storage_client)
+                                  storage_client=storage_client, ip=ip)
     return _error(404, "unknown path — try /api/map?field=... or POST /api/scan")
