@@ -212,6 +212,13 @@ def subject_map_multi(queries: list[str], transport: Transport, *,
                       max_results: int = 25) -> dict:
     """Map several query variants (e.g. a D-068 expansion) to ONE merged subject map.
 
+    NOT CURRENTLY WIRED IN (D-070). The shipped web page does this merge in the browser
+    instead — it calls ``/api/map`` once per phrasing so that ONE failing phrasing does
+    not fail the whole click, which this function cannot express: a failing variant here
+    would either vanish silently or take the entire call down. Kept, not deleted, as the
+    server-side counterpart to migrate to if the per-phrasing throttle cost ever bites;
+    the trigger and the migration are written up in ``docs/BLOCKERS.md`` B-001.
+
     Runs ``subject_map`` per unique variant (stripped, deduped case-insensitively, input
     capped at MAX_QUERIES) and merges the results: topics are deduped by ``topic_id``
     keeping the BEST (lowest) rank position across variants, each topic is tagged

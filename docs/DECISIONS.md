@@ -1405,3 +1405,25 @@ The hosted page + endpoints (the Firebase web app) follow the same ethics as the
    it MAY call the API, but ships no other external resource and no tracking.
 5. **The user can always stop safely and continue.** Cancel is graceful, partial results
    are kept and exportable, and every terminal state is resumable — never a dead end.
+
+## D-070 — The multi-phrasing subject-map merge is client-side
+
+**Status:** locked (Ahmed, 2026-07-27) — refines [D-068](#d-068--the-llm-may-generate-queries-never-claims)
+
+`/api/map` takes ONE `field`. When [D-068](#d-068--the-llm-may-generate-queries-never-claims)
+expansion returns several phrasings, the **page** calls `/api/map` once per phrasing and
+merges the results in the browser by `topic_id`, tagging each topic with the `found_by`
+phrasings that surfaced it. The server-side equivalent, `discover.subjects.subject_map_multi`,
+is deliberately **not** wired in.
+
+The reason is honesty under partial failure: a per-phrasing call lets one phrasing fail
+without failing the click, so the page continues with the rest and says so
+("N phrasings could not be mapped — continuing with the rest"), which is
+[D-037](#d-037--honest-emptiness) applied to the mapping step. A single merged
+server-side call would have to either drop a failing variant silently or fail as a whole.
+
+The cost is accepted and known: each phrasing spends one unit of the 30/h `/api/map`
+throttle, so one *Understand* click can cost up to 8. If that cap starts biting students
+in normal use, the merge moves behind `/api/map` — the trigger, the migration and the
+retained implementation are written up in
+[BLOCKERS.md B-001](BLOCKERS.md#b-001--the-multi-phrasing-subject-map-merge-is-client-side-not-subject_map_multi).

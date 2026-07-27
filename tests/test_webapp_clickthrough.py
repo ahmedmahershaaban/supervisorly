@@ -443,6 +443,21 @@ def test_a_hostile_api_never_reaches_the_dom_unescaped(tmp_path):
     assert all("<img" not in s["warn"] for s in rep["trace"])
 
 
+def test_the_client_side_merge_is_the_documented_choice(run):
+    """D-070 / BLOCKERS B-001: the merge lives in the page, and subject_map_multi is its
+    unwired server-side counterpart. Pin BOTH halves so the divergence cannot quietly
+    flip: if someone wires the server-side merge, this test makes them update the
+    decision rather than leaving the record wrong."""
+    from supervisorly.discover import subjects
+
+    assert callable(subjects.subject_map_multi)
+    assert "NOT CURRENTLY WIRED IN (D-070)" in subjects.subject_map_multi.__doc__
+
+    # the page's behaviour is the load-bearing half: one map call per phrasing
+    maps = [r for r in run["requests"] if r["path"] == "/api/map"]
+    assert len(maps) == 2, "the page stopped merging client-side — D-070 needs revisiting"
+
+
 def test_an_expansion_outage_still_maps_the_students_own_words(tmp_path):
     """D-068 fail-closed: if /api/expand is down the wizard must not stall — it falls
     back to the student's literal words and maps those (one call, not zero)."""
