@@ -57,6 +57,10 @@ THROTTLE_COLLECTION = "throttle"
 SCAN_JOB_NAME_ENV = "SCAN_WORKER_JOB"
 RESULTS_BUCKET_ENV = "RESULTS_BUCKET"
 WEBAPP_API_BASE_ENV = "WEBAPP_API_BASE"
+#: Which Firestore database to talk to. Unset = ``(default)``, the historical single
+#: database. Newer Firebase projects can hand you a NAMED database instead, in which case
+#: this must carry that name or every call 404s (see ``_firestore_client``).
+FIRESTORE_DATABASE_ENV = "FIRESTORE_DATABASE"
 
 #: the Cloud Run Job that executes scans (§3.6).
 WORKER_JOB_NAME = "supervisorly-scan-worker"
@@ -87,9 +91,21 @@ def set_client_factory(factory) -> None:
 
 
 def _firestore_client():
+    """The Firestore client, honouring ``FIRESTORE_DATABASE`` when set.
+
+    ``firestore.Client()`` with no argument targets the database literally named
+    ``(default)``. That used to be the only possibility, but a Firebase project created
+    today can get a NAMED database instead — this project's is called ``default``, with
+    no parentheses — and against such a project every call fails with a NOT_FOUND that
+    names a database you never asked for. Deploy-time config, not a code constant, is the
+    right place to say which database to use, so the id comes from the environment and
+    falls back to the historical default when unset.
+    """
     if _client_factory is not None:
         return _client_factory()
-    return _firestore_module().Client()
+    fs = _firestore_module()
+    database = (os.environ.get(FIRESTORE_DATABASE_ENV) or "").strip()
+    return fs.Client(database=database) if database else fs.Client()
 
 
 def _storage_client():

@@ -497,6 +497,36 @@ def test_firestore_rules_deny_client_reads_of_job_documents():
     assert "if true" not in rules
 
 
+def test_the_firestore_database_id_comes_from_the_environment(monkeypatch):
+    """A Firebase project created today can hand you a NAMED database (this project's is
+    called "default", no parentheses) rather than the historical "(default)".
+    ``Client()`` with no argument targets "(default)", so against such a project every
+    call 404s. The id must therefore be deploy-time config, not a code constant."""
+    seen = {}
+
+    class _Mod:
+        @staticmethod
+        def Client(**kw):
+            seen.clear()
+            seen.update(kw)
+            return "client"
+
+    monkeypatch.setattr(_core, "_firestore_module", lambda: _Mod)
+    monkeypatch.setattr(_core, "_client_factory", None)
+
+    monkeypatch.setenv(_core.FIRESTORE_DATABASE_ENV, "default")
+    assert _core._firestore_client() == "client"
+    assert seen == {"database": "default"}
+
+    # unset (or blank) keeps the historical behaviour — no argument at all
+    monkeypatch.delenv(_core.FIRESTORE_DATABASE_ENV, raising=False)
+    _core._firestore_client()
+    assert seen == {}
+    monkeypatch.setenv(_core.FIRESTORE_DATABASE_ENV, "   ")
+    _core._firestore_client()
+    assert seen == {}
+
+
 def test_the_page_never_talks_to_firestore_directly():
     """The justification for denying client reads: every call the page makes is /api/**,
     so if this ever changes the rules above must be revisited deliberately."""
