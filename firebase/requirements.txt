@@ -2,4 +2,7 @@ firebase-functions>=0.4.0
 google-cloud-firestore>=2.16
 google-cloud-run>=0.10
 google-cloud-storage>=2.16
-supervisorly @ git+https://github.com/ahmedmahershaaban/supervisorly.git@web-v1
+# Installed from the release TARBALL, not git+https: the python:3.11-slim base image (and
+# some buildpacks) ship no `git`, and pip then dies with "Cannot find command 'git'".
+# A tag tarball needs no git binary and is still immutable — tags don't float, branches do.
+supervisorly @ https://github.com/ahmedmahershaaban/supervisorly/archive/refs/tags/web-v1.tar.gz

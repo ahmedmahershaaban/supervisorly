@@ -40,8 +40,13 @@ generated ones: `main.py`, `_core.py`, `worker.py`, `requirements.txt`,
 
   ```bash
   git tag web-v1 && git push origin web-v1
-  # requirements.txt: supervisorly @ git+https://github.com/ahmedmahershaaban/supervisorly.git@web-v1
+  # requirements.txt:
+  # supervisorly @ https://github.com/ahmedmahershaaban/supervisorly/archive/refs/tags/web-v1.tar.gz
   ```
+
+  Use the **tarball** URL, not `git+https://…`. The `python:3.11-slim` worker base image
+  ships no `git`, so a `git+` requirement fails the container build with
+  `Cannot find command 'git'`. A tag tarball needs no git binary and is equally immutable.
 
 - **Secrets** (both the Functions and the worker need the email/OpenAlex key):
 
@@ -126,15 +131,19 @@ field `updatedAt`. The command may live under `gcloud alpha firestore` on older 
 
 ## 5. The scan-worker Cloud Run Job
 
-`gcloud run jobs create --source .` builds from a file named `Dockerfile`, so stage a
-scratch dir first:
+Use `gcloud run jobs **deploy**`, not `create`: `create` only accepts a prebuilt
+`--image`, and passing it `--source` fails with `unrecognized arguments: --source`.
+`deploy` builds from source and creates-or-updates, so it is also the command to re-run
+after any worker change.
+
+It builds from a file named `Dockerfile` specifically, so stage a scratch dir first:
 
 ```bash
 mkdir -p /tmp/scan-worker
 cp Dockerfile.worker /tmp/scan-worker/Dockerfile
 cp requirements.txt main.py _core.py worker.py /tmp/scan-worker/
 
-gcloud run jobs create supervisorly-scan-worker --source /tmp/scan-worker \
+gcloud run jobs deploy supervisorly-scan-worker --source /tmp/scan-worker \
   --region <REGION> --tasks 1 --max-retries 1 --task-timeout 6h \
   --set-env-vars RESULTS_BUCKET=<RESULTS_BUCKET>,FIRESTORE_DATABASE=<FIRESTORE_DATABASE> \
   --set-secrets SUPERVISORLY_CONTACT_EMAIL=SUPERVISORLY_CONTACT_EMAIL:latest,\
