@@ -224,9 +224,21 @@ Note the Functions base URL it prints:
 ## 8. Set `<API_BASE_URL>`, second deploy
 
 The default needs nothing: Hosting rewrites send `/api/**` to the `api` function and
-everything else to `webapp`, so `WEBAPP_API_BASE` stays empty. Only if you serve the
-page statically (see `public/index.html`) or from another origin, set
-`WEBAPP_API_BASE=<API_BASE_URL>` in `.env`. Then:
+everything else to `webapp`, so `WEBAPP_API_BASE` stays empty.
+
+**`public/` must not contain an `index.html`.** Firebase Hosting serves matching static
+files **first** and only falls through to `rewrites` when nothing matches — so an
+`index.html` sitting in `public/` silently shadows the `webapp` function and your visitors
+get that file instead of the app. This folder shipped exactly such a placeholder, whose own
+text claimed it was "shadowed by the `/**` rewrite"; the precedence is the other way round,
+and the deployed site served a 664-byte stub instead of the 54 KB page. `public/` now holds
+only `.gitkeep`, which Hosting's `**/.*` ignore rule skips.
+
+If you would rather serve the page as a static file (no cold start on first visit), that is
+a deliberate alternative: generate it with
+`build_webapp(api_base='')` into `public/index.html` AND drop the `**` rewrite from
+`firebase.json`, so the two mechanisms cannot fight. Set
+`WEBAPP_API_BASE=<API_BASE_URL>` only when serving from another origin. Then:
 
 ```bash
 firebase deploy        # functions + hosting + rules
