@@ -811,7 +811,9 @@ Every map above is a picture of something that exists. This is the index from th
 |  | `src/supervisorly/fetch/normalize.py` `quote_in_snapshot` | the actual quote check |
 | **snapshot** | `src/supervisorly/fetch/snapshot.py` `SnapshotStore` | content-addressed on disk |
 |  | `src/supervisorly/fetch/normalize.py` `content_hash` | volatile chrome masked first |
-| **conflict** | _not built_ | Half-built: the `conflict` table exists in model/schema.sql and claims.py supersede_prior keeps history, but no code writes conflict rows yet. |
+| **conflict** | `src/supervisorly/model/conflicts.py` `detect_for_claim` | records the disagreement |
+|  | `src/supervisorly/model/conflicts.py` `decide` | the deterministic policy |
+|  | `src/supervisorly/model/schema.sql` `conflict` | both claims kept |
 | **scorer** | `src/supervisorly/score/scorer.py` `score_professor` | weighted components |
 |  | `src/supervisorly/score/scorer.py` `evaluate_eligibility` | the hard gates |
 | **exporter** | `src/supervisorly/export/json_export.py` `build_export` | the four-state envelope |

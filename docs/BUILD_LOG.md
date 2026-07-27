@@ -1227,7 +1227,39 @@ Also this round: the expansion endpoint and model became **server config**
 at Gemini/DeepSeek/Groq with no code change. D-068 §3 is preserved — env only, never a
 request param, with a test pinning that a caller cannot smuggle either one in.
 
-**State: GOAL 4 COMPLETE, DEPLOYED, AND HARDENED.** Suite green at **571** on `build/web`.
+## round W11 — the atlas points at real code, and one thing it exposed got built
+
+Bringing the design artifacts up to the shipped reality (the whole web tier was missing
+from every diagram) turned into a defect hunt, because mapping each diagram node to the
+code that implements it makes an unimplemented node impossible to hide.
+
+- **The atlas is now an index into the tree.** Click a node in `docs/atlas.html` and the
+  drawer names the files and symbols that implement it; `design-atlas.md` carries the same
+  mapping as a table. 59 nodes, 115 references, **machine-verified** by
+  `tests/test_atlas_code_map.py` — the file must exist and the symbol must really be
+  defined in it, so a rename fails the suite instead of leaving the atlas lying. Building it
+  caught two references I had invented (`extract/md_ingest.py` does not exist; MD ingestion
+  is `ingest.py:ingest_md`).
+- **D-010 conflicts were prose, not code.** The `conflict` table shipped with the first
+  schema and *nothing ever wrote a row*: the second source silently overwrote the first,
+  while the atlas, the domain model and D-010 all promised disagreements were recorded.
+  `model/conflicts.py` closes it — a disagreement is recorded, the loser superseded rather
+  than deleted, and the head chosen by a policy a reader can check (higher trust wins on
+  provenance; within a tier the fresher observation wins; a standoff stays **`open`** for a
+  human instead of being quietly decided). Wired into `record_claim`, the one choke point
+  every claim already passes through, for the same reason the quote gate is there: a
+  guarantee a caller must remember is not a guarantee.
+  Writing the tests caught a real bug in my own first cut — the schema's `source_tier` CHECK
+  allows **eight** tiers and I had ranked four, so `official_api`, `cris`, `registry` and
+  `open_social` would have scored zero and lost to an aggregator. A test now asserts the
+  ranking and the schema vocabulary match exactly.
+- **`people search` (Stage 4) stays labelled "not built"** — it is SKILL.md prose with no
+  module behind it. Implementing it is a feature, not a docs fix, so the atlas says so
+  rather than quietly omitting the node.
+
+Suite **571 → 702**.
+
+**State: GOAL 4 COMPLETE, DEPLOYED, AND HARDENED.** Suite green at **702** on `build/web`.
 Still unproven by anything: the 6 h task timeout, the 7-day TTLs (they need seven days),
 throttles under real concurrency, and any scan large enough to meet the OpenAlex daily
 budget.

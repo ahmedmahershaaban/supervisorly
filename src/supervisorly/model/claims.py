@@ -54,11 +54,19 @@ def record_claim(
     schema_version: str | None = None,
     confidence: str | None = None,
     verify: bool = True,
+    detect_conflicts: bool = True,
 ) -> RecordResult:
     """Insert a claim, enforcing quote-in-snapshot for tool/LLM value claims.
 
     Returns a ``RecordResult`` — ``claim_id`` on success, or ``rejected`` with a reason.
     Rejection is normal flow (a hallucination filtered out), not an exception.
+
+    A successful **value** claim is then compared against the live claim for the same
+    ``(entity, field)``; a disagreement is recorded in the ``conflict`` table and the loser
+    superseded (``conflicts.detect_for_claim``). That happens *here*, at the one choke point
+    every claim passes through, for the same reason the quote gate does: a guarantee a
+    caller has to remember is not a guarantee. ``detect_conflicts=False`` is for tests that
+    want to build history by hand.
     """
     if state not in VALID_STATES:
         return RecordResult(None, f"invalid state {state!r}")
@@ -91,6 +99,10 @@ def record_claim(
          prompt_version, schema_version, confidence, utcnow()),
     )
     conn.commit()
+    if detect_conflicts and state == "value":
+        from .conflicts import detect_for_claim  # local: avoids a model-layer import cycle
+        detect_for_claim(conn, entity_kind=entity_kind, entity_id=entity_id,
+                         field=field, claim_id=claim_id)
     return RecordResult(claim_id)
 
 
