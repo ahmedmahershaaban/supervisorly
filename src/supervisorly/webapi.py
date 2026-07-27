@@ -88,10 +88,12 @@ def handle_subject_map(params: dict, *, transport=None, environ=None) -> tuple[i
 def handle_expand(params: dict, *, environ=None, transport=None) -> tuple[int, dict]:
     """Expand a free-text field into search-string variants (D-068).
 
-    The API key comes from server config (``SUPERVISORLY_EXPAND_KEY``) ONLY — never a
-    request param. NOTE: the 30-day per-field expansion cache (§5) lives in the Firebase
-    wrapper (Firestore), NOT here — this handler always asks the engine, which itself
-    fails closed (no key / any error → the raw field proceeds, ``expanded: False``).
+    The API key, endpoint and model all come from server config
+    (``SUPERVISORLY_EXPAND_KEY`` / ``_BASE_URL`` / ``_MODEL``) ONLY — never a request
+    param, so a caller cannot redirect the call or pick the model. NOTE: the 30-day
+    per-field expansion cache (§5) lives in the Firebase wrapper (Firestore), NOT here —
+    this handler always asks the engine, which itself fails closed (no key / any error →
+    the raw field proceeds, ``expanded: False``).
     """
     field = str(params.get("field") or "").strip()
     if not field:
@@ -100,7 +102,8 @@ def handle_expand(params: dict, *, environ=None, transport=None) -> tuple[int, d
     environ = os.environ if environ is None else environ
     key = (environ.get(expand.ENV_KEY) or "").strip() or None
     try:
-        return 200, expand.expand_query(field, api_key=key, transport=transport)
+        return 200, expand.expand_query(field, api_key=key, transport=transport,
+                                        environ=environ)
     except Exception as exc:                             # never leak a stack over HTTP
         return _error(500, f"expand failed: {type(exc).__name__}")
 

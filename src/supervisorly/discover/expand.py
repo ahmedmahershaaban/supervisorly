@@ -34,6 +34,22 @@ DEFAULT_MODEL = "kimi-for-coding"
 #: Environment variable holding the expansion API key (server config, fail-closed).
 ENV_KEY = "SUPERVISORLY_EXPAND_KEY"
 
+#: Endpoint + model, as SERVER config (D-068 §3). The defaults above stay the defaults;
+#: these let an operator point the same OpenAI-compatible call at another provider without
+#: a code change. They are read from the environment ONLY — never from a request — so a
+#: caller still cannot smuggle in a different endpoint or model.
+#:
+#: The work here is deliberately small (a few dozen tokens in, <= 300 out, one call per
+#: "Understand" click), and a wrong expansion can only cost topics, never mint a fact
+#: (D-010 still gates every claim) — so the cheapest capable model is the right choice,
+#: not a compromise. Verified working with:
+#:   Gemini   base=https://generativelanguage.googleapis.com/v1beta/openai
+#:            model=gemini-2.5-flash-lite
+#:   DeepSeek base=https://api.deepseek.com/v1               model=deepseek-chat
+#:   Groq     base=https://api.groq.com/openai/v1            model=llama-3.3-70b-versatile
+ENV_BASE_URL = "SUPERVISORLY_EXPAND_BASE_URL"
+ENV_MODEL = "SUPERVISORLY_EXPAND_MODEL"
+
 #: D-068 output contract: <= 8 short strings, <= 120 chars each.
 MAX_VARIANTS = 8
 MAX_VARIANT_LEN = 120
@@ -92,7 +108,7 @@ def _sanitize(field: str, raw) -> list[str]:
 
 def expand_query(field: str, *, base_url: str | None = None, api_key: str | None = None,
                  model: str | None = None, timeout: float = 10.0,
-                 transport=None) -> dict:
+                 transport=None, environ=None) -> dict:
     """Expand ``field`` into up to 8 search-string variants (D-068).
 
     Sends ONE OpenAI-compatible chat completion to ``{base_url}/chat/completions``
@@ -106,16 +122,18 @@ def expand_query(field: str, *, base_url: str | None = None, api_key: str | None
     (status, text)`` with the same contract as ``post_json``; the default builds the
     httpx-backed helper, so cassette tests need neither network nor a real LLM.
     """
+    environ = os.environ if environ is None else environ
     q = (field or "").strip()
-    key = api_key or os.environ.get(ENV_KEY)
+    key = api_key or environ.get(ENV_KEY)
     if not q:
         return _closed(field, "empty query")
     if not key:
         return _closed(q, "no api key")
 
-    url = f"{(base_url or DEFAULT_BASE_URL).rstrip('/')}/chat/completions"
+    endpoint = (base_url or environ.get(ENV_BASE_URL) or DEFAULT_BASE_URL).strip()
+    url = f"{endpoint.rstrip('/')}/chat/completions"
     payload = {
-        "model": model or DEFAULT_MODEL,
+        "model": (model or environ.get(ENV_MODEL) or DEFAULT_MODEL).strip(),
         "messages": [
             {"role": "system", "content": _SYSTEM},
             {"role": "user", "content": f"Academic field: {q}"},

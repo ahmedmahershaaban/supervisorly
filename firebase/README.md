@@ -178,11 +178,24 @@ gcloud run jobs describe supervisorly-scan-worker --region <REGION> \
   --project <FIREBASE_PROJECT_ID> \
   --format="value(spec.template.spec.template.spec.serviceAccountName)"
 
-# 2. bind run.invoker to THAT account (roles/run.invoker covers jobs as well as services)
+# 2. bind BOTH roles on the job — see the warning below, run.invoker alone is NOT enough
 gcloud run jobs add-iam-policy-binding supervisorly-scan-worker --region <REGION> \
-  --member "serviceAccount:<THE_ACCOUNT_YOU_JUST_READ>" \
-  --role roles/run.invoker
+  --member "serviceAccount:<THE_ACCOUNT_YOU_JUST_READ>" --role roles/run.invoker
+gcloud run jobs add-iam-policy-binding supervisorly-scan-worker --region <REGION> \
+  --member "serviceAccount:<THE_ACCOUNT_YOU_JUST_READ>" --role roles/run.developer
 ```
+
+> **`roles/run.invoker` is NOT sufficient, despite what every "launch a Cloud Run job"
+> tutorial says.** The Functions start the worker *with overrides* — that is how `JOB_ID`
+> is injected per execution (`_core.invoke_worker`) — and overriding requires
+> **`run.jobs.runWithOverrides`**, which `roles/run.invoker` does not grant. It is in
+> `roles/run.developer`.
+>
+> This is easy to miss because the default Compute Engine service account ships with
+> `roles/editor`, which covers it. Scans will appear to work perfectly until someone
+> applies least privilege — and then `POST /api/scan` starts returning 500 with
+> `Permission 'run.jobs.runWithOverrides' denied`, with nothing in the code changed. That
+> is exactly how this was found here.
 
 The runtime account needs three more grants the original runbook never mentioned, each of
 which fails late and confusingly if missing:
@@ -203,6 +216,33 @@ gcloud iam service-accounts add-iam-policy-binding $SA \
 
 Without the last one, `/api/result/<id>` fails with *"you need a private key to sign
 credentials"* the first time anyone opens a finished dashboard.
+
+### Least privilege (optional, but do it deliberately)
+
+GCP gives the Compute Engine default service account **`roles/editor`** on the whole
+project. That is far more than this app needs, and — as the `runWithOverrides` case above
+shows — it also *masks* missing grants, so a project that looks healthy can be one
+`roles/editor` removal away from breaking. If you drop it, grant these first or you will
+break both builds and runtime:
+
+```bash
+SA=<THE_ACCOUNT_YOU_JUST_READ>
+for R in roles/cloudbuild.builds.builder roles/logging.logWriter \
+         roles/monitoring.metricWriter roles/artifactregistry.writer; do
+  gcloud projects add-iam-policy-binding <FIREBASE_PROJECT_ID> \
+    --member "serviceAccount:$SA" --role $R
+done
+gcloud projects remove-iam-policy-binding <FIREBASE_PROJECT_ID> \
+  --member "serviceAccount:$SA" --role roles/editor
+```
+
+`cloudbuild.builds.builder` matters because Cloud Build uses this same account as its
+build service account — strip `editor` without it and your next `firebase deploy` fails.
+`logging.logWriter` matters because without it the worker's output silently disappears,
+which is precisely the information you need when something goes wrong.
+
+**Then re-verify by running an actual scan**, not just by redeploying: a deploy with no
+source change is skipped entirely (`No changes detected`) and proves nothing.
 
 ## 7. First deploy
 

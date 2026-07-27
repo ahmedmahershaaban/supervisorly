@@ -26,6 +26,45 @@ def _fake(status=200, text="", seen=None):
     return transport
 
 
+def test_endpoint_and_model_are_server_config_not_request_params():
+    """D-068 §3 keeps the endpoint and model off the request so a caller cannot redirect
+    the call or pick the model. They ARE operator config, though: the same
+    OpenAI-compatible request points at any provider (Gemini/DeepSeek/Groq) from the
+    environment alone — no code change, and no new way for a request to influence it."""
+    seen = {}
+    env = {expand.ENV_KEY: KEY,
+           expand.ENV_BASE_URL: "https://generativelanguage.googleapis.com/v1beta/openai",
+           expand.ENV_MODEL: "gemini-2.5-flash-lite"}
+    r = expand.expand_query("NLP", environ=env,
+                            transport=_fake(200, _reply(["natural language processing"]), seen))
+    assert r["expanded"] is True
+    assert seen["url"] == ("https://generativelanguage.googleapis.com/v1beta/openai"
+                           "/chat/completions")
+    assert seen["payload"]["model"] == "gemini-2.5-flash-lite"
+    assert seen["payload"]["response_format"] == {"type": "json_object"}   # still JSON mode
+    assert seen["headers"]["Authorization"] == f"Bearer {KEY}"
+
+    # unset -> the shipped defaults, unchanged
+    seen2 = {}
+    expand.expand_query("NLP", api_key=KEY, transport=_fake(200, _reply(["nlp"]), seen2),
+                        environ={})
+    assert seen2["url"] == URL and seen2["payload"]["model"] == "kimi-for-coding"
+
+
+def test_a_request_cannot_smuggle_in_an_endpoint_or_model():
+    """The handler must ignore any endpoint/model a caller puts in the query string."""
+    from supervisorly import webapi
+    seen = {}
+    status, body = webapi.handle_expand(
+        {"field": "NLP", "base_url": "https://evil.example", "model": "attacker-model",
+         "SUPERVISORLY_EXPAND_BASE_URL": "https://evil.example"},
+        environ={expand.ENV_KEY: KEY},
+        transport=_fake(200, _reply(["natural language processing"]), seen))
+    assert status == 200 and body["expanded"] is True
+    assert "evil.example" not in seen["url"] and seen["url"] == URL
+    assert seen["payload"]["model"] == "kimi-for-coding"
+
+
 def test_expand_success_returns_variants_with_the_original_first():
     seen = {}
     r = expand.expand_query("NLP", api_key=KEY,
