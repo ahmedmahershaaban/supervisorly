@@ -1140,3 +1140,24 @@ Plan §7 step 8. Three green waves:
   tested and unreachable. Recorded as a decision with both sides of the trade-off (client-side
   keeps per-phrasing failure honest; server-side would cost 1 throttle unit instead of 8)
   rather than silently deleted or silently refactored. → **566 passed**.
+- **Wave 4 (`ace785d`) — this build log backfilled** for W0–W6, with a notice saying plainly
+  that it was written after the fact and that per-round test counts are omitted, not guessed.
+- **Wave 5 (this commit) — clean-room + README + the completion report.** The root `README.md`
+  had **no mention of the web app at all** (a §6 DoD item); it now documents the local two-step
+  run and points at the deploy runbook. Writing it caught a false claim before it shipped: the
+  dev server serves the **API only**, not the page.
+
+**Clean-room (contract §4 step 6) — PASSED.** Wiped `.pytest_cache`, egg-info, every
+`__pycache__`, all `*.sqlite`, `.cache/`, `snaps/`, `browser_staging/`, `scratchpad/` and
+`output/` (a smoke run: dashboard HTML/JSON, subject map, one page snapshot, the SQLite store —
+moved aside, not destroyed). `git status` + `git clean -ndx` empty before the run; a brand-new
+virtualenv (3.12.2) + `pip install -e ".[dev]"` → **566 passed, first try**; after the run the
+tree still carried no database, snapshot or scan output (D-005). One deviation recorded in
+`docs/WEB_COMPLETION_REPORT.md` §4: the existing `.venv` was kept and a *separate* fresh venv
+used, rather than deleting the machine's only working environment.
+
+**State: GOAL 4 COMPLETE OFFLINE — NOT DEPLOYED.** Suite green at **566** on `build/web`;
+audit closed with zero open findings; clean-room green; DoD checked in
+`docs/WEB_COMPLETION_REPORT.md`. The Firestore rules, signed URLs, IAM binding and Cloud Run
+bridge are verified **only against fakes** — nothing has ever run against a real GCP project,
+and no test in this repo can close that gap (report §6).
