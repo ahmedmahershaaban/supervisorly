@@ -174,9 +174,28 @@ a clean-room pass. Each is fixed, and `firebase/README.md` now states the reason
 | 5 | IAM step named `<project>@appspot.gserviceaccount.com`, which **does not exist** here (404 Unknown service account), and omitted three required roles | *Start scan* and *Open dashboard* both broken |
 | 6 | `public/index.html` shadowed the `webapp` function — Hosting serves **static files before rewrites**, the opposite of what that file's own text claimed | Visitors got a 664-byte stub instead of the 54 KB app |
 | 7 | v4 signing needs `service_account_email` + `access_token` to route through IAM signBlob; the `serviceAccountTokenCreator` grant alone is **not** sufficient | `/api/result/<id>` 500s: *"you need a private key to sign credentials"* |
+| 8 | **`roles/run.invoker` was never sufficient.** The Functions launch the worker *with overrides* (that is how `JOB_ID` is injected), which needs `run.jobs.runWithOverrides` — a permission in `roles/run.developer`, not `run.invoker` | `POST /api/scan` 500s on any project where the default `roles/editor` has been removed |
 
 Defects 2, 5, 6 and 7 all **deployed successfully**. A green deploy was never evidence the
 thing worked — which is the transferable lesson here.
+
+Defect 8 is sharper still, and was found only by applying least privilege. Every scan that
+succeeded before it was fixed worked **only** because the Compute Engine default service
+account ships with `roles/editor`, which silently covered the missing permission. So
+`roles/editor` does not merely over-permit: **it masks missing grants**, and "it works" is
+therefore no evidence that the documented permissions are correct. The documented IAM would
+have failed on any project that had ever been hardened — at the moment a student pressed
+*Start scan*, with nothing in the code to blame.
+
+### Least privilege — applied and verified
+
+`roles/editor` was removed from the runtime service account and replaced with
+`cloudbuild.builds.builder`, `logging.logWriter`, `monitoring.metricWriter`,
+`artifactregistry.writer` at project level, plus resource-scoped `datastore.user`,
+`storage.objectAdmin` (results bucket), `secretmanager.secretAccessor` (the one secret),
+and `run.invoker` + `run.developer` (the worker job). Verified afterwards by running a real
+scan to completion — **not** by redeploying, since a deploy with no source change is
+skipped entirely (`No changes detected`) and proves nothing.
 
 ### Verified live, not simulated
 
@@ -192,6 +211,10 @@ thing worked — which is the transferable lesson here.
 | `GET /api/result/<id>` | 302 → `GOOG4-RSA-SHA256`, 900 s, signed by the runtime SA |
 | The signed URL | 200, 21,890-byte dashboard, `searched_absent` / `never_attempted` rendering |
 | **Same object, unsigned** | **403** — the bucket is genuinely private; the signature does the work |
+| **§3.2 stuck-job watchdog** | ✅ a job stranded by defect 8 was flipped to `failed` — *"worker stalled; safe to resume"* — after the 600 s stall window |
+| **Resume after failure** | ✅ that same failed job resumed → `queued` → `done` → signed URL |
+| **§3.3 idempotent start** | ✅ a repeat of the same plan+email returned the EXISTING job (`"existing": true`) rather than a duplicate |
+| **§3.5 one active job per email** | ✅ a second concurrent scan was refused with an honest 429 naming the active job |
 
 One false alarm, recorded because being wrong loudly matters: a cancelled *queued* job
 appeared stuck in `cancelling`, and I called it a dead-end bug. Reading the Firestore
@@ -221,10 +244,14 @@ defect; an impatient test.
 1. ~~Nothing has ever been deployed.~~ **Resolved 2026-07-27** — deployed and exercised end
    to end (§4b). The prediction that this was "the single biggest untested surface" was
    correct: it yielded seven defects, four of which deployed green.
-   **What remains untested even now:** the 6-hour task timeout, the stuck-job watchdog
-   (§3.2), the 7-day Firestore/bucket TTLs (they need seven days to prove), throttle
-   behaviour under genuine concurrent load, and any scan large enough to hit the OpenAlex
-   daily budget. The scans run were deliberately tiny (2 institutions, shortlist 3).
+   **What remains untested even now:** the 6-hour task timeout, the 7-day
+   Firestore/bucket TTLs (they need seven days to prove), throttle behaviour under genuine
+   concurrent load, and any scan large enough to hit the OpenAlex daily budget. The scans
+   run were deliberately tiny (2 institutions, shortlist 3).
+   The **§3.2 watchdog is no longer on this list** — defect 8 stranded a real job in
+   `queued`, and the watchdog flipped it to `failed` with "safe to resume" on schedule,
+   after which it resumed to `done`. A better test than anything that could have been
+   staged deliberately.
 2. **F1's fix encodes an assumption about the hosting front end** — that GCP appends
    `<client>, <lb>` to `X-Forwarded-For`. It is correct for Cloud Functions/Run behind
    Google's front end and is the documented behaviour, but it is *hosting-specific*: put

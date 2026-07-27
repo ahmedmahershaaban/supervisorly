@@ -1188,7 +1188,46 @@ One false alarm, recorded on purpose: a cancelled queued job looked stuck in `ca
 and was called a dead-end bug. The document actually said `cancelled` ~130 s in — a Cloud
 Run cold start, and a 100 s poll window. Not a defect, an impatient test.
 
-**State: GOAL 4 COMPLETE AND DEPLOYED.** Suite green at **569** on `build/web`; audit
-closed; clean-room green; live lifecycle exercised. Still unproven by anything: the 6 h
-task timeout, the §3.2 watchdog, the 7-day TTLs (they need seven days), throttles under
-real concurrency, and any scan large enough to meet the OpenAlex daily budget.
+## round W10 — least privilege, and the defect it exposed (commit `145690a`)
+
+Two cleanups from the W9 report, both done — and the second one earned its keep.
+
+- **Orphaned Firestore database deleted.** `firebase deploy` had created `(default)`
+  alongside the named `default` the project shipped with, leaving rules on one and data on
+  the other. Standardised on `(default)`; the named one held only stale throttle counters
+  (no job docs, no scan data) and is gone.
+- **`roles/editor` removed from the runtime service account** — and it immediately broke
+  `POST /api/scan`:
+
+  > `PERMISSION_DENIED: Permission 'run.jobs.runWithOverrides' denied`
+
+  **`roles/run.invoker` was never sufficient.** The Functions launch the worker WITH
+  OVERRIDES (that is how `JOB_ID` is injected per execution), and overriding needs
+  `run.jobs.runWithOverrides`, which lives in `roles/run.developer`. Every scan that had
+  succeeded until then worked only because the default compute SA ships with
+  `roles/editor`, which silently covered it. `roles/editor` does not merely over-permit —
+  **it masks missing grants**, so "it works" was never evidence the documented permissions
+  were right. The runbook would have failed on any hardened project, at the moment a
+  student pressed *Start scan*.
+
+  Replaced with explicit grants (`cloudbuild.builds.builder` — Cloud Build uses this same
+  account, so without it the next deploy breaks; `logging.logWriter` — without it the
+  worker's output vanishes exactly when it is needed; `monitoring.metricWriter`,
+  `artifactregistry.writer`) plus the resource-scoped roles, then **verified by running a
+  real scan**, not by redeploying: a deploy with no source change is skipped outright.
+
+**A gift from the failure:** the job stranded by the permission error let the **§3.2
+watchdog** prove itself in production — it flipped the stuck job to `failed` with "worker
+stalled; safe to resume" after the 600 s window, and the job then resumed to `done` and
+issued a signed URL. §3.3 idempotent start (`"existing": true`) and the §3.5 one-active-
+job-per-email 429 were both observed incidentally too.
+
+Also this round: the expansion endpoint and model became **server config**
+(`SUPERVISORLY_EXPAND_BASE_URL` / `_MODEL`), so the same OpenAI-compatible call can point
+at Gemini/DeepSeek/Groq with no code change. D-068 §3 is preserved — env only, never a
+request param, with a test pinning that a caller cannot smuggle either one in.
+
+**State: GOAL 4 COMPLETE, DEPLOYED, AND HARDENED.** Suite green at **571** on `build/web`.
+Still unproven by anything: the 6 h task timeout, the 7-day TTLs (they need seven days),
+throttles under real concurrency, and any scan large enough to meet the OpenAlex daily
+budget.
