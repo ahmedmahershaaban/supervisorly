@@ -4,7 +4,8 @@
       "source": ".",
       "codebase": "default",
       "runtime": "python311",
-      "ignore": ["*.md", "Dockerfile.worker", "public", "__pycache__", ".firebaserc"]
+      "ignore": ["*.md", "Dockerfile.worker", "public", "__pycache__", ".firebaserc",
+                 "venv", ".venv", "*.pyc"]
     }
   ],
   "hosting": {

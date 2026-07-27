@@ -68,6 +68,9 @@ node_modules/
 npm-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+firebase-debug.log*
+firebase-debug.*.log
+.firebase/
 .vite/
 
 # --- Editors and OS ----------------------------------------------------------

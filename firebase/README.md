@@ -162,21 +162,61 @@ The Functions runtime service account needs permission to run the job. The relev
 permission (`run.jobs.run`) is granted by **`roles/run.invoker`** — the invoker role
 covers both services and jobs; there is no separate "jobs.run" role to bind:
 
+**Do not assume the service account — read it.** This file used to say the runtime SA is
+`<FIREBASE_PROJECT_ID>@appspot.gserviceaccount.com` (the App Engine default). On a project
+created today that account may not exist at all: deploying to `supervisorly` logged
+`404, Unknown service account` for exactly that address, and both the Functions and the
+Cloud Run job in fact run as the **compute** default,
+`<PROJECT_NUMBER>-compute@developer.gserviceaccount.com`. Binding the wrong one produces a
+permission error only when a student first presses *Start scan*.
+
 ```bash
+# 1. read the real runtime service account off what you deployed
+gcloud run services describe api --region <REGION> --project <FIREBASE_PROJECT_ID> \
+  --format="value(spec.template.spec.serviceAccountName)"
+gcloud run jobs describe supervisorly-scan-worker --region <REGION> \
+  --project <FIREBASE_PROJECT_ID> \
+  --format="value(spec.template.spec.template.spec.serviceAccountName)"
+
+# 2. bind run.invoker to THAT account (roles/run.invoker covers jobs as well as services)
 gcloud run jobs add-iam-policy-binding supervisorly-scan-worker --region <REGION> \
-  --member "serviceAccount:<FIREBASE_PROJECT_ID>@appspot.gserviceaccount.com" \
+  --member "serviceAccount:<THE_ACCOUNT_YOU_JUST_READ>" \
   --role roles/run.invoker
 ```
 
-(`<FIREBASE_PROJECT_ID>@appspot.gserviceaccount.com` is the App Engine default
-service account, which 2nd-gen Functions use unless you configured a custom one —
-substitute yours if so.)
+The runtime account needs three more grants the original runbook never mentioned, each of
+which fails late and confusingly if missing:
+
+```bash
+SA=<THE_ACCOUNT_YOU_JUST_READ>
+# Firestore read/write (job docs + progress)
+gcloud projects add-iam-policy-binding <FIREBASE_PROJECT_ID> \
+  --member "serviceAccount:$SA" --role roles/datastore.user
+# write dashboards into the results bucket / read them back to sign
+gcloud storage buckets add-iam-policy-binding gs://<RESULTS_BUCKET> \
+  --member "serviceAccount:$SA" --role roles/storage.objectAdmin
+# mint v4 signed URLs: with no private key on disk, signing goes through the IAM
+# signBlob API, which needs the account to be able to sign AS ITSELF
+gcloud iam service-accounts add-iam-policy-binding $SA \
+  --member "serviceAccount:$SA" --role roles/iam.serviceAccountTokenCreator
+```
+
+Without the last one, `/api/result/<id>` fails with *"you need a private key to sign
+credentials"* the first time anyone opens a finished dashboard.
 
 ## 7. First deploy
 
 ```bash
 firebase deploy --only functions,firestore,storage
 ```
+
+**On PowerShell, quote the list** — `--only "functions,firestore,storage"`. Unquoted,
+PowerShell splits on the commas and passes three separate arguments, and the CLI answers
+`Cannot understand what targets to deploy/serve`.
+
+Run it from THIS folder (`firebase/`): that is where `firebase.json` and `.firebaserc`
+live, and `firebase login:use` binds an account per-directory, so running it from the repo
+root can also pick the wrong Google account.
 
 Note the Functions base URL it prints:
 `https://<REGION>-<FIREBASE_PROJECT_ID>.cloudfunctions.net`.
