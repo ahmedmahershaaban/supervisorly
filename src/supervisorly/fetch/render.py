@@ -36,6 +36,7 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import walls
 from .robots import USER_AGENT
 
 log = logging.getLogger(__name__)
@@ -82,8 +83,15 @@ class ChromiumRenderer:
         self._pw = None
         self._browser = None
         self._js = None
+        #: Latched after a failed launch. Without it, every page retries the launch: the
+        #: second attempt calls ``sync_playwright().start()`` while the first context is still
+        #: alive and fails with "Sync API inside the asyncio loop", which is a misleading
+        #: message for "we already tried". One failure per run is a diagnosis; twenty-five is
+        #: a slow scan that reports the wrong cause.
+        self._unavailable = False
         self.rendered = 0
         self.refused_by_robots = 0
+        self.refused_walled = 0
         self.failed = 0
 
     # ── lifecycle ────────────────────────────────────────────────────────────
@@ -95,10 +103,13 @@ class ChromiumRenderer:
     def _ensure_browser(self):
         if self._browser is not None:
             return self._browser
+        if self._unavailable:
+            return None
         try:
             from playwright.sync_api import sync_playwright  # noqa: PLC0415 — optional dep
         except ImportError:
             log.info("playwright not installed — server-side rendering disabled")
+            self._unavailable = True
             return None
         try:
             self._pw = sync_playwright().start()
@@ -107,7 +118,16 @@ class ChromiumRenderer:
             self._js = _load_extractor_js()
         except Exception as exc:                      # noqa: BLE001 — fail-closed
             log.warning("chromium failed to launch (%s) — rendering disabled", exc)
-            self._browser = None
+            # Tear the half-started context down. Leaving `_pw` alive was a real bug: the next
+            # call started a SECOND playwright and failed with "Sync API inside the asyncio
+            # loop", reporting a threading problem when the truth was a missing browser binary.
+            try:
+                if self._pw is not None:
+                    self._pw.stop()
+            except Exception:                         # noqa: BLE001 — teardown must not raise
+                pass
+            self._pw = self._browser = None
+            self._unavailable = True
             return None
         return self._browser
 
@@ -137,6 +157,14 @@ class ChromiumRenderer:
         an honest ``blocked`` either way, and no failure here can propagate into the scan.
         """
         if not url:
+            return None
+        if walls.is_walled(url):
+            # Checked BEFORE anything else, because the status-code guard below cannot see
+            # this class of wall at all: ResearchGate answers 403 to a plain client and 200
+            # to Chromium (measured). A browser is not shown the wall, so refusing on the
+            # response is refusing on evidence we will never receive. Refusal has to be a
+            # property of the host, decided before the request (D-039/D-043/D-044).
+            self.refused_walled += 1
             return None
         try:
             if not self._robots_check(url):

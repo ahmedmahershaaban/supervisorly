@@ -90,6 +90,40 @@ def test_a_non_2xx_page_is_refused_rather_than_scraped_anyway(status):
     assert r.rendered == 0
 
 
+@pytest.mark.parametrize("walled", [
+    "https://www.researchgate.net/profile/Shimaa_Abu_Zeid",
+    "https://researchgate.net/profile/X",
+    "https://www.academia.edu/123/Paper",
+    "https://scholar.google.com/citations?user=abc",
+    "https://scholar.google.co.uk/citations?user=abc",
+    "https://uk.linkedin.com/in/prof",
+    "https://x.com/prof", "https://twitter.com/prof",
+])
+def test_a_walled_host_is_refused_before_the_browser_is_even_opened(walled):
+    """The near-miss this guard was written for, measured against the real host on
+    2026-07-28: ResearchGate answers **403 to httpx and 200 to Chromium**, and the renderer
+    pulled 55,568 characters of a professor's page off it.
+
+    The status-code guard could never have caught that — a browser is not shown the wall, so
+    refusing on the response means refusing on evidence that never arrives. Refusal has to be
+    a property of the HOST, decided before the request. If this test ever fails, the tool has
+    started using a browser to walk through walls it refuses over plain HTTP."""
+    page = _Page(status=200, text="a professor's entire profile page")
+    r = _renderer(page=page)
+    assert r.render(walled) is None
+    assert page.navigated_to is None, "the browser must not even open a walled host"
+    assert r.refused_walled == 1
+    assert r.rendered == 0
+
+
+def test_the_renderer_and_the_pipeline_share_one_walled_list():
+    """Two copies of a refusal rule is two chances to disagree, and the permissive copy is the
+    one that ends up on the network. This is exactly how the gap above appeared."""
+    from supervisorly import pipeline
+    from supervisorly.fetch import walls
+    assert pipeline._WALLED_SOCIAL is walls.WALLED_HOSTS
+
+
 def test_a_page_that_says_yes_and_needs_javascript_is_rendered():
     """The case the whole module exists for: public, robots-allowed, 200, content only after
     JS. That is a reader limitation, not a wall."""

@@ -35,6 +35,7 @@ from .export import dashboard as dash
 from .export import json_export as jx
 from .fetch import browser_rung
 from .fetch import render as render_mod
+from .fetch import walls
 from .fetch.fetcher import Fetcher
 from .fetch.normalize import content_hash, main_text
 from .fetch.ratelimit import HostRateLimiter
@@ -514,9 +515,12 @@ _SOCIAL_URL = re.compile(
 #:   academia.edu      403, robots.txt Disallow: /
 #: ORCID resolution surfaced a real ResearchGate profile URL as a professor's only page,
 #: which is how the gap was found.
-_WALLED_SOCIAL = re.compile(
-    r"^https?://(?:[\w-]+\.)*(?:twitter\.com|x\.com|linkedin\.com|researchgate\.net"
-    r"|academia\.edu|scholar\.google\.[a-z.]+)/", re.IGNORECASE)
+#: ONE definition, in ``fetch/walls.py``, shared with the server-side renderer. It used to
+#: live here while the renderer relied on its own weaker guard ("a non-2xx is a refusal") —
+#: and a real ResearchGate profile walked straight through it, because that host answers 403
+#: to a plain client and 200 to Chromium. Two copies of a refusal rule is two chances to
+#: disagree, and the permissive copy is the one that ends up on the network.
+_WALLED_SOCIAL = walls.WALLED_HOSTS
 
 
 def _first_sentence(rx, html):
