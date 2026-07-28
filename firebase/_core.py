@@ -46,6 +46,25 @@ STATUS_LIMIT_PER_HOUR = 3000
 #: it is the one route that writes attacker-influenced text into our own logging.
 CLIENTLOG_LIMIT_PER_HOUR = 40
 
+# ═══════════════════════════════════════════════════════════════════════════════════════
+# TEMPORARY_THROTTLE_LIFT — MUST BE REVERTED (second time; see commit a6fd713 / 2e80d7d for
+# the first). The multi-field test pass covers engineering, science, art and medicine, which
+# is more scans than 5/hour allows.
+#
+# One self-contained block on purpose: restoring is deleting it, not re-typing six numbers.
+# `git revert` of the commit that adds it is the intended undo. While it is live the §5.2
+# caps — which protect a SHARED upstream budget (OpenAlex/ROR serve everyone) and bound the
+# bill — are effectively off, so it must not outlive the test pass.
+_TEMPORARY_THROTTLE_LIFT = True
+if _TEMPORARY_THROTTLE_LIFT:                                    # noqa: SIM108
+    EXPAND_LIMIT_PER_HOUR = 10_000
+    MAP_LIMIT_PER_HOUR = 10_000
+    SCAN_LIMIT_PER_HOUR = 10_000
+    RESUME_LIMIT_PER_HOUR = 10_000
+    CANCEL_LIMIT_PER_HOUR = 10_000
+    RESULT_LIMIT_PER_HOUR = 10_000
+# ═══════════════════════════════════════════════════════════════════════════════════════
+
 #: §5 — expansion results are cached per normalized field for 30 days.
 CACHE_TTL_DAYS = 30
 
