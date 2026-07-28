@@ -1522,3 +1522,73 @@ change was ~90%, derived from ORCID *presence* rather than URL presence, and it 
 forbid this use, that host is removed from the API path — an explicit request from the
 operator outranks this decision. robots.txt alone does not, which is precisely what is
 being decided here.
+
+---
+
+## D-073 — A model may point at text that exists; it may never invent text
+
+**Status:** proposed (Ahmed, 2026-07-28) — supersedes the *provisional* wording of
+[D-009](#d-009--deterministic-collection-llm-interpretation), extends
+[D-064](#d-064--the-browser-rung) to the hosted tier, and is bounded by
+[D-010](#d-010--every-field-carries-provenance-and-confidence) exactly as everything else is.
+
+The hosted product has **no judgement layer**. The CLI has five agents (`recruiting-analyst`,
+`eligibility-analyst`, `evidence-auditor`, `profile-synthesist`, `adapter-author`); the web
+tier shipped none of them and can therefore only report what a regular expression matched.
+That — not robots, not ORCID — is why a student sees an empty dashboard. D-009 already
+described the fix ("language models are used only where judgement is genuinely required —
+classification, summarisation, ambiguous matching"); it was never implemented on this surface.
+
+### The rule
+
+A model reads a stored snapshot and returns **proposals**: `(field, value, quote)`. Each quote
+must be **copied verbatim from the page**. Every proposal is then checked with
+`normalize.quote_in_snapshot` — the same function `claims.record_claim` uses — and anything
+whose quote is not literally present is dropped before it can become a claim.
+
+The model's power is therefore bounded to *pointing at text that already exists*. It may be
+wrong about what a sentence means; it cannot invent a deadline, a professor, or a recruiting
+status, because the sentence it cites has to be on the page. **A hallucination dies at the
+gate, not in front of a student.**
+
+`extract/llm_claims.py` imports that gate rather than reimplementing it. A second,
+slightly-different implementation of a security check is how gates grow holes.
+
+### Bounds, all enforced in code
+
+1. **Fixed vocabulary.** A proposal may only target a field the export already has. A model
+   cannot add a column — an invented field would arrive with no descriptor, no label, and no
+   policy about whether it exports.
+2. **`supervises` is an enum**, using the same words as the student's `intent_kind`, so "I
+   want a PhD supervisor" matches "this person takes PhD students" with no translation step.
+   Unrecognised words are dropped, never mapped — mapping them would be a dictionary of a
+   field's terms, which [D-038](#d-038--generate-dont-look-up) forbids.
+3. **Fail-closed** ([D-068](#d-068--the-llm-may-generate-queries-never-claims) pattern): no
+   key, bad JSON, wrong shape, timeout or exception → an empty list, and the scan finishes on
+   the deterministic extractors. Nobody's search dies because a model was unavailable.
+4. **Bounded work**: ≤12 proposals per page, ≤200-char values, ≤400-char quotes, ≤12,000 chars
+   of page text shown — the same cap `page_extract.js` already applies in-page.
+5. **Shortlist only.** One call per deep-dived professor (~25/scan), not per enumerated one.
+   D-009's cost objection — "an LLM call per professor across several hundred professors" —
+   predates the shortlist gate that already bounds this.
+6. **Rejections are counted, not silent.** A model whose quotes stop matching is a signal
+   worth seeing, not a quiet fade to an empty dashboard.
+
+### What this does NOT authorise
+
+- **No bypassing a wall.** Rendering JavaScript on a *public, robots-allowed* page is reading
+  a public page properly. Driving a browser to get past ResearchGate's 403, or any login, is
+  still refused ([D-039](#d-039--api-first-public-sources-human-rung-for-the-walled)/
+  [D-043](#d-043--human-assisted-retrieval-and-md-ingestion)/[D-044](#d-044--the-professors-own-channels-are-a-first-class-recruiting-signal-source)).
+- **No unquoted judgement in the export.** "This professor is a good match for you" has no
+  quote and is not a fact; [D-024](#d-024--evaluative-judgements-about-individuals-stay-local-and-unexported)
+  keeps it out. A quote-backed extraction is a *cited fact* and exports like any other.
+- **No trusting the model about identity.** It never decides who a professor is, only what a
+  page says.
+
+### Reversal condition
+
+If a quote-verified claim is ever found to be materially wrong in a way the quote did not
+support, the gate is not the problem — the *field vocabulary* is too coarse, and the fix is a
+narrower field, not a more trusted model. If instead someone proposes accepting a claim
+**without** a verbatim quote, that is a different decision entirely and this one forbids it.
