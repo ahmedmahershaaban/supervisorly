@@ -12,7 +12,10 @@ it, not by deleting it.
 
 ## B-003 — Every hosted scan returns zero facts, and the only fix goes through a `Disallow: /`
 
-**Status:** OPEN — needs Ahmed. This is an ethics call, so no code was written for it.
+**Status:** decided and shipped ([D-072](DECISIONS.md#d-072--robotstxt-governs-the-crawler-not-the-documented-api-client),
+Ahmed, 2026-07-28) — **and it did not fix the symptom.** See "What shipping it actually
+changed" at the end: the cause was correctly identified, the fix is correct, and the data it
+depends on does not exist for this cohort. A follow-up is needed and is scoped below.
 **Found:** 2026-07-28, from Ahmed's screenshot of run `run_89fc85b70a06` (job
 `5d1316cbc8a74b929425fcb5b64c7ebd`) — 331 professors, every cell either "not checked yet"
 or "awaiting your browser", not one fact.
@@ -101,6 +104,57 @@ useless, while its *machine* endpoint is useful and disallowed.
 
 Until this is answered the hosted product enumerates correctly and reports nothing, which
 is the state Ahmed is looking at.
+
+### What shipping it actually changed: nothing, and that is the useful result
+
+D-072 was ruled, `discover/orcid.py` was built, and both tiers were deployed (`web-v7`,
+worker image `sha256:e2b29f2c…`). Two live scans against the hosted product then measured
+the outcome, because "the fix is deployed" is not the same claim as "the student sees data":
+
+| run | targets | deep-dived | `value` cells |
+|---|---|---|---|
+| `ab3a3041…` (10 institutions) | 6 | 6 | **0** |
+| `3f6b3139…` (30 institutions) | 89 | 25 | **0** |
+
+Still 100% `blocked`. The resolution ran and correctly found nothing:
+
+- Run `ab3a3041…`: **0 of 6** deep-dived authors had an ORCID *or* a homepage. There was no
+  identifier to resolve, so D-072 could not apply to a single target.
+- Run `3f6b3139…`: **11 of 25** had an ORCID — and **0 of those 11** ORCID records list any
+  researcher URL. Every record was read; every one was empty.
+
+**The 24% estimate does not hold for this cohort, and the difference is instructive.** The
+6-of-25 sample came from an *unfiltered* institution query, which returns the most prominent
+authors — exactly the people who fill in an ORCID profile. A real scan filters by
+institution **and topic**, surfacing working academics who do not. Sampling the population
+you are not going to search tells you nothing about the one you are.
+
+### Where the data for this cohort actually is (measured, 2026-07-28)
+
+Institution sites, not registries — but not uniformly, and Cairo University is the worst case:
+
+| host | with TLS verification | content |
+|---|---|---|
+| `cu.edu.eg` | **fails** — incomplete certificate chain | 16 visible chars (JS shell) |
+| `scholar.cu.edu.eg` | **fails** — incomplete certificate chain | 403 to bots |
+| `aun.edu.eg` (Assiut) | 200 | **8,048 visible chars** |
+| `alexu.edu.eg` (Alexandria) | 200 | **5,859 visible chars** |
+| `mans.edu.eg` (Mansoura) | 200 | **9,577 visible chars** |
+
+Three of five serve real, fetchable HTML. Cairo's TLS chain is broken at the server, so the
+worker cannot reach it at all — and disabling verification is not an option worth having.
+
+### The follow-up this points to (not started — needs Ahmed's go-ahead)
+
+Strengthen the **institution directory rung** so faculty pages supply the URL that OpenAlex
+and ORCID do not. This is the option offered as "find homepages another way" and not chosen
+at the time; the measurements above are the argument for revisiting it. It touches no ethics
+boundary — these are ordinary public pages, fetched through the existing robots-gated
+fetcher — and it is the only path measured to reach real content for this cohort.
+
+Two things must be honest about it: it is **per-institution work**, not one generic fix; and
+it will never cover Cairo University until Cairo fixes its certificate chain, which is
+outside this project's control and should be stated to the student rather than papered over.
 
 ---
 

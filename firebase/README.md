@@ -132,10 +132,29 @@ field `updatedAt`. The command may live under `gcloud alpha firestore` on older 
 
 ## 5. The scan-worker Cloud Run Job
 
+> **`firebase deploy` does NOT rebuild this.** The worker is a Cloud Run **Job** with its
+> own image; the Functions deploy never touches it. So a change to `worker.py`, or a new
+> `web-vN` tag in `requirements.txt`, is live in the API and **still stale in the scanner**
+> until the command below is re-run. This cost a whole verification cycle: worker logging
+> was deployed, a real scan ran, and the new lines were absent — not because they were
+> broken, but because the scanner was still running the previous image. Deploy **both**,
+> and confirm with the digest:
+>
+> ```bash
+> gcloud run jobs describe supervisorly-scan-worker --region <REGION> \
+>   --format="value(spec.template.spec.template.spec.containers[0].image)"
+> ```
+>
+> If the `sha256:` digest did not change, the scanner did not change.
+
 Use `gcloud run jobs **deploy**`, not `create`: `create` only accepts a prebuilt
 `--image`, and passing it `--source` fails with `unrecognized arguments: --source`.
 `deploy` builds from source and creates-or-updates, so it is also the command to re-run
 after any worker change.
+
+Re-running `deploy` with **no** `--set-env-vars` / `--set-secrets` keeps the existing
+config and swaps only the image, which is what you want for a code-only change — passing a
+partial `--set-env-vars` would silently drop the variables you left out.
 
 It builds from a file named `Dockerfile` specifically, so stage a scratch dir first:
 
