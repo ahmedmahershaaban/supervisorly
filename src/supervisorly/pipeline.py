@@ -1166,6 +1166,12 @@ def _attach_recent_works(targets: list[dict], oa) -> None:
         author_id = t.get("openalex_id")
         if not author_id:
             continue
+        # Marked BEFORE the call, and left marked whatever happens. The modal shows a works
+        # COUNT from the registry, so an empty publications list next to "4 works" reads as a
+        # bug unless the page can say which it is: not looked up (outside the shortlist) or
+        # looked up and nothing came back. Same four-state honesty as the evidence cells —
+        # a number with no explanation is the failure, not the empty list.
+        t["works_checked"] = True
         try:
             works = oa.works_by_author(author_id)
         except Exception:                          # noqa: BLE001 — see docstring
@@ -1216,6 +1222,8 @@ def _profile_for(t: dict, plan_topic_ids) -> dict:
     }
     if t.get("recent_works"):
         prof["recent_works"] = t["recent_works"]
+    if t.get("works_checked"):
+        prof["works_checked"] = True
     return prof
 
 

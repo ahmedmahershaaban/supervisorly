@@ -251,12 +251,23 @@ function profileHtml(p){
   if(pr.orcid)        links.push('<a href="'+esc(pr.orcid)+'" target="_blank" rel="noopener noreferrer">ORCID ↗</a>');
   if(pr.openalex_id)  links.push('<a href="'+esc(pr.openalex_id)+'" target="_blank" rel="noopener noreferrer">OpenAlex ↗</a>');
   if(pr.page_url)     links.push('<a href="'+esc(pr.page_url)+'" target="_blank" rel="noopener noreferrer">Their page ↗</a>');
+  /* An empty publication list next to "4 works" reads as a bug unless the page says which
+     it is. Three honest cases, never a silent gap. */
   var works="";
   if(pr.recent_works&&pr.recent_works.length){
     works='<div class="sect"><div class="sect-h">Recent publications</div><ol class="works">'+
       pr.recent_works.map(function(w){
         return '<li><span class="yr">'+esc(w.year||"—")+'</span> '+esc(w.title||"")+'</li>';
       }).join('')+'</ol><div class="note">From OpenAlex, newest first — an activity and recency signal, not a full bibliography.</div></div>';
+  } else if(pr.works_checked){
+    works='<div class="sect"><div class="sect-h">Recent publications</div>'+
+      '<div class="note">We asked OpenAlex and it returned no indexed works for this person — '+
+      'the count above comes from their author record, which can be ahead of the index.</div></div>';
+  } else if(pr.works_count){
+    works='<div class="sect"><div class="sect-h">Recent publications</div>'+
+      '<div class="note">Not looked up — publications are fetched only for the professors in '+
+      'the deep-dive shortlist, and this one was outside it. The '+num(pr.works_count)+
+      ' above is from their author record.</div></div>';
   }
   return '<div class="sect">'+
       (pr.institutions&&pr.institutions.length?'<div class="inst">'+esc(pr.institutions.join(" · "))+'</div>':'')+

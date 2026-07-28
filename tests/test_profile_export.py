@@ -90,6 +90,34 @@ def test_a_target_with_no_openalex_id_is_skipped_without_a_call():
     assert oa.calls == []
 
 
+@pytest.mark.parametrize("oa,label", [(_OA([]), "empty result"), (_OA(boom=True), "failure")])
+def test_looking_and_finding_nothing_is_recorded_as_HAVING_LOOKED(oa, label):
+    """The modal shows a works COUNT from the author record. An empty publication list beside
+    "4 works" reads as a bug unless the page can say which case it is — so the attempt is
+    marked before the call and stays marked whatever comes back. Found in a live run: a
+    professor showed "4 works" and no publications, with nothing to explain the gap."""
+    t = dict(TARGET)
+    pipeline._attach_recent_works([t], oa)
+    assert t.get("works_checked") is True, label
+    assert not t.get("recent_works"), label
+
+
+def test_a_professor_outside_the_shortlist_is_not_marked_as_checked():
+    """The distinction only means something if the un-looked-up case stays unmarked."""
+    assert "works_checked" not in pipeline._profile_for(TARGET, [])
+
+
+def test_the_modal_explains_an_empty_publication_list_either_way():
+    from supervisorly.export import dashboard as dash
+    html = dash.build_dashboard(
+        {"schema_version": 1, "generated_at": "2026-07-29T00:00:00+00:00",
+         "run": {"run_id": "r", "status": "finalized"},
+         "fields": [{"id": "deadline", "label": "Deadline"}], "professors": []})
+    assert "no indexed works for this person" in html      # we asked, OpenAlex had none
+    assert "Not looked up" in html                          # outside the deep-dive shortlist
+    assert "pr.works_checked" in html                       # the branch that tells them apart
+
+
 # ------------------------------------------------------------------ the export boundary
 
 def _export(profile):
