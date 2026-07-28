@@ -82,11 +82,19 @@ class _FirestoreHooks:
                                result=uploaded)
 
     def on_failed(self, message: str) -> None:
+        # Log the reason at ERROR before touching anything else: an upload that also fails
+        # must not be what swallows the explanation. `severity` is the field Cloud Logging
+        # reads, so this surfaces in `logs.py errors` rather than hiding at INFO.
+        print(json.dumps({"severity": "ERROR", "job": self._job_id, "phase": "failed",
+                          "error": str(message)[:800]}, ensure_ascii=True), flush=True)
         try:                                  # keep the partial DB for resume (§3.1)
             upload_results(self._bucket, self._job_id, self._paths,
                            storage_client=self._storage_client)
-        except Exception:
-            pass                              # the honest failure message matters more
+        except Exception as exc:
+            print(json.dumps({"severity": "WARNING", "job": self._job_id,
+                              "phase": "upload_failed_after_failure",
+                              "error": f"{type(exc).__name__}: {exc}"[:400]},
+                             ensure_ascii=True), flush=True)
         self._store.set_status(self._job_id, "failed", error=message)
 
 
@@ -111,6 +119,23 @@ def main(environ=None, *, store=None, transport=None, storage_client=None,
         return 0
     run_params = job.get("run_params") or {}
     store.set_status(job_id, "running")
+    # What this scan was actually asked to do. Without it the event stream starts at
+    # "enumerated" and a zero-result run gives no way to tell a thin country from a wrong
+    # one — which is exactly how the country-code bug stayed invisible.
+    # D-005: the plan carries the student's email; it is NEVER logged. Country, field,
+    # counts and scope are not personal data. Professor names never appear here either.
+    _plan = job.get("plan") or {}
+    print(json.dumps({"job": job_id, "phase": "start",
+                      "country": _plan.get("country"),
+                      "field": str(_plan.get("field") or "")[:120],
+                      "topics": len(_plan.get("resolved_topic_ids") or []),
+                      "named_targets": len(_plan.get("targets") or []),
+                      "university_mode": _plan.get("university_mode"),
+                      "universities": len(_plan.get("universities") or []),
+                      "shortlist": run_params.get("shortlist", 40),
+                      "max_institutions": run_params.get("max_institutions"),
+                      "resuming": bool(job.get("progress"))},
+                     ensure_ascii=True), flush=True)
     root = Path(work_root or environ.get("SUPERVISORLY_WORK_ROOT")
                 or DEFAULT_WORK_ROOT) / job_id
     paths = {"db_path": root / "supervisorly.sqlite",
@@ -130,7 +155,24 @@ def main(environ=None, *, store=None, transport=None, storage_client=None,
         resume=bool(job.get("progress")),   # a re-invoked job resumes its checkpoints
         **paths)
     final = store.get(job_id) or {}
-    print(f"job {job_id} finished with status {final.get('status')}", flush=True)
+    status = final.get("status")
+    # Fold the event stream into the numbers that answer "did this scan find anything?" —
+    # the question a container log could not previously answer without replaying Firestore.
+    counts: dict = {}
+    for e in final.get("progress") or []:
+        d = e.get("data") or []
+        if e.get("phase") == "enumerated" and len(d) >= 2:
+            counts["targets"], counts["institutions"] = d[0], d[1]
+        elif e.get("phase") == "deep_dive_progress" and len(d) >= 2:
+            counts["deep_dive_done"], counts["deep_dive_total"] = d[0], d[1]
+    warnings = [e["data"][0] for e in (final.get("progress") or [])
+                if e.get("phase") == "partial_warning" and e.get("data")]
+    print(json.dumps({"job": job_id, "phase": "finished", "status": status,
+                      "counts": counts, "warnings": warnings[:5],
+                      "error": final.get("error"),
+                      "severity": "ERROR" if status == "failed" else "INFO"},
+                     ensure_ascii=True), flush=True)
+    print(f"job {job_id} finished with status {status}", flush=True)
     return 0 if result is not None else 1
 
 
