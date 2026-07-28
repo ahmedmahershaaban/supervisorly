@@ -312,7 +312,9 @@ def cmd_map_field(args: argparse.Namespace) -> int:
 
 
 # Keys a Scan Studio / conversational plan JSON must carry (D-066). A plan missing any of
-# these is rejected loudly with the full expected list, never silently defaulted (D-002).
+# these is rejected loudly with the full expected list, never silently defaulted.
+# (This previously cited D-002, which is about v1 targeting any country — the fail-loud rule
+# is a build principle from IMPLEMENTATION_GOAL.md, not a numbered decision.)
 PLAN_REQUIRED_KEYS = ("intent_kind", "country", "resolved_topic_ids", "field",
                       "university_mode", "universities")
 
