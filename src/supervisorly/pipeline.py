@@ -33,6 +33,8 @@ from .discover import roster as _roster
 from .ethics import optout as optout_mod
 from .export import dashboard as dash
 from .export import json_export as jx
+from .fetch import browser_rung
+from .fetch import render as render_mod
 from .fetch.fetcher import Fetcher
 from .fetch.normalize import content_hash, main_text
 from .fetch.ratelimit import HostRateLimiter
@@ -724,7 +726,8 @@ def _apply_shortlist(targets: list[dict], exempt_keys: set, topic_ids: list[str]
 
 
 def _process_targets(conn, run_id, targets, fetcher, snaps, *, stats, resume,
-                     progress=None, should_stop=None, orcid_client=None) -> int:
+                     progress=None, should_stop=None, orcid_client=None,
+                     renderer=None) -> int:
     """Deep-dive each target (fetch → extract → claim) — the shared core of run_offline/run_live.
 
     Returns the gap count (targets with any still-``blocked`` field or an unchecked walled social
@@ -742,7 +745,7 @@ def _process_targets(conn, run_id, targets, fetcher, snaps, *, stats, resume,
     total = len(targets)
     for i, t in enumerate(targets, 1):
         _deep_dive_one(conn, run_id, t, fetcher, snaps, stats=stats, resume=resume,
-                       orcid_client=orcid_client)
+                       orcid_client=orcid_client, renderer=renderer)
         _emit_progress(progress, ("deep_dive_progress", i, total))
         if _stop_requested(should_stop):
             stats["cancelled"] = True
@@ -777,8 +780,37 @@ def _page_url_for(t: dict, orcid_client, stats) -> str | None:
     return None
 
 
+def _render_page(conn, snaps, url, res, renderer, stats):
+    """Render a JavaScript page and store it as a snapshot, or None if it stays unreadable.
+
+    Returns ``(html, source_id, snapshot_hash)`` so the caller cites what it actually read.
+
+    The rendered text goes through the SAME wall detector that sent us here. A login page
+    renders perfectly well — it is a real page, it just is not the professor's — so without
+    this second check "render it" would quietly become "defeat it", which is the one thing
+    D-039/D-043 forbid. Provenance is recorded truthfully as a server-side read: robots WAS
+    consulted, and the host's normal tier applies (an institutional page is no less
+    institutional for having been rendered).
+    """
+    if renderer is None:
+        return None
+    page = renderer.render(url)
+    if page is None:
+        return None
+    ingested = browser_rung.ingest_page(
+        conn, snaps.root, final_url=page.final_url, text=page.text, title=page.title,
+        source_tier=_source_tier(page.final_url or url), robots_allowed=True,
+    )
+    html = snaps.load(ingested["snapshot_hash"])
+    if _roster.detect_login_wall(html):
+        stats["render_still_walled"] = stats.get("render_still_walled", 0) + 1
+        return None
+    stats["rendered"] = stats.get("rendered", 0) + 1
+    return html, ingested["source_id"], ingested["snapshot_hash"]
+
+
 def _deep_dive_one(conn, run_id, t, fetcher, snaps, *, stats, resume,
-                   orcid_client=None) -> None:
+                   orcid_client=None, renderer=None) -> None:
     """One target of ``_process_targets``: fetch → extract → claim (semantics per its docstring)."""
     pid = t["id"]
     if resume and runs.target_stage_done(conn, "person", pid, "deep_dive"):
@@ -787,33 +819,48 @@ def _deep_dive_one(conn, run_id, t, fetcher, snaps, *, stats, resume,
     task = runs.add_task(conn, run_id, "person", pid, stage="deep_dive")
     url = _page_url_for(t, orcid_client, stats)
     res = fetcher.fetch(url) if url else None
+    src_id_override = snapshot_hash_override = None
     if res is not None and res.ok:
         html = snaps.load(res.snapshot_hash)
         if _roster.detect_login_wall(html):
-            # a robots-allowed 200 that is really a login/JS/bot wall — its chrome text is NOT
-            # the professor's content, so never extract it; mark blocked → the human rung
-            # (D-039/D-044). This is what keeps a wall from being silently defeated.
-            for field in _EXTRACTORS:
-                _record_blocked(conn, pid, field)
-            runs.set_task_status(conn, task, "blocked",
-                                 last_error="login/bot wall — routed to the human rung")
-            return
+            # A robots-allowed 200 whose text is not the professor's content. Two very
+            # different things land here and they must not share a fate:
+            #   * a LOGIN or bot wall  — a refusal; goes to the human rung untouched.
+            #   * a JAVASCRIPT SHELL   — the page said yes and then needed a browser. That is
+            #                            our reader's limit, not a wall (D-073).
+            # So try rendering, then apply the SAME wall detector to what came back: if the
+            # rendered text still looks like a wall, it was a wall, and nothing was defeated.
+            rendered = _render_page(conn, snaps, url, res, renderer, stats)
+            if rendered is None:
+                for field in _EXTRACTORS:
+                    _record_blocked(conn, pid, field)
+                runs.set_task_status(conn, task, "blocked",
+                                     last_error="login/bot wall — routed to the human rung")
+                return
+            html, src_id_override, snapshot_hash_override = rendered
         chash = content_hash(html)
         if xcache.lookup(conn, "person", pid, chash, PROMPT_VERSION, MODEL_ID,
                          CACHE_SCHEMA_VERSION):
             stats["cache_hits"] += 1
             runs.set_task_status(conn, task, "done")
             return
-        src_id = claims.record_web_source(
-            conn, res.final_url or url, snapshot_hash=res.snapshot_hash, http_status=200,
-            source_tier=_source_tier(res.final_url or url), robots_allowed=True,
-        )
+        # When the page was rendered, the evidence must cite the RENDERED snapshot: that is
+        # the text the quote was found in, and a quote verified against one snapshot while
+        # citing another is exactly the provenance break D-010 exists to prevent.
+        if src_id_override is not None:
+            src_id, evidence_hash = src_id_override, snapshot_hash_override
+        else:
+            src_id = claims.record_web_source(
+                conn, res.final_url or url, snapshot_hash=res.snapshot_hash, http_status=200,
+                source_tier=_source_tier(res.final_url or url), robots_allowed=True,
+            )
+            evidence_hash = res.snapshot_hash
         claim_ids: list[str] = []
         walled_social = None
         for field, extractor in _EXTRACTORS.items():
             found = extractor(html)
             rec = _record_evidence(conn, pid, field, found, src_id=src_id,
-                                   snapshot_hash=res.snapshot_hash, html=html)
+                                   snapshot_hash=evidence_hash, html=html)
             if rec and rec.ok:
                 claim_ids.append(rec.claim_id)
             if field == "social" and found and _WALLED_SOCIAL.search(found[0]):
@@ -1019,9 +1066,22 @@ def run_live(plan: dict, transport: Transport, snap_root, *, email: str,
     # Live runs only: resolves an ORCID profile URL to the professor's real page (D-072).
     # Built here rather than inside the deep-dive so the offline/demo path stays network-free
     # and every existing cassette test keeps passing unchanged (D-011/D-063).
-    gaps = _process_targets(conn, run_id, deep_dive, fetcher, snaps, stats=stats,
-                            resume=resume, progress=progress, should_stop=should_stop,
-                            orcid_client=orcid_mod.OrcidClient(transport))
+    # Server-side rendering (D-073), live runs only. It asks the FETCHER's robots question so
+    # both readers share one cached answer per host — two robots caches is two chances to
+    # disagree, and the permissive one wins. Absent Playwright this is inert: `render()`
+    # returns None and every page takes exactly the path it takes today.
+    renderer = render_mod.ChromiumRenderer(fetcher.robots_allows)
+    try:
+        gaps = _process_targets(conn, run_id, deep_dive, fetcher, snaps, stats=stats,
+                                resume=resume, progress=progress, should_stop=should_stop,
+                                orcid_client=orcid_mod.OrcidClient(transport),
+                                renderer=renderer)
+    finally:
+        # One browser for the whole run; leaking it would outlive the scan inside a container
+        # that then gets reused for the next job.
+        renderer.close()
+    if stats.get("rendered"):
+        stats["render_note"] = (f"{stats['rendered']} page(s) needed a browser to read")
     if stats.get("cancelled"):
         # cancelled wins the status audit: a stopped run NEVER reports a finalized
         # status, whatever the gap count of the processed targets says.

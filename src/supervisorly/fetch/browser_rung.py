@@ -42,12 +42,26 @@ def ingest_page(
     final_url: str,
     text: str,
     title: str | None = None,
+    source_tier: str = SOURCE_TIER,
+    robots_allowed: bool | None = None,
 ) -> dict:
     """Store browser-extracted main text as a snapshot and record its web source.
 
     Returns ``{"snapshot_hash", "source_id", "bytes", "final_url"}``.
     Raises ``ValueError`` on a blank url or empty/whitespace-only text — there is
     nothing verifiable to store (the CLI turns this into exit 2).
+
+    ``source_tier``/``robots_allowed`` default to the human-session rung this module was
+    written for (``agent_browser``, robots not consulted). The **server-side** renderer
+    (D-073) passes its own: when *we* drive the browser we ARE the robot, robots.txt was
+    checked and obeyed, and the page is as official as it would be over plain HTTP — an
+    institutional page does not become less institutional because Chromium read it. Leaving
+    the defaults in place for that path would record two falsehoods: that a human session
+    produced it, and that robots was never consulted.
+
+    The storage path stays shared on purpose. ``_wrap_as_snapshot`` is what makes a browser
+    snapshot byte-compatible with a fetcher one, so the D-010 quote gate behaves identically
+    for both; forking it per rung is how the two would silently drift apart.
     """
     if not final_url or not final_url.strip():
         raise ValueError("final_url is required (provenance cites the FINAL url)")
@@ -59,7 +73,7 @@ def ingest_page(
     snapshot_hash = snaps.store(_wrap_as_snapshot(text, title))
     source_id = claims.record_web_source(
         conn, final_url, snapshot_hash=snapshot_hash,
-        source_tier=SOURCE_TIER, robots_allowed=None,   # robots not consulted (honesty)
+        source_tier=source_tier, robots_allowed=robots_allowed,
     )
     return {
         "snapshot_hash": snapshot_hash,

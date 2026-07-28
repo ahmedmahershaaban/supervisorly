@@ -11,6 +11,22 @@ FROM python:3.11-slim
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Headless Chromium for the server-side render rung (D-073). A measured run had 52 of 52
+# professors `blocked` because the only page on record was an ORCID profile — public,
+# robots-allowed, and a JavaScript application our HTTP reader cannot execute.
+#
+# This is the expensive line in the image (~400 MB with the system libs Chromium needs), and
+# it is why the worker build is slower than the Functions one. `--with-deps` installs those
+# libs; without it Chromium is present and refuses to start, which fails at RUN time rather
+# than silently at scan time.
+#
+# If this layer is ever dropped, nothing breaks: `render.py` reports itself unavailable and
+# every page takes the path it took before (D-068 fail-closed). Slower is not the same as
+# broken, and the scan still finishes.
+RUN pip install --no-cache-dir playwright==1.49.1 \
+    && playwright install --with-deps chromium
+
 COPY main.py _core.py worker.py ./
 
 # one job execution = one scan; JOB_ID is injected per run by the Functions wrapper

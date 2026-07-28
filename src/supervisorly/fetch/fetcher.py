@@ -75,11 +75,22 @@ class Fetcher:
         self._robots[host] = text
         return text
 
+    def robots_allows(self, url: str) -> bool:
+        """Whether robots.txt permits fetching ``url``, using this fetcher's cache and agent.
+
+        Exposed so the server-side renderer (D-073) asks the SAME question against the SAME
+        cached robots.txt this fetcher already read, rather than keeping its own opinion.
+        Two robots caches on one host is two chances to disagree, and the one that says yes
+        is the one that gets used.
+        """
+        parts = urlsplit(url)
+        robots_txt = self._robots_for(parts.scheme or "https", parts.netloc)
+        return robots.is_allowed(robots_txt, url, self._ua)
+
     def fetch(self, url: str) -> FetchResult:
         parts = urlsplit(url)
         host = parts.netloc
-        robots_txt = self._robots_for(parts.scheme or "https", host)
-        if not robots.is_allowed(robots_txt, url, self._ua):
+        if not self.robots_allows(url):
             return FetchResult(url=url, allowed=False, error="disallowed by robots.txt")
 
         attempt = 0            # 0-based retry index; total hits = attempt + 1
