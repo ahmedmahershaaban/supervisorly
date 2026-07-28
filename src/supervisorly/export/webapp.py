@@ -875,13 +875,19 @@ function resumeScan(){
 }
 function openDashboard(){
   if(!state.jobId) return;
-  fetchJson(api("/api/result/"+state.jobId)).then(function(r){
-    var target = r.body && (r.body.html_path || r.body.json_path);
-    if(r.status===200 && target){
-      /* the dashboard opens in a NEW TAB, never iframed (CSP/sandbox conflicts) */
-      window.open(String(target), "_blank", "noopener");
-    } else showErr("err-progress", humanError(r.status, r.body));
-  }, function(e){ showErr("err-progress", humanError(0, null, e)); });
+  /* NAVIGATE — never fetch. /api/result answers 302 to a short-lived signed URL on a
+     DIFFERENT origin (the private results bucket). A fetch follows that redirect and is
+     then blocked by CORS, so the button could never work on the hosted deployment: it
+     always ended in "that request could not be completed". JS cannot read the redirect
+     target either — with redirect:"manual" the response is an opaqueredirect whose
+     Location header is unreadable by design. A top-level navigation follows the redirect
+     natively, with no CORS involved.
+
+     It also has to happen SYNCHRONOUSLY inside the click handler: window.open after an
+     await has lost the user-gesture context and popup blockers eat it.
+
+     The dashboard opens in a NEW TAB, never iframed (CSP/sandbox conflicts). */
+  window.open(api("/api/result/"+encodeURIComponent(state.jobId)), "_blank", "noopener");
 }
 /* polling resilience: >2 min of consecutive poll errors -> the lost-contact panel.
    The job id is the access token, so the student can re-attach from anywhere. */

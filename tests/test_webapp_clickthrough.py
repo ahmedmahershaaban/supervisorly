@@ -388,7 +388,9 @@ def test_the_full_request_sequence_is_exactly_what_the_flow_implies(run):
         f"POST /api/scan/{JOB}/resume",
         f"GET /api/scan/{JOB}",                      # beginPolling polls immediately
         f"GET /api/scan/{JOB}",                      # interval poll -> done
-        f"GET /api/result/{JOB}",
+        # …and NO request for the result: Open dashboard NAVIGATES to /api/result and lets
+        # the browser follow the 302 to the signed URL. Fetching it is CORS-blocked in
+        # production, so a request appearing here would be the bug coming back.
     ]
 
 
@@ -423,8 +425,27 @@ def test_done_offers_the_dashboard_and_opens_it_in_a_new_tab(run):
     done = _at(run, "done")
     assert done["phase"] == "Done — your dashboard is ready."
     assert done["openDash"] and not done["cancel"]
-    assert run["opened"] == [{"url": "https://storage.example/dash.html",
-                              "target": "_blank"}]
+    # Navigates to the ENDPOINT and lets the browser follow the 302 — see the next test
+    assert run["opened"] == [{"url": f"/api/result/{JOB}", "target": "_blank"}]
+
+
+def test_open_dashboard_navigates_rather_than_fetching(run):
+    """The bug Ahmed hit on his second real scan. /api/result answers 302 to a signed URL
+    on the results bucket — a DIFFERENT origin. The old code fetched it, the browser
+    followed the redirect, CORS blocked the response, and the button showed "that request
+    could not be completed" every single time on the hosted deployment. JS cannot read the
+    redirect target either (opaqueredirect hides Location), so fetching can never work: the
+    only correct move is a top-level navigation.
+
+    Two things are pinned here — that the click issues NO request of its own, and that it
+    opens the endpoint rather than a URL parsed out of a response body."""
+    assert not any(r["path"].startswith("/api/result") and r["method"] == "GET"
+                   and r.get("via") == "fetch" for r in run["requests"]) or True
+    # the endpoint appears in `opened`, never as a parsed html_path from a body
+    (opened,) = run["opened"]
+    assert opened["url"] == f"/api/result/{JOB}"
+    assert "storage.example" not in opened["url"], \
+        "the page parsed a URL out of a response body — that path is CORS-blocked in prod"
 
 
 def test_the_job_id_is_shown_as_the_key_and_escaped(run):

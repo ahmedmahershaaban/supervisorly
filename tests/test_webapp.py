@@ -67,9 +67,13 @@ def test_only_fetch_targets_are_the_endpoint_paths():
     assert paths == {"/api/expand", "/api/map", "/api/scan", "/api/scan/", "/api/result/"}
     # dynamic ids are concatenated onto the scan/result prefixes only
     assert '"/api/scan/"+state.jobId' in js
-    assert '"/api/result/"+state.jobId' in js
     assert '"/api/scan/"+state.jobId+"/cancel"' in js
     assert '"/api/scan/"+state.jobId+"/resume"' in js
+    # /api/result is reached by api() too, but by NAVIGATION rather than fetch: it answers
+    # 302 to a signed URL on the results bucket, and fetching across that redirect is
+    # CORS-blocked in production. See test_open_dashboard_navigates_not_fetches below.
+    assert '"/api/result/"+encodeURIComponent(state.jobId)' in js
+    assert "fetchJson(api(\"/api/result/" not in js
 
 
 # ── Atlas language + accessibility ───────────────────────────────────────────
@@ -167,9 +171,34 @@ def test_cancel_resume_open_dashboard():
             in html)
     js = _js(build_webapp())
     assert '"/cancel"' in js and '"/resume"' in js
-    assert 'window.open(String(target), "_blank", "noopener")' in js   # NEW TAB
+    assert '"_blank", "noopener"' in js                                # NEW TAB
     assert "only a failed or cancelled job can be resumed" not in js   # server-side copy
     assert "Resume continues where it left off." in js
+
+
+def test_open_dashboard_navigates_not_fetches():
+    """`/api/result/<id>` answers 302 to a short-lived signed URL on the results bucket —
+    a different origin. Fetching it makes the browser follow that redirect and CORS then
+    blocks the response, so on the hosted deployment the button failed 100% of the time
+    with "that request could not be completed" (Ahmed hit this on a real scan). JS cannot
+    read the redirect target either: with redirect:"manual" the Location header is hidden
+    behind an opaqueredirect by design. A top-level navigation is the only thing that works.
+
+    It must also be synchronous inside the click handler — a window.open after an await has
+    lost the user gesture and popup blockers discard it."""
+    js = _js(build_webapp())
+    body = js[js.index("function openDashboard"):]
+    body = body[:body.index("\n}") + 2]
+    # the comment explains why it must not fetch — assert on CODE, not on the prose
+    code = re.sub(r"/\*.*?\*/", "", body, flags=re.S)
+
+    assert "window.open(" in code, "the dashboard must open in a new tab"
+    assert "fetch(" not in code, \
+        "openDashboard fetches again — that path is CORS-blocked against the results bucket"
+    assert ".then(" not in code, \
+        "window.open after an await loses the user gesture and gets popup-blocked"
+    assert "html_path" not in code and "json_path" not in code, \
+        "parsing a target out of a response body is the broken design"
 
 
 def test_slow_state_thresholds_and_notice():
