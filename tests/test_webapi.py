@@ -7,6 +7,8 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
+
 from supervisorly import jobs, preflight, webapi
 from supervisorly.discover import expand, openalex, ror
 from supervisorly.fetch.transport import CassetteTransport
@@ -554,6 +556,36 @@ def test_an_unrecognised_country_fails_loudly_instead_of_scanning_nothing(tmp_pa
     assert status == 400
     assert "unrecognized country" in body["error"] and "Freedonia" in body["error"]
     assert "alpha-2" in body["error"]
+
+
+@pytest.mark.parametrize("wrong_type", [42, [], {}, True])
+def test_a_country_of_the_wrong_type_is_refused_by_the_plan_validator(tmp_path, wrong_type):
+    """Already handled upstream, and better than the blank check could: the message names the
+    type it got. Pinned so the two guards are known to cover different inputs rather than one
+    being assumed to cover both."""
+    status, body = _start(_store(tmp_path),
+                          {"email": EMAIL, "plan": dict(PLAN, country=wrong_type)})
+    assert status == 400, (wrong_type, body)
+    assert "must be a string" in body["error"]
+
+
+@pytest.mark.parametrize("blank", ["", "   ", "\t\n", None])
+def test_a_blank_country_is_refused_rather_than_scanning_the_whole_world(tmp_path, blank):
+    """The hole the FIRST version of this fix left open, found in production.
+
+    `country` is in PLAN_REQUIRED_KEYS, so the key had to be present — but "" satisfied that
+    and then skipped the resolution branch, which was guarded by `if raw.strip()`. ROR was
+    searched for no country, matched nothing, and the student was told "Done — your dashboard
+    is ready." over an empty table: a scan accepted, a Cloud Run worker launched, a slot of
+    their hourly budget spent, and nothing said about why it was empty.
+
+    "Freedonia" failing while "" succeeded is the tell — the stricter input was rejected and
+    the emptier one was not."""
+    status, body = _start(_store(tmp_path),
+                          {"email": EMAIL, "plan": dict(PLAN, country=blank)})
+    assert status == 400, (blank, body)
+    assert "country is required" in body["error"]
+    assert "alpha-2" in body["error"]        # the message must say what a valid one looks like
 
 
 def test_map_route_checks_its_method_like_every_other_route():

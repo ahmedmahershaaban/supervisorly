@@ -280,13 +280,22 @@ def handle_scan_start(params: dict, *, store, worker=None, transport=None,
     # 285 institutions in ROR. Normalise here, before the job key is derived, so the stored
     # plan and the idempotency key both carry the resolved code.
     raw_country = plan.get("country")
-    if isinstance(raw_country, str) and raw_country.strip():
-        code = to_country_code(raw_country)
-        if not code:
-            return _error(400, f"unrecognized country {raw_country.strip()!r} — pass an "
-                               "ISO 3166-1 alpha-2 code (e.g. EG) or an English country "
-                               "name (e.g. Egypt)")
-        plan = {**plan, "country": code}
+    if not isinstance(raw_country, str) or not raw_country.strip():
+        # A BLANK country used to slip through this check entirely: `country` is in
+        # PLAN_REQUIRED_KEYS so the key had to exist, but "" satisfied that and then skipped
+        # the branch below. ROR was searched for no country, matched no institutions, and the
+        # student was told "Done — your dashboard is ready." over an empty table — a scan
+        # accepted, a worker launched and a result that explained nothing. Found by a browser
+        # driver that filled the field on the wrong wizard step, which is exactly the mistake
+        # a distracted person makes. Unrecognised already failed loud (D-002); missing must too.
+        return _error(400, "a country is required (plan key 'country') — pass an ISO 3166-1 "
+                           "alpha-2 code (e.g. EG) or an English country name (e.g. Egypt)")
+    code = to_country_code(raw_country)
+    if not code:
+        return _error(400, f"unrecognized country {raw_country.strip()!r} — pass an "
+                           "ISO 3166-1 alpha-2 code (e.g. EG) or an English country "
+                           "name (e.g. Egypt)")
+    plan = {**plan, "country": code}
 
     job_key = jobs.new_job_key(email, plan)
     active = store.active_job_for(email)
