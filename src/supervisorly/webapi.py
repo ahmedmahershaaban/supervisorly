@@ -86,6 +86,70 @@ def handle_subject_map(params: dict, *, transport=None, environ=None) -> tuple[i
     return 200, smap
 
 
+#: Hard caps on a client report. The browser is untrusted input like any other, and this
+#: endpoint writes to OUR logs — so it must never become a way to flood them or to smuggle
+#: personal data into a place the privacy rules do not reach.
+CLIENTLOG_MAX_BYTES = 4 * 1024
+CLIENTLOG_MAX_MESSAGE = 500
+CLIENTLOG_KINDS = ("js_error", "unhandled_rejection", "api_error", "diagnostics")
+
+_EMAILISH = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
+
+
+def _scrub(text: str, limit: int) -> str:
+    """Trim, cap, strip control characters, and REDACT anything email-shaped.
+
+    The page is written not to send an address, but this is the last line before a value
+    reaches a log we keep — and "the client promised not to" is not a control. A student's
+    email is the one piece of personal data the browser holds, so it is redacted here even
+    though it should never arrive (D-005)."""
+    s = _EMAILISH.sub("[email-redacted]", str(text or ""))
+    s = "".join(ch for ch in s if ch == "\n" or ch == "\t" or ch >= " ")
+    return s.strip()[:limit]
+
+
+def handle_client_log(params: dict, *, environ=None, now=None) -> tuple[int, dict]:
+    """Accept ONE browser-side error report and write it to the server log (D-071).
+
+    This exists because the two worst bugs found in production — a finished scan claiming
+    the user was offline, and an "Open dashboard" button that failed every time — happened
+    entirely in the browser and produced NO server log line at all. The CORS failure never
+    even sent a request. The backend logged a healthy day while the page was broken.
+
+    Deliberately narrow, so it cannot drift into tracking (D-069 ships no tracking):
+
+    * **errors only** — the `kind` must be one of a fixed set; there is no page-view, no
+      session id, no user id, no timing beacon, and nothing is sent on a healthy run;
+    * **no identity** — no email, no plan, no professor data; anything email-shaped is
+      redacted server-side regardless of what was sent;
+    * **capped** — 4 KB per report, 500 chars per message, and throttled per IP in the
+      Firebase wrapper, so it cannot be used to flood the logs;
+    * **answers 204 always** — a logging endpoint must never tell a caller anything, and a
+      failure here must never surface to the student mid-scan.
+    """
+    kind = str(params.get("kind") or "").strip()
+    if kind not in CLIENTLOG_KINDS:
+        return 204, {}                       # unknown kind: accept and drop, never explain
+    if len(json.dumps(params, ensure_ascii=False).encode("utf-8")) > CLIENTLOG_MAX_BYTES:
+        return 204, {}
+
+    job = str(params.get("job_id") or "")[:64]
+    entry = {
+        "severity": "WARNING",
+        "source": "client",
+        "kind": kind,
+        "job": job if jobs._SAFE_ID.fullmatch(job) else None,
+        "message": _scrub(params.get("message"), CLIENTLOG_MAX_MESSAGE),
+        "where": _scrub(params.get("where"), 200),
+        "phase": _scrub(params.get("phase"), 80),
+        "status": params.get("status") if isinstance(params.get("status"), int) else None,
+        "ua": _scrub(params.get("ua"), 180),
+    }
+    print(json.dumps({k: v for k, v in entry.items() if v not in (None, "")},
+                     ensure_ascii=True), flush=True)
+    return 204, {}
+
+
 def handle_expand(params: dict, *, environ=None, transport=None) -> tuple[int, dict]:
     """Expand a free-text field into search-string variants (D-068).
 
@@ -354,6 +418,8 @@ def route_request(method: str, path: str, params: dict, *, store=None, worker=No
         return handle_subject_map(params, transport=transport, environ=environ)
     if path == "/api/expand" and method in ("GET", "POST"):
         return handle_expand(params, environ=environ, transport=transport)
+    if path == "/api/clientlog" and method == "POST":
+        return handle_client_log(params, environ=environ)
     if path == "/api/scan" or path.startswith("/api/scan/") \
             or path.startswith("/api/result/"):
         if store is None:

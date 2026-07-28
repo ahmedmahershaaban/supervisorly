@@ -232,6 +232,42 @@ _JS = r"""
 function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,c=>(
   {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
 
+/* ── D-071: browser-side error reporting ─────────────────────────────────────
+   Errors ONLY. Nothing is sent on a healthy run: no page views, no session id, no timing,
+   no identity. The two worst production bugs so far lived entirely in the browser and left
+   no server trace at all — a finished scan claiming the user was offline, and an Open
+   dashboard button that failed every time without ever sending a request. This is the
+   narrowest thing that would have caught them.
+
+   Capped at REPORT_MAX per page load so a render loop cannot beat on the endpoint, and
+   every send is fire-and-forget: a failure to report must never become a second failure
+   the student can see. The email and the plan are NEVER included — the server redacts
+   anything email-shaped as a backstop, but the page simply does not send it. */
+var REPORT_MAX = 6, reportsSent = 0;
+function report(kind, message, extra){
+  if(reportsSent >= REPORT_MAX) return;
+  reportsSent++;
+  try {
+    var b = {kind: kind, message: String(message == null ? "" : message).slice(0, 500),
+             ua: (navigator.userAgent || "").slice(0, 180)};
+    if(state.jobId) b.job_id = state.jobId;
+    if(state.phaseKey) b.phase = state.phaseKey;
+    if(extra){ if(extra.where) b.where = String(extra.where).slice(0,200);
+               if(typeof extra.status === "number") b.status = extra.status; }
+    fetch(api("/api/clientlog"), {method:"POST", keepalive:true,
+      headers:{"Content-Type":"application/json"}, body: JSON.stringify(b)})
+      .catch(function(){});                       /* never surface a reporting failure */
+  } catch(e){ /* reporting must not be able to break the page */ }
+}
+window.addEventListener("error", function(e){
+  report("js_error", (e && e.message) || "script error",
+         {where: (e && e.filename ? e.filename + ":" + e.lineno : "")});
+});
+window.addEventListener("unhandledrejection", function(e){
+  var r = e && e.reason;
+  report("unhandled_rejection", (r && (r.message || r)) || "unhandled rejection");
+});
+
 /* tuning constants (docs/FIREBASE_WEB_PLAN.md §4/§5) */
 var POLL_MS = 4000;            /* status poll interval: every 4 s */
 var LOST_AFTER_MS = 120000;    /* >2 min of consecutive poll errors -> lost-contact panel */
@@ -268,6 +304,31 @@ function showErr(id, msg){
   var e = document.getElementById(id);
   e.textContent = msg; e.classList.add("on");
   var step = e.closest(".step"); if(step) step.classList.add("bad");
+  /* Every error the student is actually shown is reported (D-071). Reporting HERE rather
+     than at each call site means a new error path cannot be added without it — the same
+     reasoning that puts the quote gate and conflict detection at their choke points. */
+  report("api_error", msg, {where: id});
+}
+
+/* What the student can hand over when something goes wrong — assembled locally, sent
+   nowhere unless they choose to paste it. Contains no email and no plan. */
+function diagnosticsText(){
+  var lines = [
+    "Supervisorly diagnostics",
+    "when       : " + new Date().toISOString(),
+    "job id     : " + (state.jobId || "(none)"),
+    "step       : " + state.step,
+    "phase      : " + (state.phaseKey || "(none)"),
+    "last status: " + ((document.getElementById("phaseLine")||{}).textContent || ""),
+    "error shown: " + ((document.getElementById("err-progress")||{}).textContent || "(none)"),
+    "field      : " + (state.field || ""),
+    "variants   : " + ((state.variants || []).join(" | ") || "(none)"),
+    "topics     : " + (state.topicTotal || 0) + " offered",
+    "online     : " + navigator.onLine,
+    "page       : " + location.host,
+    "browser    : " + (navigator.userAgent || "").slice(0, 180)
+  ];
+  return lines.join("\n");
 }
 function clearErrs(){
   document.querySelectorAll(".err").forEach(function(e){
@@ -936,6 +997,25 @@ document.addEventListener("DOMContentLoaded", function(){
   document.getElementById("cancelBtn").addEventListener("click", cancelScan);
   document.getElementById("resumeBtn").addEventListener("click", resumeScan);
   document.getElementById("openDash").addEventListener("click", openDashboard);
+  document.getElementById("copyDiag").addEventListener("click", function(){
+    var txt = diagnosticsText();
+    var done = function(){ toast("diagnostics copied — paste them when reporting"); };
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(txt).then(done, function(){ fallbackCopy(txt, done); });
+    } else fallbackCopy(txt, done);
+    /* the student asked for this, so the same detail goes to the log too — the one place
+       a report is deliberately BOTH local and sent (D-071) */
+    report("diagnostics", "student copied diagnostics", {where: "copyDiag"});
+  });
+  function fallbackCopy(txt, done){
+    var ta = document.createElement("textarea");
+    ta.value = txt; ta.setAttribute("readonly", "");
+    ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand("copy"); done(); }
+    catch(e){ toast("could not copy — select the text manually"); }
+    document.body.removeChild(ta);
+  }
   document.getElementById("resumeIdBtn").addEventListener("click", resumeById);
   document.getElementById("resumeId").addEventListener("keydown", function(e){
     if(e.key==="Enter"){ e.preventDefault(); resumeById(); } });
@@ -1156,9 +1236,13 @@ def build_webapp(*, api_base: str = "") -> str:
       <button type="button" class="btn ghost" id="cancelBtn">Cancel scan</button>
       <button type="button" class="btn hidden" id="resumeBtn">Resume scan</button>
       <button type="button" class="btn big hidden" id="openDash">Open dashboard ↗</button>
+      <button type="button" class="btn ghost" id="copyDiag">Copy diagnostics</button>
     </div>
     <div class="hint">cancel stops after the current page and keeps everything gathered —
-      resume continues where it left off. The dashboard opens in a new tab.</div>
+      resume continues where it left off. The dashboard opens in a new tab.
+      <b>Copy diagnostics</b> puts what happened on your clipboard — job id, phase and any
+      error, with no email and no results — so you can paste it when reporting a problem.
+      Nothing is sent by pressing it.</div>
   </section>
 </main>
 <div id="toast" role="status"></div>

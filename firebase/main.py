@@ -101,6 +101,8 @@ if https_fn is not None:
             return https_fn.Response("", status=302,
                                      headers={**CORS_HEADERS,
                                               "Location": body["url"]})
+        if status == 204:                       # 204 means NO content — not "{}" (D-071)
+            return https_fn.Response("", status=204, headers=CORS_HEADERS)
         return _json(status, body)
 
     def _deny_method(req, *allowed: str):
@@ -131,6 +133,14 @@ if https_fn is not None:
             return _preflight()
         return (_deny_method(req, "GET", "POST")
                 or _respond(*_core.handle_map(_params(req), ip=_ip(req))))
+
+    @https_fn.on_request()
+    def clientlog(req: https_fn.Request) -> https_fn.Response:
+        """Browser error reports (D-071). Always 204 — never tells the caller anything."""
+        if req.method == "OPTIONS":
+            return _preflight()
+        return (_deny_method(req, "POST")
+                or _respond(*_core.handle_client_log(_params(req), ip=_ip(req))))
 
     @https_fn.on_request(secrets=[EXPAND_KEY_SECRET])
     def expand(req: https_fn.Request) -> https_fn.Response:

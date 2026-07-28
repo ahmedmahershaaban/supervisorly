@@ -254,7 +254,9 @@ let threw = null;
 
     /* plant a stale error, exactly as a timed-out click would, and prove the next
        authoritative status clears it rather than letting the two coexist */
-    sandbox.showErr("err-progress", "a click that failed earlier");
+    if (scen.plant_error !== false) {
+      sandbox.showErr("err-progress", "a click that failed earlier");
+    }
     trace.push(snap("stale error planted"));
     byId("cancelBtn").fire("click");
     await flush();
@@ -333,7 +335,8 @@ def _scenario():
     }
 
 
-def _run(tmp_path, scenario):
+def _run(tmp_path, scenario, *, plant_error=True):
+    scenario = {**scenario, "plant_error": plant_error}
     node = shutil.which("node")
     if node is None:
         pytest.skip("node not on PATH")
@@ -377,7 +380,10 @@ def test_understand_expands_once_then_maps_every_phrasing(run):
 def test_the_full_request_sequence_is_exactly_what_the_flow_implies(run):
     """The click-through's real assertion: the exact calls a student's browser makes,
     in order, with no surprise extras (a stray call here would be a privacy question)."""
-    assert [f"{r['method']} {r['path']}" for r in run["requests"]] == [
+    # the D-071 beacon is orthogonal to the scan lifecycle — it fires whenever an error is
+    # shown, so it is asserted separately (see the beacon test) and excluded here
+    flow = [r for r in run["requests"] if r["path"] != "/api/clientlog"]
+    assert [f"{r['method']} {r['path']}" for r in flow] == [
         "POST /api/expand",
         "GET /api/map", "GET /api/map",
         "POST /api/scan",
@@ -494,6 +500,24 @@ def test_a_stale_error_never_survives_into_a_terminal_state(tmp_path):
     assert done["phase"] == "Done — your dashboard is ready."
     assert done["err"] == "", f"a stale error survived into 'done': {done['err']!r}"
     assert _at(rep, "after open dashboard")["err"] == ""
+
+
+def test_every_error_shown_to_the_student_is_also_reported(run):
+    """D-071. The two worst production bugs lived entirely in the browser and left NO
+    server trace — a finished scan claiming the student was offline, and a dashboard button
+    whose request never even left the machine. The beacon fires from showErr, so a new
+    error path cannot be added without reporting, and the planted error in the walkthrough
+    must therefore have produced exactly one POST."""
+    beacons = [r for r in run["requests"] if r["path"] == "/api/clientlog"]
+    assert beacons, "an error was shown but nothing was reported"
+    assert all(r["method"] == "POST" for r in beacons)
+
+
+def test_the_beacon_reports_errors_only_and_never_on_a_clean_run(tmp_path):
+    """It must not become tracking: nothing is sent when nothing is wrong."""
+    rep = _run(tmp_path, _scenario(), plant_error=False)
+    assert not [r for r in rep["requests"] if r["path"] == "/api/clientlog"], \
+        "the page reported something on a healthy run — that is telemetry, not error logging"
 
 
 def test_only_a_real_offline_state_is_reported_as_offline(tmp_path):

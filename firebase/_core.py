@@ -41,6 +41,10 @@ RESUME_LIMIT_PER_HOUR = 5
 CANCEL_LIMIT_PER_HOUR = 60
 RESULT_LIMIT_PER_HOUR = 120
 STATUS_LIMIT_PER_HOUR = 3000
+#: Browser error reports (D-071). Generous enough that a genuinely broken session can
+#: report what happened, tight enough that the endpoint cannot be used to flood the logs —
+#: it is the one route that writes attacker-influenced text into our own logging.
+CLIENTLOG_LIMIT_PER_HOUR = 40
 
 #: §5 — expansion results are cached per normalized field for 30 days.
 CACHE_TTL_DAYS = 30
@@ -450,6 +454,17 @@ def handle_expand(params: dict, *, client=None, ip: str = "", environ=None,
     return status, body
 
 
+def handle_client_log(params: dict, *, client=None, ip: str = "") -> tuple[int, dict]:
+    """POST /api/clientlog: throttle (§5.2, 40/h) → write the browser's report to the log.
+
+    Over the limit is still a 204, not a 429: the page must never surface a logging failure
+    to a student mid-scan, and a beacon that argues back would be worse than one that
+    quietly stops."""
+    if not check_throttle("clientlog", ip, CLIENTLOG_LIMIT_PER_HOUR, client=client):
+        return 204, {}
+    return webapi.handle_client_log(params)
+
+
 def handle_map(params: dict, *, client=None, ip: str = "", environ=None,
                transport=None) -> tuple[int, dict]:
     """GET/POST /api/map: throttle (§5.2, 30/h) → the existing subject-map handler."""
@@ -606,6 +621,8 @@ def route_api(method: str, path: str, params: dict, *, ip: str = "", environ=Non
     if path == "/api/expand" and method in ("GET", "POST"):
         return handle_expand(params, client=client, ip=ip, environ=environ,
                              transport=transport)
+    if path == "/api/clientlog" and method == "POST":
+        return handle_client_log(params, client=client, ip=ip)
     if path == "/api/scan" and method == "POST":
         return handle_scan_start(params, client=client, ip=ip, environ=environ,
                                  transport=transport, jobs_client=jobs_client)

@@ -94,8 +94,14 @@ def test_an_unsettleable_disagreement_stays_open(conn):
     """Same tier, no usable ordering: the head is chosen so the export has a value, but the
     conflict is `open` — which is the whole point. A contested field is allowed; a hidden
     one is not."""
-    a = _claim(conn, "open")
-    b = _claim(conn, "closed")
+    # The SAME observed_at on both, stated explicitly. Relying on two inserts landing in
+    # the same clock second made this flaky: utcnow() has second resolution, so two claims
+    # usually share a timestamp (unorderable -> open) but occasionally straddle a boundary
+    # (orderable -> resolved by recency) and the test failed for a reason that had nothing
+    # to do with the behaviour it is describing.
+    same = "2026-03-01T12:00:00+00:00"
+    a = _claim(conn, "open", observed_at=same)
+    b = _claim(conn, "closed", observed_at=same)
     (c,) = conflicts.conflicts_for(conn, "person", "p1")
     assert c["resolution_state"] == "open"
     assert conflicts.open_conflicts(conn) and conflicts.open_conflicts(conn)[0]["conflict_id"] == c["conflict_id"]

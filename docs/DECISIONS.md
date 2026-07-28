@@ -1406,6 +1406,47 @@ The hosted page + endpoints (the Firebase web app) follow the same ethics as the
 5. **The user can always stop safely and continue.** Cancel is graceful, partial results
    are kept and exportable, and every terminal state is resumable — never a dead end.
 
+## D-071 — Browser errors are reported; nothing else is
+
+**Status:** locked (Ahmed, 2026-07-28) — narrows
+[D-069](#d-069--the-hosted-web-product-honesty-privacy-and-user-control)
+
+The hosted product had **no browser-side visibility at all**, and it cost real bugs. Two of
+the three worst defects found in production lived entirely in the page and produced **not
+one server log line**: a finished scan that told the student they were offline, and an
+*Open dashboard* button that failed every single time — the latter never even sent a
+request, because the browser blocked it before it left the machine. The backend logged a
+healthy day while the product was broken. Both were found by a human noticing, not by us.
+
+D-069(4) says the page "ships no other external resource and no tracking." That still
+holds, and this decision is written to keep it holding:
+
+1. **Errors only.** A report is sent when an error is *shown to the student*, when a script
+   throws, or when a promise rejects unhandled — never otherwise. A healthy run sends
+   nothing at all. There is no page view, no session id, no user id, no timing beacon. A
+   test asserts a clean run produces zero reports; if that test ever needs relaxing, this
+   decision is being broken.
+2. **No identity, ever.** The email and the plan are never sent. The server redacts
+   anything email-shaped anyway, because "the client promised not to" is not a control.
+   No professor data is involved — reports carry a job id, a phase, an error message and a
+   user-agent string.
+3. **Reported at the choke point.** The beacon fires inside `showErr`, so a new error path
+   cannot be added without reporting — the same reasoning that puts the quote gate and
+   conflict detection where they are.
+4. **Capped and quiet.** Six reports per page load, 4 KB per report, 500 characters per
+   message, 40/hour per IP. Failure to report is swallowed: a logging problem must never
+   become a second visible failure during someone's scan. The endpoint answers **204
+   always** — it tells a caller nothing, including whether it was throttled.
+5. **The student can always report by hand instead.** *Copy diagnostics* puts the same
+   information on the clipboard and sends nothing. It is the honest path for anyone who
+   would rather hand over the detail themselves.
+
+**Reversal condition:** if a report is ever wanted that is not an error — a funnel step, a
+timing, a feature-use count — that is analytics, not diagnostics, and this decision does
+not cover it. Open a new one and argue it on its own terms.
+
+---
+
 ## D-070 — The multi-phrasing subject-map merge is client-side
 
 **Status:** locked (Ahmed, 2026-07-27) — refines [D-068](#d-068--the-llm-may-generate-queries-never-claims)

@@ -61,10 +61,16 @@ def test_self_contained_except_api_fetches():
 
 def test_only_fetch_targets_are_the_endpoint_paths():
     js = _js(build_webapp())
-    # one call site, always on a variable built by api() — never a literal URL
-    assert re.findall(r"fetch\((\w+)", js) == ["url"]
+    # Two call sites, and the invariant that matters is that NEITHER takes a literal URL:
+    #   fetchJson(url…)  — every product call, url built by api()
+    #   report()         — the D-071 beacon, fetch(api("/api/clientlog")…). It bypasses
+    #     fetchJson on purpose: fetchJson rejects on failure, which would fire another
+    #     report and risk a loop, and the beacon needs keepalive to survive page unload.
+    assert sorted(re.findall(r"fetch\((\w+)", js)) == ["api", "url"]
+    assert 'fetch("' not in js and "fetch('" not in js, "a literal URL is being fetched"
     paths = set(re.findall(r'api\("([^"]+)"', js))
-    assert paths == {"/api/expand", "/api/map", "/api/scan", "/api/scan/", "/api/result/"}
+    assert paths == {"/api/expand", "/api/map", "/api/scan", "/api/scan/", "/api/result/",
+                     "/api/clientlog"}
     # dynamic ids are concatenated onto the scan/result prefixes only
     assert '"/api/scan/"+state.jobId' in js
     assert '"/api/scan/"+state.jobId+"/cancel"' in js
@@ -304,7 +310,9 @@ const scen = JSON.parse(fs.readFileSync(scenPath, "utf8"));
 const sandbox = {
   document: { addEventListener() {}, getElementById: () => null,
               querySelectorAll: () => [], querySelector: () => null },
-  window: {}, navigator: {}, console,
+  // a real window has addEventListener — the page registers error/unhandledrejection
+  // handlers at load for the D-071 beacon, and a sandbox without it fails at parse time
+  window: { addEventListener() {} }, navigator: {}, console, fetch: () => Promise.resolve({}),
   setTimeout: () => 0, clearTimeout: () => {}, setInterval: () => 0,
   clearInterval: () => {},
 };

@@ -449,6 +449,74 @@ def test_scan_start_to_status_to_result_round_trip_on_cassettes(tmp_path):
                                      work_root=tmp_path / "jobs", environ={})[0] == 409
 
 
+# ── D-071: browser error reports ─────────────────────────────────────────────
+
+def _clientlog(params, capsys):
+    status, body = webapi.handle_client_log(params)
+    return status, capsys.readouterr().out.strip()
+
+
+def test_a_client_report_is_written_to_the_log(capsys):
+    status, out = _clientlog({"kind": "api_error", "message": "boom",
+                              "job_id": "abc123", "phase": "deep_dive",
+                              "status": 500, "where": "err-progress"}, capsys)
+    assert status == 204
+    rec = json.loads(out)
+    assert rec["source"] == "client" and rec["kind"] == "api_error"
+    assert rec["message"] == "boom" and rec["job"] == "abc123"
+    assert rec["severity"] == "WARNING"
+
+
+def test_an_email_is_redacted_even_though_the_page_never_sends_one(capsys):
+    """The page is written not to send an address — but "the client promised not to" is
+    not a control, and this is the last point before a value lands in a log we keep."""
+    status, out = _clientlog({"kind": "js_error",
+                              "message": "failed for student@university.edu mid-scan",
+                              "where": "mail a.b+c@d.co.uk"}, capsys)
+    assert status == 204
+    assert "@university.edu" not in out and "@d.co.uk" not in out
+    assert out.count("[email-redacted]") == 2
+
+
+def test_a_malformed_job_id_is_dropped_not_logged(capsys):
+    _, out = _clientlog({"kind": "js_error", "message": "x",
+                         "job_id": "../../etc/passwd"}, capsys)
+    assert "passwd" not in out and '"job"' not in out
+
+
+def test_only_known_kinds_are_logged(capsys):
+    """D-071 is errors-only. A page view is analytics; it must not be loggable through
+    this endpoint just because someone posts one."""
+    for kind in ("pageview", "timing", "", "click", None):
+        status, out = _clientlog({"kind": kind, "message": "should not appear"}, capsys)
+        assert status == 204 and out == "", kind
+
+
+def test_an_oversized_report_is_dropped(capsys):
+    status, out = _clientlog({"kind": "api_error", "message": "x" * 9000}, capsys)
+    assert status == 204 and out == ""
+
+
+def test_a_long_message_is_capped_rather_than_refused(capsys):
+    _, out = _clientlog({"kind": "api_error", "message": "y" * 900}, capsys)
+    assert len(json.loads(out)["message"]) == webapi.CLIENTLOG_MAX_MESSAGE
+
+
+def test_control_characters_cannot_forge_log_lines(capsys):
+    """A newline in a message would otherwise let a caller inject a second, fake entry."""
+    _, out = _clientlog({"kind": "js_error",
+                         "message": 'a\r\n{"severity":"ERROR","fake":true}'}, capsys)
+    assert len(out.splitlines()) == 1
+    assert json.loads(out)["message"].count("\n") <= 1
+
+
+def test_clientlog_is_post_only_and_routed(capsys):
+    assert webapi.route_request("POST", "/api/clientlog", {"kind": "js_error",
+                                                           "message": "m"})[0] == 204
+    capsys.readouterr()
+    assert webapi.route_request("GET", "/api/clientlog", {})[0] == 404
+
+
 def test_a_country_name_is_resolved_to_iso_alpha2_before_the_scan_starts(tmp_path):
     """The bug Ahmed's first real scan hit: the wizard sends a country NAME, ROR's filter
     needs alpha-2, and the hosted path never translated. Every web scan queried ROR with
