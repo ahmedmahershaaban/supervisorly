@@ -146,10 +146,14 @@ def test_the_small_endpoint_is_used_not_the_whole_record():
 def test_a_walled_researcher_url_is_skipped_not_fetched():
     """The line D-072 does not cross. 2 of the 6 real URLs found were ResearchGate and
     LinkedIn; scraping them is forbidden (D-039/043/044) whatever robots.txt allows. If this
-    test ever fails, the tool has started scraping walled sources."""
+    test ever fails, the tool has started scraping walled sources.
+
+    Asserts the PROPERTY (no walled URL is ever handed onward) rather than a particular
+    return value — the fallback changed under D-073 and this rule did not."""
     t = {"url": f"https://orcid.org/{ID}", "url_kind": "orcid", "orcid": ID}
     c = _client(ID, "https://www.linkedin.com/in/prof/", "https://x.com/prof")
-    assert pipeline._page_url_for(t, c, {}) is None
+    picked = pipeline._page_url_for(t, c, {})
+    assert picked is None or not pipeline._WALLED_SOCIAL.search(picked)
 
 
 @pytest.mark.parametrize("walled", [
@@ -166,7 +170,8 @@ def test_every_measured_bot_walled_profile_host_is_refused(walled):
     ALLOWS /profile/ and nothing else would stop the fetch — it just 403s. A live ORCID
     record listed exactly such a URL as a professor's only page, which is how this was found."""
     t = {"url": f"https://orcid.org/{ID}", "url_kind": "orcid", "orcid": ID}
-    assert pipeline._page_url_for(t, _client(ID, walled), {}) is None
+    picked = pipeline._page_url_for(t, _client(ID, walled), {})
+    assert picked != walled and not pipeline._WALLED_SOCIAL.search(picked or "")
 
 
 def test_a_real_page_wins_over_a_walled_one_in_the_same_record():
@@ -177,12 +182,33 @@ def test_a_real_page_wins_over_a_walled_one_in_the_same_record():
     assert stats["orcid_resolved"] == 1
 
 
-def test_the_orcid_profile_page_itself_is_never_what_gets_fetched():
-    """The whole defect in one assertion: orcid.org/<id> is a JS shell that can only ever
-    produce `blocked`, so it must never be the URL handed to the fetcher."""
+def test_a_resolved_page_is_preferred_over_the_orcid_profile():
+    """A real homepage always wins — that is what resolution is for."""
     t = {"url": f"https://orcid.org/{ID}", "url_kind": "orcid", "orcid": ID}
-    for client in (_client(ID), _client(ID, "https://ok.edu/")):
-        assert pipeline._page_url_for(t, client, {}) != t["url"]
+    assert pipeline._page_url_for(t, _client(ID, "https://ok.edu/"), {}) == "https://ok.edu/"
+
+
+def test_with_no_researcher_url_we_fall_back_to_the_orcid_profile_itself():
+    """This REVERSES the original D-072 behaviour, deliberately.
+
+    D-072 returned None here, to skip fetching a page "known in advance to be walled". True
+    while the only reader was an HTTP client; false once the render rung (D-073) existed —
+    the profile is public, robots-allowed and merely needs JavaScript, and a browser reads it
+    (29,109 chars measured on a real Cairo professor).
+
+    Keeping the skip made the render rung dead code for exactly the targets it was built for:
+    the first hosted run after shipping it deep-dived 12 professors in 3 seconds and never
+    opened a browser, because no URL was ever handed to the fetcher."""
+    t = {"url": f"https://orcid.org/{ID}", "url_kind": "orcid", "orcid": ID}
+    assert pipeline._page_url_for(t, _client(ID), {}) == f"https://orcid.org/{ID}"
+
+
+def test_a_record_of_only_walled_urls_still_falls_back_rather_than_giving_up():
+    """The walled candidates are skipped, but the ORCID profile is not walled — it is the
+    honest remaining lead."""
+    t = {"url": f"https://orcid.org/{ID}", "url_kind": "orcid", "orcid": ID}
+    c = _client(ID, "https://www.linkedin.com/in/prof/", "https://x.com/prof")
+    assert pipeline._page_url_for(t, c, {}) == f"https://orcid.org/{ID}"
 
 
 def test_a_target_with_a_real_homepage_is_left_completely_alone():

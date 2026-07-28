@@ -770,8 +770,17 @@ def _page_url_for(t: dict, orcid_client, stats) -> str | None:
     recruiting source the tool must NOT scrape (D-039/D-043/D-044), and the existing
     ``walled_social`` path already routes advertised ones to the human rung.
 
-    Returning None when nothing resolves is deliberate — it SKIPS the fetch of a page known
-    in advance to be walled, so a doomed request never spends the host's rate limit.
+    When the record lists no usable page we fall back to **the ORCID profile itself**. That
+    reverses an optimisation D-072 added, and the reversal is the point: D-072 skipped this
+    fetch because the profile "is known in advance to be walled", which was true while the
+    only reader was an HTTP client. With the render rung (D-073) it is no longer true — the
+    profile is public, robots-allowed, and merely needs JavaScript, and a browser reads it
+    (measured: 29,109 characters for a real Cairo professor). Skipping it now would mean
+    refusing to open the one page the new capability exists to open.
+
+    The cost of being wrong is bounded and unchanged: with no renderer available the fetch
+    returns the JavaScript shell, the wall detector fires, and the target is `blocked` exactly
+    as it was before — one wasted request, never a fabricated fact.
     """
     url = t.get("url")
     if orcid_client is None or t.get("url_kind") != "orcid":
@@ -781,7 +790,7 @@ def _page_url_for(t: dict, orcid_client, stats) -> str | None:
             continue
         stats["orcid_resolved"] = stats.get("orcid_resolved", 0) + 1
         return candidate
-    return None
+    return url
 
 
 def _render_page(conn, snaps, url, res, renderer, stats):
