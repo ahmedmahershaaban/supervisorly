@@ -111,11 +111,23 @@ class ChromiumRenderer:
             log.info("playwright not installed — server-side rendering disabled")
             self._unavailable = True
             return None
+        # Loaded BEFORE the browser and reported separately. These were one try block, so a
+        # missing page_extract.js in the installed wheel was logged as "chromium failed to
+        # launch (No such file or directory: .../page_extract.js)" — a message that names the
+        # real file while blaming the wrong component, and sends the reader to look at the
+        # browser. Chromium was fine. An error line that misattributes costs more time than
+        # no error line, because it is believed.
+        try:
+            self._js = _load_extractor_js()
+        except OSError as exc:
+            log.warning("page extractor missing (%s) — rendering disabled. It is package "
+                        "data: check `extract/*.js` is in pyproject's package-data.", exc)
+            self._unavailable = True
+            return None
         try:
             self._pw = sync_playwright().start()
             self._browser = self._pw.chromium.launch(
                 args=["--no-sandbox", "--disable-dev-shm-usage"])
-            self._js = _load_extractor_js()
         except Exception as exc:                      # noqa: BLE001 — fail-closed
             log.warning("chromium failed to launch (%s) — rendering disabled", exc)
             # Tear the half-started context down. Leaving `_pw` alive was a real bug: the next

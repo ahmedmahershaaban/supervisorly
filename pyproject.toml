@@ -30,7 +30,12 @@ supervisorly = "supervisorly.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-supervisorly = ["model/*.sql"]
+# Non-Python files that are LOADED AT RUNTIME and must therefore be in the wheel, not just
+# in the repo. `model/*.sql` was here; `extract/*.js` was not, and the omission was invisible
+# from a source checkout — the render rung worked locally and failed in the deployed worker
+# with "No such file or directory: .../supervisorly/extract/page_extract.js", because running
+# from src/ reads the file straight off disk.
+supervisorly = ["model/*.sql", "extract/*.js"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

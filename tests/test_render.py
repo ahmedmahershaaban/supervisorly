@@ -173,6 +173,42 @@ def test_without_playwright_the_renderer_is_simply_unavailable(monkeypatch):
 
 # ─────────────────────────────────────────────── the extractor is the shared one
 
+def test_every_runtime_data_file_is_declared_as_package_data():
+    """Files loaded at runtime must be in the WHEEL, not merely in the repo.
+
+    This is the test that would have caught a full deploy cycle: `extract/*.js` was missing
+    from pyproject's package-data, which is invisible from a source checkout — running from
+    src/ reads the file off disk. The deployed worker failed with "No such file or directory:
+    .../supervisorly/extract/page_extract.js" and rendering was silently disabled for the
+    entire scan. Any future runtime asset has to be added here AND to pyproject."""
+    import re
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    declared = re.search(r'supervisorly\s*=\s*\[(.*?)\]',
+                         (root / "pyproject.toml").read_text(encoding="utf-8"), re.S)
+    assert declared, "package-data entry for `supervisorly` not found in pyproject.toml"
+    patterns = set(re.findall(r'"([^"]+)"', declared.group(1)))
+    assert "extract/*.js" in patterns, patterns
+    assert "model/*.sql" in patterns, patterns
+    # and the files those globs promise really exist
+    src = root / "src" / "supervisorly"
+    assert (src / "extract" / "page_extract.js").is_file()
+    assert list((src / "model").glob("*.sql"))
+
+
+def test_a_missing_extractor_disables_rendering_with_an_accurate_message(monkeypatch, caplog):
+    """The message must name the right component. It used to say "chromium failed to launch"
+    for a missing JS file — accurate about the path, wrong about the cause, and believed."""
+    import logging
+    r = R.ChromiumRenderer(lambda _u: True)
+    monkeypatch.setattr(R, "_load_extractor_js",
+                        lambda: (_ for _ in ()).throw(FileNotFoundError("page_extract.js")))
+    with caplog.at_level(logging.WARNING):
+        assert r._ensure_browser() is None
+    assert any("page extractor missing" in m for m in caplog.messages), caplog.messages
+    assert not any("chromium failed to launch" in m for m in caplog.messages)
+
+
 def test_the_in_page_extractor_is_the_file_the_human_rung_uses():
     """Not a Python re-implementation. page_extract.js mirrors normalize.main_text, so a
     rendered snapshot is byte-compatible with a fetched one and the D-010 quote gate runs
