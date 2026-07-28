@@ -114,9 +114,51 @@ async function shot(name) {
   const chips = await evalJs(`document.querySelectorAll("#fieldChips .chip").length`);
   check("added fields appear as chips", chips === parts.length - 1,
         chips + " chips for " + parts.length + " fields (last left unadded on purpose)");
+  // the cap Ahmed hit must be gone, not merely raised
+  const capErr = await evalJs(`(document.getElementById("err-field")||{}).textContent||""`);
+  check("no cap error however many fields are added", !/most fields/.test(capErr),
+        capErr.trim().slice(0, 80) || "(no error)");
   await sleep(800); await shot("02-step2-fields");
 
+  // the 1–50 phrasing slider
+  const DEPTH = Number(process.env.SV_DEPTH || 20);
+  await evalJs(`(()=>{const s=document.getElementById("depthRange");
+    s.value=${DEPTH}; s.dispatchEvent(new Event("input",{bubbles:true}));})()`);
+  const shown = await evalJs(`document.getElementById("depthVal").textContent`);
+  check("phrasing slider reflects the choice", String(shown) === String(DEPTH),
+        "depth=" + shown);
+  await sleep(600); await shot("02b-slider");
+
+  // phase 1: Understand => the collapsible plan, nothing mapped yet
   await realClick("#understand");
+  await waitFor(`document.querySelectorAll("#fieldPlan details.fp").length > 0`,
+                "search plan", 300000);
+  const plan = await evalJs(`(()=>{const rows=[...document.querySelectorAll("#fieldPlan details.fp")];
+    return { rows: rows.length,
+             counts: rows.map(r=>(r.querySelector(".wchip")||{}).textContent||""),
+             header: (document.querySelector(".fplan-h")||{}).textContent||"" };})()`);
+  check("a plan row per field, with counts", plan.rows === parts.length,
+        plan.rows + " rows · " + plan.counts.join(" / "));
+  check("the plan states the total before searching", /We will search/.test(plan.header),
+        plan.header.replace(/\s+/g, " ").slice(0, 90));
+  await sleep(700); await shot("02c-plan");
+
+  // open a row and edit it — the whole point of showing the plan
+  await realClick("#fieldPlan details.fp summary");
+  await sleep(700);
+  const before = await evalJs(`document.querySelectorAll('#fieldPlan details.fp')[0]
+      .querySelectorAll(".chip").length`);
+  await evalJs(`(()=>{const i=document.querySelector('input[data-addto="0"]');
+    i.value="a phrasing I added";})()`);
+  await realClick('button[data-addbtn="0"]');
+  await sleep(700);
+  const after = await evalJs(`document.querySelectorAll('#fieldPlan details.fp')[0]
+      .querySelectorAll(".chip").length`);
+  check("the student can add a phrasing", after === before + 1, before + " -> " + after);
+  await shot("02d-plan-edited");
+
+  // phase 2: map the approved plan
+  await realClick("#toMap");
   await waitFor(`document.querySelectorAll("input.topic").length > 0`, "topics", 300000);
   const nTopics = await evalJs(`document.querySelectorAll("input.topic").length`);
   check("Understand returned topics", nTopics > 0, nTopics + " offered");
@@ -187,8 +229,11 @@ async function shot(name) {
              stats:Array.from(m.querySelectorAll(".stat")).map(s=>s.innerText.replace(/\\s+/g," ")),
              links:Array.from(m.querySelectorAll(".links a")).map(a=>a.innerText),
              works:Array.from(m.querySelectorAll("ol.works li")).length,
-             pubsSection:/Recent publications/.test(m.innerText),
-             pubsNote:(m.innerText.match(/Recent publications[\\s\\S]{0,220}/)||[""])[0],
+             /* case-INSENSITIVE: the heading is styled text-transform:uppercase, and Chrome's
+                innerText applies CSS casing — so a case-sensitive match reported a section
+                that was plainly on screen as "(section absent)". */
+             pubsSection:/recent publications/i.test(m.innerText),
+             pubsNote:(m.innerText.match(/recent publications[\\s\\S]{0,240}/i)||[""])[0],
              fields:Array.from(m.querySelectorAll(".field .k")).map(k=>k.innerText),
              why:(m.querySelector(".why")||{}).innerText||"",
              disclaimer:/not quote-verified evidence/.test(m.innerText) };})()`);
@@ -200,7 +245,7 @@ async function shot(name) {
     // and OpenAlex can return none. Demanding a list here failed a run for correct behaviour.
     // What must always hold is that the section EXPLAINS itself rather than being blank.
     check("publications are listed or explained",
-          modal.works > 0 || /Not looked up|no indexed works/.test(modal.pubsNote || ""),
+          modal.works > 0 || /not looked up|no indexed works/i.test(modal.pubsNote || ""),
           modal.works > 0 ? modal.works + " works"
                           : (modal.pubsNote || "(section absent)").replace(/\s+/g, " ").slice(0, 100));
     check("modal shows all evidence fields", modal.fields.length >= 5, modal.fields.join("|"));
