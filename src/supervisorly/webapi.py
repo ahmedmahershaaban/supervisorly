@@ -36,6 +36,7 @@ from uuid import uuid4
 
 from . import cli, jobs, preflight
 from .discover import expand, subjects
+from .discover.countries import to_country_code
 from .fetch.transport import httpx_transport
 
 _CONTENT_JSON = "application/json; charset=utf-8"
@@ -206,6 +207,22 @@ def handle_scan_start(params: dict, *, store, worker=None, transport=None,
         errors.append(err)
     if errors:
         return _error(400, "; ".join(errors))
+
+    # The wizard sends a country NAME ("Egypt") because that is what a person types. ROR's
+    # filter needs ISO 3166-1 alpha-2. `cli.cmd_scan` resolves this where it builds the plan
+    # and fails loud on anything unrecognised — the hosted path never did, so every web scan
+    # queried ROR with `country.country_code:EGYPT`, matched nothing, and finished "done"
+    # with zero results, reported as an honest-looking coverage gap for a country that has
+    # 285 institutions in ROR. Normalise here, before the job key is derived, so the stored
+    # plan and the idempotency key both carry the resolved code.
+    raw_country = plan.get("country")
+    if isinstance(raw_country, str) and raw_country.strip():
+        code = to_country_code(raw_country)
+        if not code:
+            return _error(400, f"unrecognized country {raw_country.strip()!r} — pass an "
+                               "ISO 3166-1 alpha-2 code (e.g. EG) or an English country "
+                               "name (e.g. Egypt)")
+        plan = {**plan, "country": code}
 
     job_key = jobs.new_job_key(email, plan)
     active = store.active_job_for(email)

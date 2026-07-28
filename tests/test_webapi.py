@@ -449,6 +449,45 @@ def test_scan_start_to_status_to_result_round_trip_on_cassettes(tmp_path):
                                      work_root=tmp_path / "jobs", environ={})[0] == 409
 
 
+def test_a_country_name_is_resolved_to_iso_alpha2_before_the_scan_starts(tmp_path):
+    """The bug Ahmed's first real scan hit: the wizard sends a country NAME, ROR's filter
+    needs alpha-2, and the hosted path never translated. Every web scan queried ROR with
+    `country.country_code:EGYPT`, matched none of Egypt's 285 institutions, and finished
+    "done" with zero results — dressed up as an honest coverage gap.
+
+    The CLI already did this (cli.cmd_scan). This pins that the web path does too, and that
+    the STORED plan carries the code — the worker reads the plan, not the request."""
+    store = _store(tmp_path)
+    status, body = _start(store, {"email": EMAIL, "plan": dict(PLAN, country="Egypt")})
+    assert status == 202, body
+    stored = store.get(body["job_id"])
+    assert stored["plan"]["country"] == "EG", \
+        f"the worker would scan {stored['plan']['country']!r}, which ROR cannot match"
+
+
+def test_a_country_name_with_odd_casing_or_accents_still_resolves(tmp_path):
+    cases = [("EGYPT", "EG"), ("  egypt ", "EG"), ("Türkiye", "TR"),
+             ("Cote d'Ivoire", "CI"), ("eg", "EG")]
+    # a fresh store per case, indexed — NOT named after the country: Windows paths are
+    # case-insensitive, so "EGYPT" and "egypt" would share a store and the second start
+    # would (correctly) come back as the idempotent duplicate of the first
+    for i, (typed, expect) in enumerate(cases):
+        store = _store(tmp_path / f"case{i}")
+        status, body = _start(store, {"email": EMAIL, "plan": dict(PLAN, country=typed)})
+        assert status == 202, (typed, body)
+        assert store.get(body["job_id"])["plan"]["country"] == expect, typed
+
+
+def test_an_unrecognised_country_fails_loudly_instead_of_scanning_nothing(tmp_path):
+    """Silently scanning a country that matches nothing is the failure mode this whole fix
+    is about — a wrong country must be a 400, not a cheerful empty dashboard."""
+    status, body = _start(_store(tmp_path),
+                          {"email": EMAIL, "plan": dict(PLAN, country="Freedonia")})
+    assert status == 400
+    assert "unrecognized country" in body["error"] and "Freedonia" in body["error"]
+    assert "alpha-2" in body["error"]
+
+
 def test_map_route_checks_its_method_like_every_other_route():
     """Audit W8-F7: the /api/map branch matched on PATH ALONE, so DELETE/PUT/PATCH all
     reached the subject-map handler. Every neighbouring route already checked."""
