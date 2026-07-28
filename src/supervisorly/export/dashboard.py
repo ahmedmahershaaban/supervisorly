@@ -114,6 +114,13 @@ ol.works li{margin:6px 0;line-height:1.45}
 ol.works .yr{font-family:var(--mono);font-size:11px;color:var(--faint);margin-right:6px}
 .why{margin-top:14px;padding:11px 13px;border:1px solid var(--line2);border-radius:9px;
   background:rgba(255,255,255,.02);color:var(--muted);font-size:13px;line-height:1.5}
+/* the actions that turn "awaiting your browser" from an instruction into something to click */
+.acts{margin-top:12px;display:flex;flex-wrap:wrap;gap:9px;align-items:center}
+.act{display:inline-block;font-family:var(--mono);font-size:11.5px;letter-spacing:.02em;
+  color:var(--accent);background:transparent;border:1px solid var(--accent);border-radius:8px;
+  padding:7px 13px;cursor:pointer;text-decoration:none;line-height:1.2}
+.act:hover{background:var(--accent);color:#0a0d14}
+.acts .note{flex-basis:100%;margin-top:4px}
 .close{position:absolute;top:16px;right:18px;background:transparent;border:1px solid var(--line2);
   color:var(--muted);border-radius:8px;padding:5px 10px;cursor:pointer;font-family:var(--mono);font-size:11px}
 .close:hover{border-color:var(--accent);color:var(--accent)}
@@ -259,6 +266,51 @@ function profileHtml(p){
     '</div>'+works;
 }
 
+/* "Awaiting your browser" used to be an instruction with nothing to click — a terminal state
+   that is a dead end, which is exactly what D-070 says must never happen. These are the three
+   things a person can actually do, best lead first.
+
+   All three run in the STUDENT's browser and their own session. That is the human rung as
+   designed (D-043/D-044): a person reading a page they can already reach is a different act
+   from a datacentre rendering it at scale, and nothing here asks the tool to defeat anything. */
+function searchUrl(p){
+  var bits=[p.name||""];
+  var inst=(p.profile&&p.profile.institutions)||[];
+  if(inst.length) bits.push(inst[0]);
+  return "https://duckduckgo.com/?q="+encodeURIComponent(bits.join(" ")+" faculty page");
+}
+function actionsHtml(p){
+  var pr=p.profile||{}, b=[];
+  if(pr.page_url)
+    b.push('<a class="act" href="'+esc(pr.page_url)+'" target="_blank" rel="noopener noreferrer">Open the page we found ↗</a>');
+  b.push('<a class="act" href="'+esc(searchUrl(p))+'" target="_blank" rel="noopener noreferrer">Search for their page ↗</a>');
+  if(pr.human_prompt)
+    b.push('<button type="button" class="act" data-prompt="'+esc(p.id)+'">Copy research prompt</button>');
+  return '<div class="acts">'+b.join('')+
+    '<div class="note">The prompt is ready to paste into Claude for Chrome (or any assistant you '+
+    'use). It asks for a verbatim quote and a source URL per field, and says plainly that '+
+    '“found nothing” is a valid answer — so what comes back can be checked, not just believed.</div></div>';
+}
+function copyPrompt(id){
+  var p=DATA.professors.find(function(x){return x.id===id;});
+  if(!p||!p.profile||!p.profile.human_prompt) return;
+  var txt=p.profile.human_prompt;
+  var done=function(){ var el=document.querySelector('[data-prompt="'+id+'"]');
+    if(el){ var o=el.textContent; el.textContent="Copied ✓"; setTimeout(function(){el.textContent=o;},1600);} };
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(txt).then(done,function(){fallbackCopyText(txt);done();});
+  } else { fallbackCopyText(txt); done(); }
+}
+/* Clipboard API needs a secure context and a permission the file:// dashboard may not have —
+   a downloaded dashboard opened from disk is a normal way to read this, so it must still work. */
+function fallbackCopyText(txt){
+  var ta=document.createElement("textarea");
+  ta.value=txt; ta.setAttribute("readonly",""); ta.style.position="fixed"; ta.style.left="-9999px";
+  document.body.appendChild(ta); ta.select();
+  try{ document.execCommand("copy"); }catch(e){}
+  document.body.removeChild(ta);
+}
+
 function openDetail(id){
   var p=DATA.professors.find(function(x){return x.id===id;}); if(!p) return;
   var anyBlocked=false;
@@ -274,7 +326,7 @@ function openDetail(id){
     }
     return '<div class="field"><div class="k">'+esc(f.label)+'</div>'+v+'</div>';
   }).join('');
-  var why=anyBlocked?'<div class="why">'+esc(whyBlocked(p.profile))+'</div>':'';
+  var why=anyBlocked?'<div class="why">'+esc(whyBlocked(p.profile))+'</div>'+actionsHtml(p):'';
   document.getElementById("panel").innerHTML=
     '<div class="overlay" id="overlay"></div>'+
     '<div class="modal" role="dialog" aria-modal="true" aria-label="Professor detail">'+
@@ -287,6 +339,8 @@ function openDetail(id){
   document.getElementById("panel").classList.remove("hidden");
   document.getElementById("closeDetail").onclick=closeDetail;
   document.getElementById("overlay").onclick=closeDetail;
+  var cp=document.querySelector('[data-prompt]');
+  if(cp) cp.onclick=function(){copyPrompt(cp.getAttribute("data-prompt"));};
   document.getElementById("closeDetail").focus();
 }
 function closeDetail(){var pn=document.getElementById("panel");pn.classList.add("hidden");pn.innerHTML="";}

@@ -31,6 +31,7 @@ from .discover import orcid as orcid_mod
 from .discover import ror as _ror
 from .discover import roster as _roster
 from .ethics import optout as optout_mod
+from .extract import chrome_prompt
 from .export import dashboard as dash
 from .export import json_export as jx
 from .fetch import browser_rung
@@ -1218,6 +1219,40 @@ def _profile_for(t: dict, plan_topic_ids) -> dict:
     return prof
 
 
+def _anchor_links(t: dict) -> list[str]:
+    """Where a human should start looking for this professor — best lead first."""
+    seen, out = set(), []
+    for u in (t.get("url"), t.get("orcid"), t.get("openalex_id")):
+        if u and u not in seen:
+            seen.add(u)
+            out.append(u)
+    return out
+
+
+def _human_prompt_for(t: dict, blocked_fields: list[str]) -> str | None:
+    """The ready-to-paste D-043 prompt for one professor's open gaps, or None.
+
+    Built with ``chrome_prompt.generate_prompt`` — the same function the CLI uses, which
+    embeds the required output shape by emitting a worked example through ``md_grammar``,
+    the module the ingester parses. Re-creating that shape in the dashboard's JavaScript
+    would have been easier and would have re-introduced exactly the drift that design
+    exists to prevent: two hand-written copies of a grammar, one of which is not tested
+    against the parser.
+
+    Only generated for professors who actually have blocked fields, so the payload is
+    bounded by the shortlist rather than by the enumerated count.
+    """
+    if not blocked_fields:
+        return None
+    try:
+        return chrome_prompt.generate_prompt(
+            target_kind="person", target_ref=str(t.get("id") or ""),
+            target_name=t.get("name"), missing_fields=blocked_fields,
+            anchor_links=_anchor_links(t))
+    except ValueError:
+        return None
+
+
 def _build_result(conn, run_id, status, targets, *, stats, gaps,
                   plan_topic_ids=()) -> dict:
     """Assemble the export + dashboard from the persisted claims (no fetching here)."""
@@ -1230,6 +1265,18 @@ def _build_result(conn, run_id, status, targets, *, stats, gaps,
             p["resolution"] = t["resolution"]
         professors.append(p)
     claims_by_entity = {t["id"]: claims.claims_for(conn, "person", t["id"]) for t in targets}
+    # A `blocked` cell told the student "awaiting your browser" and then gave them nothing to
+    # do about it — a dead end, which D-070 says a terminal state must never be. Attach the
+    # generated D-043 prompt to exactly the professors who have open gaps, so the dashboard
+    # can offer a real action instead of an instruction.
+    by_id = {t["id"]: t for t in targets}
+    for p in professors:
+        blocked = sorted({c["field"] for c in claims_by_entity.get(p["id"], [])
+                          if c.get("state") == "blocked" and not c.get("superseded_by")})
+        prompt = _human_prompt_for(by_id[p["id"]], blocked)
+        if prompt:
+            p["profile"]["blocked_fields"] = blocked
+            p["profile"]["human_prompt"] = prompt
     enumerated = len(targets)
     # Honest coverage line so the empty-state can tell "sources returned nothing" apart
     # from "found people, none matched" (edge-case matrix / D-046). The deterministic
