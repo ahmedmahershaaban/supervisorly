@@ -24,8 +24,21 @@ RUN pip install --no-cache-dir -r requirements.txt
 # If this layer is ever dropped, nothing breaks: `render.py` reports itself unavailable and
 # every page takes the path it took before (D-068 fail-closed). Slower is not the same as
 # broken, and the scan still finishes.
+#
+# The libraries are installed EXPLICITLY rather than with `playwright install --with-deps`.
+# That flag does not support Debian, which this image is: it falls back to Ubuntu 20.04
+# package names ("BEWARE: your OS is not officially supported by Playwright") and the build
+# dies on `ttf-unifont` and `ttf-ubuntu-font-family`, which do not exist in Debian's repos.
+# The list below is Chromium's actual runtime closure on bookworm; fonts-liberation is the
+# Debian font package that replaces the two Ubuntu ones.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
+      libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 \
+      libpango-1.0-0 libcairo2 libasound2 libatspi2.0-0 libx11-6 libxcb1 libxext6 \
+      fonts-liberation \
+    && rm -rf /var/lib/apt/lists/*
 RUN pip install --no-cache-dir playwright==1.49.1 \
-    && playwright install --with-deps chromium
+    && playwright install chromium
 
 COPY main.py _core.py worker.py ./
 
