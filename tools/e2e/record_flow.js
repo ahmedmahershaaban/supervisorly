@@ -213,7 +213,36 @@ async function shot(name) {
       check("that professor really has blocked cells",
             why.states.some(c => /s-blocked/.test(c)), why.states.join(","));
     }
+    // The actions: "awaiting your browser" must be something to DO, not just to read.
+    const acts = await evalJs(`(()=>{const m=document.querySelector(".modal"); if(!m) return null;
+      const a=[...m.querySelectorAll(".act")];
+      return { labels:a.map(x=>x.textContent.trim()),
+               hrefs:a.filter(x=>x.tagName==="A").map(x=>x.getAttribute("href")),
+               hasCopy:a.some(x=>x.tagName==="BUTTON") };})()`);
+    check("blocked professor offers actions", acts && acts.labels.length > 0,
+          acts ? acts.labels.join(" | ") : "none");
+    if (acts) {
+      check("a search action opens in the student's own browser",
+            acts.hrefs.some(h => /duckduckgo|google|bing/i.test(h || "")),
+            (acts.hrefs[acts.hrefs.length - 1] || "").slice(0, 70));
+      check("a copy-prompt button is present", acts.hasCopy);
+    }
     await sleep(1400); await shot("10-modal-blocked");
+
+    // clicking Copy must actually put the D-043 prompt on the clipboard
+    const copyBtn = await evalJs(`!!document.querySelector('[data-prompt]')`);
+    if (copyBtn) {
+      await realClick("[data-prompt]");
+      await sleep(700);
+      const label = await evalJs(`(document.querySelector('[data-prompt]')||{}).textContent||""`);
+      check("Copy gives feedback that it worked", /copied/i.test(label), label.trim());
+      const clip = await evalJs(`navigator.clipboard && navigator.clipboard.readText
+          ? navigator.clipboard.readText().catch(()=>"") : ""`);
+      if (clip) check("the copied text is the real D-043 prompt",
+                      /Quote verbatim/.test(clip) && /searched_absent/.test(clip),
+                      clip.slice(0, 60).replace(/\s+/g, " "));
+      await sleep(900); await shot("11-copied");
+    }
     await realClick("#closeDetail");
     await sleep(800);
   }
