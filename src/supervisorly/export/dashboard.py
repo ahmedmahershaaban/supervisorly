@@ -85,12 +85,35 @@ tr.row:focus{outline:2px solid var(--focus);outline-offset:-2px}
 .badge{font-family:var(--mono);font-size:10.5px;padding:2px 9px;border-radius:999px;border:1px solid var(--line)}
 .badge.firm{color:var(--firm);border-color:#3a6b48} .badge.watch{color:var(--watch);border-color:#7a6528}
 .note{font-family:var(--mono);font-size:11px;color:var(--faint);padding:8px 4px}
-/* cell drawer */
+/* professor modal — a centred dialog, not a side drawer: the panel now carries a profile,
+   stats, links and a publication list, and 452px of edge-anchored column made that a
+   scrolling ribbon on every screen size. */
 .overlay{position:fixed;inset:0;background:rgba(3,5,9,.62);backdrop-filter:blur(3px);z-index:50}
-aside.detail{position:fixed;top:0;right:0;height:100%;width:min(452px,94vw);z-index:51;
-  background:var(--drawer);border-left:1px solid var(--line2);padding:22px 24px;overflow-y:auto;
-  box-shadow:-40px 0 90px -40px rgba(0,0,0,.9);animation:omDrawerIn .24s cubic-bezier(.2,.7,.2,1)}
-aside.detail h2{margin:.2em 0 .1em;font-size:24px;letter-spacing:-.01em}
+.modal{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:51;
+  width:min(720px,94vw);max-height:88vh;overflow-y:auto;border-radius:14px;
+  background:var(--drawer);border:1px solid var(--line2);padding:26px 28px;
+  box-shadow:0 40px 120px -30px rgba(0,0,0,.95);animation:omModalIn .22s cubic-bezier(.2,.7,.2,1)}
+@keyframes omModalIn{from{opacity:0;transform:translate(-50%,-46%) scale(.985)}
+  to{opacity:1;transform:translate(-50%,-50%) scale(1)}}
+@media (prefers-reduced-motion:reduce){.modal{animation:none}}
+.modal h2{margin:.2em 0 .1em;font-size:24px;letter-spacing:-.01em}
+.sect{margin-top:18px;padding-top:16px;border-top:1px solid var(--line2)}
+.sect-h{font-family:var(--mono);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--faint);margin-bottom:10px}
+.inst{color:var(--ink2);font-size:14.5px;margin-bottom:10px}
+.stats{display:flex;flex-wrap:wrap;gap:8px}
+.stat{font-family:var(--mono);font-size:11px;color:var(--muted);border:1px solid var(--line2);
+  border-radius:999px;padding:4px 11px}
+.stat b{color:var(--ink);font-size:12.5px}
+.stat.match{border-color:var(--accent)}.stat.match b{color:var(--accent)}
+.links{display:flex;flex-wrap:wrap;gap:14px;margin-top:12px}
+.links a{color:var(--accent);text-decoration:none;font-size:13px}
+.links a:hover{text-decoration:underline}
+ol.works{margin:0;padding-left:18px;color:var(--ink2);font-size:13.5px}
+ol.works li{margin:6px 0;line-height:1.45}
+ol.works .yr{font-family:var(--mono);font-size:11px;color:var(--faint);margin-right:6px}
+.why{margin-top:14px;padding:11px 13px;border:1px solid var(--line2);border-radius:9px;
+  background:rgba(255,255,255,.02);color:var(--muted);font-size:13px;line-height:1.5}
 .close{position:absolute;top:16px;right:18px;background:transparent;border:1px solid var(--line2);
   color:var(--muted);border-radius:8px;padding:5px 10px;cursor:pointer;font-family:var(--mono);font-size:11px}
 .close:hover{border-color:var(--accent);color:var(--accent)}
@@ -195,23 +218,76 @@ function renderDeadlines(){
       '<span class="count">'+esc(r.f.label)+'</span>'+badge+'</div>';}).join('')+'</div>'+
     '<div class="note">Watch dates are projected from past cycles — not published deadlines. Always confirm on the official page.</div>';
 }
+function num(n){ return (typeof n==="number"&&isFinite(n)) ? n.toLocaleString() : "—"; }
+
+/* Why a row can be blocked, in the student's words. The dashboard used to say only
+   "awaiting your browser", which reads as "your turn" even when the tool never found a page
+   to hand over. page_url_kind is what makes the difference sayable (D-037). */
+function whyBlocked(pr){
+  if(!pr) return "";
+  if(!pr.page_url) return "No personal page was found for this professor in any public registry, so there was nothing to read. A search by name in your own browser is the next step.";
+  if(pr.page_url_kind==="orcid") return "The only page on record is an ORCID profile, which loads its content with JavaScript — the reader cannot see it, and the registry lists no other page. Opening it yourself works.";
+  return "The page we found refused an automated reader, or returned nothing usable. Opening it in your own browser is the next step.";
+}
+
+/* The registry facts the scan already collected. Kept visually and structurally apart from
+   the evidence fields below it: this block never carries a quote because it is not a claim
+   about recruiting, and presenting it as one would defeat the point of the quote gate. */
+function profileHtml(p){
+  var pr=p.profile; if(!pr) return "";
+  var chips=[];
+  if(pr.works_count)     chips.push('<span class="stat"><b>'+num(pr.works_count)+'</b> works</span>');
+  if(pr.cited_by_count)  chips.push('<span class="stat"><b>'+num(pr.cited_by_count)+'</b> citations</span>');
+  if(pr.topics_total)    chips.push('<span class="stat"><b>'+num(pr.topics_total)+'</b> topics</span>');
+  if(pr.topic_overlap)   chips.push('<span class="stat match"><b>'+num(pr.topic_overlap)+'</b> matching yours</span>');
+  var links=[];
+  if(pr.orcid)        links.push('<a href="'+esc(pr.orcid)+'" target="_blank" rel="noopener noreferrer">ORCID ↗</a>');
+  if(pr.openalex_id)  links.push('<a href="'+esc(pr.openalex_id)+'" target="_blank" rel="noopener noreferrer">OpenAlex ↗</a>');
+  if(pr.page_url)     links.push('<a href="'+esc(pr.page_url)+'" target="_blank" rel="noopener noreferrer">Their page ↗</a>');
+  var works="";
+  if(pr.recent_works&&pr.recent_works.length){
+    works='<div class="sect"><div class="sect-h">Recent publications</div><ol class="works">'+
+      pr.recent_works.map(function(w){
+        return '<li><span class="yr">'+esc(w.year||"—")+'</span> '+esc(w.title||"")+'</li>';
+      }).join('')+'</ol><div class="note">From OpenAlex, newest first — an activity and recency signal, not a full bibliography.</div></div>';
+  }
+  return '<div class="sect">'+
+      (pr.institutions&&pr.institutions.length?'<div class="inst">'+esc(pr.institutions.join(" · "))+'</div>':'')+
+      (chips.length?'<div class="stats">'+chips.join('')+'</div>':'')+
+      (links.length?'<div class="links">'+links.join('')+'</div>':'')+
+      '<div class="note">Registry facts from OpenAlex/ROR — not quote-verified evidence; the fields below are.</div>'+
+    '</div>'+works;
+}
+
 function openDetail(id){
   var p=DATA.professors.find(function(x){return x.id===id;}); if(!p) return;
+  var anyBlocked=false;
   var body=DATA.fields.map(function(f){
     var env=p.fields[f.id]||{state:"never_attempted"}, v;
     if(env.state==="value"){
       v='<div class="v s-value">'+esc(env.value)+'</div>'+
         (env.quote?'<blockquote>“'+esc(env.quote)+'”</blockquote>':'')+srcLink(env.source_url)+
         (env.confidence?' <span class="count">'+esc(env.confidence)+(isWatch(env)?' · watch':'')+'</span>':'');
-    } else { v='<div class="v s-'+env.state+'">'+(stateLabel[env.state]||env.state)+'</div>'; }
+    } else {
+      if(env.state==="blocked") anyBlocked=true;
+      v='<div class="v s-'+env.state+'">'+(stateLabel[env.state]||env.state)+'</div>';
+    }
     return '<div class="field"><div class="k">'+esc(f.label)+'</div>'+v+'</div>';
   }).join('');
+  var why=anyBlocked?'<div class="why">'+esc(whyBlocked(p.profile))+'</div>':'';
   document.getElementById("panel").innerHTML=
-    '<div class="overlay" id="overlay"></div><aside class="detail"><button class="close" id="closeDetail">ESC ✕</button>'+
-    '<div class="eyebrow">Cell detail</div><h2>'+esc(p.name||p.id)+idBadge(p)+'</h2><div class="meta">'+esc(p.id)+'</div>'+body+'</aside>';
+    '<div class="overlay" id="overlay"></div>'+
+    '<div class="modal" role="dialog" aria-modal="true" aria-label="Professor detail">'+
+      '<button class="close" id="closeDetail">ESC ✕</button>'+
+      '<div class="eyebrow">Professor</div>'+
+      '<h2>'+esc(p.name||p.id)+idBadge(p)+'</h2><div class="meta">'+esc(p.id)+'</div>'+
+      profileHtml(p)+
+      '<div class="sect"><div class="sect-h">What the scan verified</div>'+body+why+'</div>'+
+    '</div>';
   document.getElementById("panel").classList.remove("hidden");
   document.getElementById("closeDetail").onclick=closeDetail;
   document.getElementById("overlay").onclick=closeDetail;
+  document.getElementById("closeDetail").focus();
 }
 function closeDetail(){var pn=document.getElementById("panel");pn.classList.add("hidden");pn.innerHTML="";}
 

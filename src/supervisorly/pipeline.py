@@ -1012,6 +1012,10 @@ def run_live(plan: dict, transport: Transport, snap_root, *, email: str,
         # the same PARTIAL disclosure the coverage line carries, as a §4.1 event (D-037)
         _emit_progress(progress, ("partial_warning",
                                   _partial_warning_message(stats["truncated"])))
+    # What the professor has actually been publishing — the single most useful thing a
+    # student weighing a supervisor can see, and the one signal that survives a blocked
+    # deep-dive. `works_by_author` shipped with the OpenAlex client and was never called.
+    _attach_recent_works(deep_dive, oa_client)
     # Live runs only: resolves an ORCID profile URL to the professor's real page (D-072).
     # Built here rather than inside the deep-dive so the offline/demo path stays network-free
     # and every existing cassette test keeps passing unchanged (D-011/D-063).
@@ -1028,7 +1032,8 @@ def run_live(plan: dict, transport: Transport, snap_root, *, email: str,
     _emit_progress(progress, ("scoring",))
     # a cancelled run exports its partials through the same honest path (D-046 four-state
     # model: untouched targets are never_attempted, never silently "checked").
-    result = _build_result(conn, run_id, status, targets, stats=stats, gaps=gaps)
+    result = _build_result(conn, run_id, status, targets, stats=stats, gaps=gaps,
+                           plan_topic_ids=plan.get("resolved_topic_ids") or ())
     _emit_progress(progress, ("exported",))
     return result
 
@@ -1067,11 +1072,85 @@ def reexport(db_path, targets: list[dict], *, optout_path=None) -> dict:
     )
 
 
-def _build_result(conn, run_id, status, targets, *, stats, gaps) -> dict:
+#: How many recent works to carry per professor. Enough to read activity and recency at a
+#: glance; small enough that the payload stays a dashboard, not a bibliography.
+RECENT_WORKS_LIMIT = 8
+
+
+def _attach_recent_works(targets: list[dict], oa) -> None:
+    """Attach each shortlisted professor's recent publications, newest first.
+
+    Only the SHORTLISTED targets — one OpenAlex call each, so this is bounded by the same
+    gate that bounds the deep-dive, never by the enumerated count.
+
+    Failure here is never fatal and never silent-but-wrong: a professor whose works lookup
+    fails simply carries none, exactly as if OpenAlex had returned an empty list. That is
+    honest emptiness (D-037) — the alternative, failing the scan because a *supplementary*
+    signal was unavailable, would trade the whole result for a nice-to-have.
+    """
+    for t in targets:
+        author_id = t.get("openalex_id")
+        if not author_id:
+            continue
+        try:
+            works = oa.works_by_author(author_id)
+        except Exception:                          # noqa: BLE001 — see docstring
+            continue
+        ranked = sorted(works, key=lambda w: (w.get("year") or 0), reverse=True)
+        t["recent_works"] = [
+            {"title": w.get("title"), "year": w.get("year")}
+            for w in ranked[:RECENT_WORKS_LIMIT] if w.get("title")
+        ]
+    # Deliberately emits NO progress event. The §4.1 phase vocabulary is consumed by the CLI
+    # printer, the job-store event mapper and the web page's phase labels, and a new verb
+    # would have to be taught to all three — a large surface for a step that adds a few
+    # seconds inside a phase the student is already watching. It stays silent until the
+    # phase list is revised for its own reasons.
+
+
+def _profile_for(t: dict, plan_topic_ids) -> dict:
+    """The registry facts the enumeration already fetched, kept instead of thrown away.
+
+    Every one of these came from OpenAlex/ROR during discovery and was then DISCARDED — the
+    exported professor carried only ``id`` and ``name``. So a run whose deep-dive was blocked
+    showed a student a row of "awaiting your browser" and nothing else, while the tool was
+    already holding the person's institution, output, citation count and ORCID.
+
+    These are **registry metadata, not evidence claims**, and the export keeps that line
+    sharp ([D-010](../../docs/DECISIONS.md#d-010)): the five evidence fields are quote-gated
+    and stay quote-gated, while this block is labelled with the API it came from and carries
+    no quote because it is not a claim about recruiting. Mixing the two would let unverified
+    text sit next to verified text with the same authority, which is the failure D-010
+    exists to prevent. `name` already travelled this way, so the precedent is the schema's,
+    not a new one.
+    """
+    own_topics = list(t.get("topic_ids") or [])
+    prof = {
+        "institutions": [n for n in (t.get("institution_names") or []) if n],
+        "works_count": int(t.get("works_count") or 0),
+        "cited_by_count": int(t.get("cited_by_count") or 0),
+        "topics_total": len(own_topics),
+        "topic_overlap": _topic_overlap(t, list(plan_topic_ids or [])),
+        "orcid": t.get("orcid"),
+        "openalex_id": t.get("openalex_id"),
+        # Which page the deep-dive aimed at, and what KIND it was. `url_kind` is the honest
+        # part: "orcid" means the only lead was a registry profile, which is why a blocked
+        # row is blocked. Without it the student cannot tell "we found no page" from "the
+        # page we found refused us".
+        "page_url": t.get("url"),
+        "page_url_kind": t.get("url_kind"),
+    }
+    if t.get("recent_works"):
+        prof["recent_works"] = t["recent_works"]
+    return prof
+
+
+def _build_result(conn, run_id, status, targets, *, stats, gaps,
+                  plan_topic_ids=()) -> dict:
     """Assemble the export + dashboard from the persisted claims (no fetching here)."""
     professors = []
     for t in targets:
-        p = {"id": t["id"], "name": t.get("name")}
+        p = {"id": t["id"], "name": t.get("name"), "profile": _profile_for(t, plan_topic_ids)}
         if t.get("resolution"):
             # named-target identity honesty label (verified/unverified/unchecked) — it must
             # travel into the durable artifacts, not just the console (D-010).

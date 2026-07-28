@@ -69,6 +69,31 @@ def _redact_pii(value):
     return "[email redacted — see source]" if _is_pii_email(value) else value
 
 
+def _redact_profile(profile: dict) -> dict:
+    """Run the same PII pass over registry metadata that claim values already get (D-024).
+
+    The profile block is machine-supplied rather than page-scraped, which makes it *likelier*
+    to be trusted blindly, not less — so it is redacted on the same terms as everything else
+    rather than exempted for coming from an API. Strings are checked directly; the recent-works
+    list is checked title by title, because a redaction pass that only walks the top level of a
+    structure is a redaction pass with a hole in it.
+    """
+    out = {}
+    for k, v in profile.items():
+        if isinstance(v, str):
+            out[k] = _redact_url(v) if k.endswith("url") else _redact_pii(v)
+        elif isinstance(v, list):
+            out[k] = [
+                {ik: (_redact_pii(iv) if isinstance(iv, str) else iv) for ik, iv in item.items()}
+                if isinstance(item, dict)
+                else (_redact_pii(item) if isinstance(item, str) else item)
+                for item in v
+            ]
+        else:
+            out[k] = v
+    return out
+
+
 def _redact_url(url):
     """Strip any email embedded in a source_url (e.g. ``mailto:prof@uni.edu``) so it can't leak
     into the JSON, while keeping the field truthy so a value still cites a source (D-010/D-024)."""
@@ -120,6 +145,14 @@ def build_export(
             fields[d["id"]] = _envelope(_best_claim(claims, d["id"]))
         out_prof = {"id": prof["id"], "name": _redact_pii(prof.get("name")),
                     "fields": fields}
+        if prof.get("profile"):
+            # Registry metadata from the discovery APIs (institution, output, citations,
+            # ORCID, recent works). Deliberately a SEPARATE key from `fields`: `fields` is
+            # the quote-gated evidence surface (D-010) and nothing may enter it without a
+            # verified quote, while this is openly labelled as what OpenAlex/ROR said about
+            # the person. Same redaction pass as the name, so a record that somehow carries
+            # an address cannot ride out through the new key (D-005/D-032).
+            out_prof["profile"] = _redact_profile(prof["profile"])
         if prof.get("resolution"):
             # Named-target identity honesty label (verified / unverified / unchecked) —
             # an optional per-professor field, so an unconfirmed OpenAlex match is never

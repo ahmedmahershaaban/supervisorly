@@ -60,9 +60,24 @@ def test_how_it_works_view_and_reduced_motion():
     assert "Xeno-Atlas" in html                      # the Atlas hero eyebrow
 
 
-def test_professor_detail_is_a_cell_drawer():
+def test_professor_detail_is_a_modal_with_the_full_profile():
+    """Was a 452px right-hand drawer showing five cells. It now carries the registry profile
+    (institution, output, citations, links, publications) as well, which does not read in a
+    ribbon — so it is a centred dialog. Kept as one test rather than split, because the thing
+    worth pinning is that opening a professor shows BOTH surfaces at once."""
     html = _html()
     assert "openDetail" in html and "closeDetail" in html
-    assert "Cell detail" in html                      # the drawer's eyebrow label
-    assert 'aside class="detail"' in html             # the right-sheet cell drawer markup
+    assert 'class="modal" role="dialog" aria-modal="true"' in html   # dialog, not a sheet
     assert "blockquote" in html                        # shows the verbatim quote (traceable, D-010)
+    for marker in ("profileHtml", "Recent publications", "whyBlocked",
+                   "What the scan verified"):
+        assert marker in html, marker
+
+
+def test_the_profile_block_never_claims_to_be_verified_evidence():
+    """The one line that must survive every future edit of the modal: registry metadata sits
+    NEXT TO quote-gated claims, so it has to say which it is. Without this the student reads
+    an OpenAlex citation count with the same authority as a quoted recruiting sentence, and
+    the quote gate (D-010) has been defeated by layout rather than by code."""
+    html = _html()
+    assert "Registry facts from OpenAlex/ROR — not quote-verified evidence" in html
