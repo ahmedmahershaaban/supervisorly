@@ -319,10 +319,18 @@ PLAN_REQUIRED_KEYS = ("intent_kind", "country", "resolved_topic_ids", "field",
                       "university_mode", "universities")
 
 # Valid enum values a plan may carry — mirrors the argparse choices of the overriding flags.
-#: How many distinct fields one plan may carry. Each one costs an expansion and a map call
-#: per phrasing, so this bounds the §5.2 throttle spend of a single "Understand" click as
-#: much as it bounds the payload.
-PLAN_MAX_FIELDS = 6
+#: There is deliberately NO cap on how many fields a plan may carry.
+#:
+#: There was one (6), and it was wrong: it refused a student's input to solve a cost problem
+#: that belongs to the cost layer. Someone working across six areas is exactly the person this
+#: tool is for, and "remove one to add another" makes them choose which part of their own
+#: research to hide. The real limiters stayed where they belong — the §5.2 per-IP throttle
+#: bounds spend, and /api/map now takes every phrasing in ONE request (B-001) so a wide search
+#: costs one unit rather than one per phrasing.
+#:
+#: What IS still enforced is shape: entries must be non-blank strings. A blank field means the
+#: intent was mangled upstream, and that still fails loud.
+PLAN_MAX_FIELDS = None
 
 PLAN_UNIVERSITY_MODES = ("all", "prioritise", "only")
 PLAN_INTENT_KINDS = ("training", "pre_master", "pre_phd", "mentor", "master", "phd",
@@ -385,11 +393,17 @@ def _plan_value_errors(data: dict) -> list[str]:
     # them, so nothing downstream has to learn a new shape.
     fields = data.get("fields")
     if isinstance(fields, list):
-        if len(fields) > PLAN_MAX_FIELDS:
+        if PLAN_MAX_FIELDS is not None and len(fields) > PLAN_MAX_FIELDS:
             errors.append(f"'fields' accepts at most {PLAN_MAX_FIELDS} entries, "
                           f"got {len(fields)}")
         if any(isinstance(f, str) and not f.strip() for f in fields):
             errors.append("'fields' must not contain blank entries")
+    # How many phrasings the student asked the expander to try per field (the step-2 slider).
+    # Out-of-range is clamped by the server rather than rejected — a number is a preference,
+    # not a claim, and refusing a plan over a slider position would be absurd.
+    depth = data.get("variants_per_field")
+    if depth is not None and not isinstance(depth, int):
+        errors.append(f"'variants_per_field' must be an integer, got {type(depth).__name__}")
     for key in ("country", "university_mode", "intent_kind", "field", "email"):
         v = data.get(key)
         if v is not None and not isinstance(v, str):

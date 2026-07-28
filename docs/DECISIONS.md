@@ -1592,3 +1592,54 @@ If a quote-verified claim is ever found to be materially wrong in a way the quot
 support, the gate is not the problem — the *field vocabulary* is too coarse, and the fix is a
 narrower field, not a more trusted model. If instead someone proposes accepting a claim
 **without** a verbatim quote, that is a different decision entirely and this one forbids it.
+
+---
+
+## D-074 — The student chooses how wide the expansion is; the merge moves to the server
+
+**Status:** locked (Ahmed, 2026-07-29) — supersedes the count in
+[D-068](#d-068--the-llm-may-generate-queries-never-claims), reverses
+[D-070](#d-070--the-multi-phrasing-subject-map-merge-is-client-side), and closes
+[BLOCKERS.md B-001](BLOCKERS.md#b-001--the-multi-phrasing-subject-map-merge-is-client-side-not-subject_map_multi)
+at the trigger B-001 itself named.
+
+Three changes, one cause. Ahmed hit the error *"that is the most fields one search can carry
+(6) — remove one to add another"* and said there should be no limit. He is right, and the
+same reasoning applies to everything downstream of it.
+
+**1. No cap on fields.** The cap refused a student's input to solve a cost problem that
+belongs to the cost layer. Someone working across eight areas is exactly who this tool is for,
+and "remove one to add another" makes them hide part of their own research. Shape is still
+enforced — a blank field still fails loud — but the count is not.
+
+**2. The expansion count is the student's, 1–50** (step 2's slider, default 8). D-068 fixed it
+at 8. That number was never the safety property: what makes D-068 safe is that expansion emits
+**queries, never claims**, so a bad variant costs topics and can never mint a professor, a
+deadline or a recruiting status — every fact still passes the
+[D-010](#d-010--every-field-carries-provenance-and-confidence) quote gate. All of that is
+untouched, which is precisely why the number can move. The model is told to return **fewer
+rather than pad**, so a narrow field yields a short honest list at any setting: the slider is
+a ceiling, never a quota.
+
+**3. The multi-phrasing merge moves to the server.** D-070 kept it in the browser for one
+stated reason — one failing phrasing must not fail the click — and B-001 recorded the trigger
+to revisit: *"if students hit the 30/h map cap in normal use"*. The slider makes that certain
+rather than possible; 50 phrasings across 3 fields is 150 calls against a 30/hour budget, so
+the feature would 429 the first time anyone used it. `/api/map` now accepts `queries` and
+delegates to `subject_map_multi`, and **the whole click costs one unit**.
+
+D-070's objection was answered, not overridden: `subject_map_multi` now catches per-variant
+failures and returns `failed_queries`, so the page still says "N phrasings could not be mapped
+— continuing with the rest". Had that not been possible, the right move would have been to
+keep the client-side merge and cap the slider instead.
+
+**4. The plan is shown before it is used.** Step 2 became two phases: *Understand* expands and
+displays a collapsible row per field with its phrasing count; *Map these meanings* runs it.
+Between them the student can delete a phrasing that is wrong for their sense of a word, or add
+one the model missed. The expansion is a guess about their words, and a guess they cannot see
+is a guess they cannot correct — this is the last moment before the search is defined, and it
+belongs to them. Their own phrasing is always first in the list and can never be crowded out.
+
+**Reversal condition.** If `failed_queries` ever stops being honest — a variant failing
+silently rather than being named — the server-side merge has lost the property that justified
+taking it, and it goes back to the browser.

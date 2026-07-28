@@ -79,6 +79,10 @@ class El {
                                   && (!m[2] || e.checked));
     const a = /^(\w+)\[([\w-]+)\]$/.exec(sel);       // e.g. button[data-uni] (the chips)
     if (a) return all.filter(e => e.tag === a[1] && a[2] in e.attrs);
+    const t = /^(\w+)\.([\w-]+)$/.exec(sel);         // e.g. details.fp (the search plan)
+    if (t) return all.filter(e => e.tag === t[1] && e.classList.contains(t[2]));
+    const b = /^\[([\w-]+)\]$/.exec(sel);            // e.g. [data-addto]
+    if (b) return all.filter(e => b[1] in e.attrs);
     throw new Error("mini-DOM el: unsupported selector " + sel);
   }
   addEventListener(type, fn) { (this.listeners[type] ||= []).push(fn); }
@@ -91,7 +95,7 @@ class El {
 function parseTree(markup) {
   const root = new El("div");
   const stack = [root];
-  const re = /<\/?(ul|li|label|input|span|div|button)(\s[^>]*)?\/?>|([^<]+)/g;
+  const re = /<\/?(ul|li|label|input|span|div|button|details|summary|b)(\s[^>]*)?\/?>|([^<]+)/g;
   let m;
   while ((m = re.exec(markup))) {
     const [, tag, attrs, text] = m;
@@ -226,9 +230,15 @@ let threw = null;
     await flush();
     trace.push(snap("after step 1"));
 
-    /* step 2 — field: Understand => /api/expand then one /api/map per phrasing */
+    /* step 2 — fields: Understand => /api/expand per field (shows the plan);
+       "Map these meanings" => ONE /api/map carrying every phrasing (B-001) */
     byId("field").value = scen.field;
     byId("understand").fire("click");
+    await flush();
+    /* Step 2 is now two phases: Understand expands and SHOWS the plan, "Map these
+       meanings" maps it. The pause between them is the point — it is where the student
+       edits what will be searched — so the click-through has to make both moves. */
+    byId("toMap").fire("click");
     await flush();
     trace.push(snap("after understand"));
     const topics = byId("tree").querySelectorAll("input.topic");
@@ -312,7 +322,7 @@ def _scenario():
         "responses": {
             "POST /api/expand": [{"status": 200, "body": {
                 "expanded": True, "variants": ["causal ml", "causal inference"]}}],
-            "GET /api/map": [{"status": 200, "body": m}],
+            "POST /api/map": [{"status": 200, "body": m}],
             "POST /api/scan": [{"status": 202, "body": {"job_id": JOB}}],
             f"POST /api/scan/{JOB}/cancel": [{"status": 202, "body": {"status": "cancelling"}}],
             f"POST /api/scan/{JOB}/resume": [{"status": 202, "body": {"status": "queued"}}],
@@ -368,12 +378,19 @@ def test_the_wizard_walks_all_five_steps(run):
     assert _at(run, "after start")["step"] == 5
 
 
-def test_understand_expands_once_then_maps_every_phrasing(run):
-    """D-068: one /api/expand, then one /api/map per returned variant — the multi-query
-    merge is client-side, so two phrasings must produce two map calls."""
+def test_understand_expands_then_maps_every_phrasing_in_ONE_request(run):
+    """D-068 + the B-001 migration: one /api/expand per field, then ONE /api/map carrying
+    every phrasing.
+
+    This used to assert one map call per phrasing, because the merge lived in the browser so
+    that a single failing phrasing could not fail the click (D-070). With the step-2 slider
+    asking for up to 50 phrasings per field, that design spends 50 units of a 30/hour budget
+    on one click — the feature would 429 the first time a student used it, which is exactly
+    the trigger B-001 wrote down. The server now reports `failed_queries`, so the honesty
+    that justified the client-side merge survives the move."""
     assert run["requests"][0] == {"method": "POST", "path": "/api/expand"}
     maps = [r for r in run["requests"] if r["path"] == "/api/map"]
-    assert len(maps) == 2 and all(r["method"] == "GET" for r in maps)
+    assert len(maps) == 1 and maps[0]["method"] == "POST", maps
     assert run["topicValues"] == ["T1", "T2"]     # merged, deduped by topic_id
 
 
@@ -385,7 +402,7 @@ def test_the_full_request_sequence_is_exactly_what_the_flow_implies(run):
     flow = [r for r in run["requests"] if r["path"] != "/api/clientlog"]
     assert [f"{r['method']} {r['path']}" for r in flow] == [
         "POST /api/expand",
-        "GET /api/map", "GET /api/map",
+        "POST /api/map",
         "POST /api/scan",
         f"GET /api/scan/{JOB}",                      # first poll, from beginWatching
         f"GET /api/scan/{JOB}",                      # interval poll -> running
@@ -467,7 +484,7 @@ def test_a_hostile_api_never_reaches_the_dom_unescaped(tmp_path):
     list and assert the page escaped all three."""
     hostile = "<img src=x onerror=alert(1)>"
     scen = _scenario()
-    scen["responses"]["GET /api/map"] = [{"status": 200, "body": {
+    scen["responses"]["POST /api/map"] = [{"status": 200, "body": {
         "truncated": False, "groups": [{"domain": hostile, "field": "f",
                                         "subfield": "s", "topics": [
             {"topic_id": "T1", "name": hostile, "works_count": 1}]}]}}]
@@ -532,19 +549,27 @@ def test_only_a_real_offline_state_is_reported_as_offline(tmp_path):
     assert "offline" not in h["http500"], h["http500"]
 
 
-def test_the_client_side_merge_is_the_documented_choice(run):
-    """D-070 / BLOCKERS B-001: the merge lives in the page, and subject_map_multi is its
-    unwired server-side counterpart. Pin BOTH halves so the divergence cannot quietly
-    flip: if someone wires the server-side merge, this test makes them update the
-    decision rather than leaving the record wrong."""
+def test_the_server_side_merge_is_now_the_documented_choice(run):
+    """The previous version of this test pinned the OPPOSITE arrangement and said: "if
+    someone wires the server-side merge, this test makes them update the decision rather
+    than leaving the record wrong." It did exactly that job — the migration happened at
+    B-001's own trigger (the step-2 slider makes per-phrasing calls unaffordable) and this
+    test is the reason the decision was rewritten instead of quietly contradicted.
+
+    Both halves are still pinned, in their new positions."""
     from supervisorly.discover import subjects
 
     assert callable(subjects.subject_map_multi)
-    assert "NOT CURRENTLY WIRED IN (D-070)" in subjects.subject_map_multi.__doc__
+    assert "NOT CURRENTLY WIRED IN" not in (subjects.subject_map_multi.__doc__ or "")
 
-    # the page's behaviour is the load-bearing half: one map call per phrasing
+    # one merged request, however many phrasings it carries
     maps = [r for r in run["requests"] if r["path"] == "/api/map"]
-    assert len(maps) == 2, "the page stopped merging client-side — D-070 needs revisiting"
+    assert len(maps) == 1 and maps[0]["method"] == "POST", maps
+
+    # and the property the client-side merge existed to protect must still hold: a single
+    # failing phrasing is reported, not fatal.
+    assert "failed_queries" in subjects.subject_map_multi(
+        [], transport=None, email="a@b.test")
 
 
 def test_an_expansion_outage_still_maps_the_students_own_words(tmp_path):

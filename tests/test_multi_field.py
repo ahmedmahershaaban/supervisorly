@@ -98,12 +98,30 @@ def test_blank_entries_are_refused_rather_than_silently_dropped():
     assert any("blank" in e for e in errs)
 
 
-def test_the_number_of_fields_is_capped():
-    """Each field costs an expansion plus one map call per phrasing, so this bounds the §5.2
-    throttle spend of a single Understand click, not just the payload."""
-    errs = cli._plan_value_errors({"fields": [f"f{i}" for i in range(cli.PLAN_MAX_FIELDS + 1)]})
-    assert any("at most" in e for e in errs)
-    assert cli._plan_value_errors({"fields": [f"f{i}" for i in range(cli.PLAN_MAX_FIELDS)]}) == []
+def test_there_is_no_cap_on_how_many_fields_a_student_may_name():
+    """There WAS one (6), and it was wrong: it refused a student's input to solve a cost
+    problem belonging to the cost layer. Someone working across eight areas is exactly who
+    this tool is for, and "remove one to add another" makes them hide part of their own
+    research. The limiters that remain are the §5.2 throttle and the fact that /api/map now
+    takes every phrasing in ONE request (B-001)."""
+    assert cli.PLAN_MAX_FIELDS is None
+    assert cli._plan_value_errors({"fields": [f"f{i}" for i in range(40)]}) == []
+
+
+def test_shape_is_still_enforced_even_without_a_count_cap():
+    """Removing the cap must not become "anything goes" — a blank field still means the
+    intent was mangled upstream, and that still fails loud."""
+    assert any("blank" in e for e in cli._plan_value_errors({"fields": ["ok", "  "]}))
+    assert any("list of strings" in e for e in cli._plan_value_errors({"fields": "ML"}))
+
+
+@pytest.mark.parametrize("bad", ["8", 3.5, [], {}])
+def test_the_variants_slider_must_be_a_whole_number(bad):
+    assert any("integer" in e for e in cli._plan_value_errors({"variants_per_field": bad}))
+
+
+def test_a_sane_slider_value_is_accepted():
+    assert cli._plan_value_errors({"variants_per_field": 50}) == []
 
 
 # ──────────────────────────────────────────────────────────── the page
@@ -120,9 +138,11 @@ def test_the_page_offers_a_multi_field_input(page):
     assert "Your field(s), in your words" in page
 
 
-def test_the_page_cap_matches_the_server_cap(page):
-    """Two caps that can disagree is a form the student can fill and the server will reject."""
-    assert f"var MAX_FIELDS = {cli.PLAN_MAX_FIELDS};" in page
+def test_the_page_does_not_refuse_extra_fields(page):
+    """The error the student hit — "that is the most fields one search can carry (6)" — must
+    be gone from the page, not merely raised to a bigger number."""
+    assert "most fields one search can carry" not in page
+    assert "var MAX_FIELDS" not in page
 
 
 def test_enter_adds_a_field_rather_than_submitting(page):

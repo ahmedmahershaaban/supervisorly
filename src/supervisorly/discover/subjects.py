@@ -204,7 +204,12 @@ def subject_map(query: str, transport: Transport, *, email: str | None = None,
 
 
 #: Input cap for ``subject_map_multi`` — matches the D-068 expansion contract (<= 8).
-MAX_QUERIES = 8
+#: How many phrasings ONE merged map request may carry. Raised from 8 to match the step-2
+#: slider's ceiling: the student chooses how wide the expansion is, and a cap here would
+#: silently drop the phrasings they asked for. The cost is bounded the right way — this is
+#: ONE throttle unit however many phrasings it carries (B-001), which is exactly why the
+#: number can go up.
+MAX_QUERIES = 50
 
 
 def subject_map_multi(queries: list[str], transport: Transport, *,
@@ -212,12 +217,17 @@ def subject_map_multi(queries: list[str], transport: Transport, *,
                       max_results: int = 25) -> dict:
     """Map several query variants (e.g. a D-068 expansion) to ONE merged subject map.
 
-    NOT CURRENTLY WIRED IN (D-070). The shipped web page does this merge in the browser
-    instead — it calls ``/api/map`` once per phrasing so that ONE failing phrasing does
-    not fail the whole click, which this function cannot express: a failing variant here
-    would either vanish silently or take the entire call down. Kept, not deleted, as the
-    server-side counterpart to migrate to if the per-phrasing throttle cost ever bites;
-    the trigger and the migration are written up in ``docs/BLOCKERS.md`` B-001.
+    WIRED IN as of the step-2 phrasing slider — ``/api/map`` accepts ``queries`` and calls
+    this. It previously was not, and the reason it was not is worth keeping: the page merged
+    in the browser so that ONE failing phrasing could not fail the whole click, which this
+    function could not express — a failing variant either vanished silently or took the
+    entire call down.
+
+    That objection was answered rather than ignored: a variant that raises is now recorded in
+    ``failed_queries`` and the rest continue, so the page can still say "N phrasings could
+    not be mapped — continuing with the rest". The migration happened at the trigger B-001
+    named — the slider lets a student ask for up to 50 phrasings per field, and one map call
+    each would spend 50 units of a 30/hour budget on a single click.
 
     Runs ``subject_map`` per unique variant (stripped, deduped case-insensitively, input
     capped at MAX_QUERIES) and merges the results: topics are deduped by ``topic_id``
@@ -241,8 +251,19 @@ def subject_map_multi(queries: list[str], transport: Transport, *,
     merged: dict[str, dict] = {}        # topic_id -> {rank, gkey, topic}
     truncated = False
     truncated_sources: list[str] = []
+    failed: list[str] = []
     for q in unique:
-        smap = subject_map(q, transport, email=email, key=key, max_results=max_results)
+        # Per-variant fault tolerance — the ONE thing this function could not express, and
+        # the reason D-070 kept the merge in the browser. One phrasing failing must not fail
+        # the click: it is recorded in `failed` and the rest continue, which is the same
+        # honesty the page already showed ("N phrasings could not be mapped — continuing
+        # with the rest"). Without this, wiring it in would trade a real guarantee for a
+        # throttle saving.
+        try:
+            smap = subject_map(q, transport, email=email, key=key, max_results=max_results)
+        except Exception:                       # noqa: BLE001 — one variant, not the click
+            failed.append(q)
+            continue
         truncated = truncated or smap["truncated"]
         for marker in smap["truncated_sources"]:
             if marker not in truncated_sources:
@@ -269,6 +290,10 @@ def subject_map_multi(queries: list[str], transport: Transport, *,
         group = groups.setdefault(gkey, {"domain": gkey[0], "field": gkey[1],
                                          "subfield": gkey[2], "topics": []})
         group["topics"].append(entry["topic"])
-    # sorted by best rank, so first-appearance order ranks groups by their top topic
-    return {"queries": unique, "groups": list(groups.values()),
-            "truncated": truncated, "truncated_sources": truncated_sources}
+    # sorted by best rank, so first-appearance order ranks groups by their top topic.
+    # `failed` names the phrasings that could not be mapped, so the page can say so instead
+    # of quietly showing a smaller map than the student asked for (D-037).
+    return {"queries": [q for q in unique if q not in failed],
+            "groups": list(groups.values()),
+            "truncated": truncated, "truncated_sources": truncated_sources,
+            "failed_queries": failed}

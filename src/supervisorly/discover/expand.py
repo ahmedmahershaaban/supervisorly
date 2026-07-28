@@ -58,17 +58,50 @@ ENV_KEY = "SUPERVISORLY_EXPAND_KEY"
 ENV_BASE_URL = "SUPERVISORLY_EXPAND_BASE_URL"
 ENV_MODEL = "SUPERVISORLY_EXPAND_MODEL"
 
-#: D-068 output contract: <= 8 short strings, <= 120 chars each.
-MAX_VARIANTS = 8
+#: D-068 output contract: short strings, <= 120 chars each. The COUNT is now the student's
+#: to choose (step 2's slider) — 8 remains the default, 50 the ceiling.
+#:
+#: The guardrails that make D-068 safe are untouched by this, and that is the whole reason
+#: the number can move: expansion emits QUERIES, never claims. Fifty bad variants can cost
+#: topics; they cannot mint a professor, a deadline or a recruiting status, because every
+#: fact still passes the D-010 quote gate. What a bigger number does cost is breadth of
+#: search — which is exactly what the student is asking for when they raise it.
+DEFAULT_VARIANTS = 8
+MAX_VARIANTS = 50
 MAX_VARIANT_LEN = 120
 
-_SYSTEM = (
-    "You expand an academic research field into search strings for an academic "
-    "subject-map search (OpenAlex topics). Reply with a JSON object of the form "
-    '{"variants": [...]} holding up to 6 short English query variants: the canonical '
-    "phrase, the acronym expansion (or the acronym, if the input is spelled out), "
-    "synonyms, one broader term, and one narrower term. Output JSON only."
-)
+
+def clamp_count(value) -> int:
+    """A slider position is a preference, not a claim — clamp it, never reject it."""
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return DEFAULT_VARIANTS
+    return max(1, min(MAX_VARIANTS, n))
+
+
+def _system_prompt(count: int) -> str:
+    """Ask for the number the student chose.
+
+    "Do your best and stop" is stated explicitly because a model told to produce fifty
+    variants of a narrow field will pad — inventing plausible-sounding subfields that match
+    nothing, which wastes map calls and puts noise in front of the student. Fewer good
+    strings is the better failure, and saying so is what makes it happen.
+    """
+    return (
+        "You expand an academic research field into search strings for an academic "
+        "subject-map search (OpenAlex topics). Reply with a JSON object of the form "
+        f'{{"variants": [...]}} holding UP TO {count} short English query variants: the '
+        "canonical phrase, the acronym expansion (or the acronym, if the input is spelled "
+        "out), synonyms, adjacent subfields, and broader and narrower terms.\n"
+        "Return FEWER if the field does not genuinely have that many distinct phrasings — "
+        "do not pad the list with invented or near-duplicate terms. A short accurate list "
+        "is better than a long vague one. Output JSON only."
+    )
+
+
+#: Kept for callers that want the historical default prompt.
+_SYSTEM = _system_prompt(DEFAULT_VARIANTS)
 
 
 def post_json(url: str, payload: dict, headers: dict, *, timeout: float = 10.0):
@@ -94,11 +127,15 @@ def _closed(field: str, reason: str) -> dict:
     return {"variants": [field], "expanded": False, "note": reason}
 
 
-def _sanitize(field: str, raw) -> list[str]:
+def _sanitize(field: str, raw, limit: int = DEFAULT_VARIANTS) -> list[str]:
     """Reduce the parsed ``variants`` value to the D-068 contract: the original query
     first, then only strings — stripped, non-empty, <= 120 chars, deduped
-    case-insensitively, capped at MAX_VARIANTS total. A malformed entry is discarded,
-    never the whole list."""
+    case-insensitively, capped at ``limit`` total. A malformed entry is discarded,
+    never the whole list.
+
+    The student's own words are always first and can never be crowded out, however many
+    variants come back: their phrasing is the one thing here that is not a guess."""
+    limit = clamp_count(limit)
     out = [field]
     seen = {field.casefold()}
     for v in raw:
@@ -109,15 +146,15 @@ def _sanitize(field: str, raw) -> list[str]:
             continue
         seen.add(v.casefold())
         out.append(v)
-        if len(out) >= MAX_VARIANTS:
+        if len(out) >= limit:
             break
     return out
 
 
 def expand_query(field: str, *, base_url: str | None = None, api_key: str | None = None,
                  model: str | None = None, timeout: float = 10.0,
-                 transport=None, environ=None) -> dict:
-    """Expand ``field`` into up to 8 search-string variants (D-068).
+                 transport=None, environ=None, count: int | None = None) -> dict:
+    """Expand ``field`` into up to ``count`` search-string variants (D-068, default 8).
 
     Sends ONE OpenAI-compatible chat completion to ``{base_url}/chat/completions``
     (JSON-mode reply ``{"variants": [...]}``) and returns
@@ -138,17 +175,21 @@ def expand_query(field: str, *, base_url: str | None = None, api_key: str | None
     if not key:
         return _closed(q, "no api key")
 
+    want = clamp_count(count if count is not None else DEFAULT_VARIANTS)
     endpoint = (base_url or environ.get(ENV_BASE_URL) or DEFAULT_BASE_URL).strip()
     url = f"{endpoint.rstrip('/')}/chat/completions"
     payload = {
         "model": (model or environ.get(ENV_MODEL) or DEFAULT_MODEL).strip(),
         "messages": [
-            {"role": "system", "content": _SYSTEM},
+            {"role": "system", "content": _system_prompt(want)},
             {"role": "user", "content": f"Academic field: {q}"},
         ],
         "response_format": {"type": "json_object"},
         "temperature": 0.2,
-        "max_tokens": 300,
+        # Scaled to the ask: 300 tokens truncates a 50-variant reply mid-JSON, which parses
+        # as malformed and fails closed to the student's own words — the feature would look
+        # broken at exactly the setting they turned up.
+        "max_tokens": 300 + 24 * want,
     }
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
     poster = transport if transport is not None else post_json
@@ -167,7 +208,7 @@ def expand_query(field: str, *, base_url: str | None = None, api_key: str | None
     except (ValueError, TypeError, KeyError, IndexError):
         return _closed(q, "malformed response")
 
-    out = _sanitize(q, variants)
+    out = _sanitize(q, variants, want)
     if len(out) == 1:
         # parsed fine, but nothing usable survived validation — same honest skip
         return _closed(q, "no usable variants")

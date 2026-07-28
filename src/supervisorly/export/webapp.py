@@ -128,6 +128,23 @@ textarea{min-height:96px;resize:vertical}
 /* university chips */
 .urow{display:flex;gap:8px;margin-bottom:10px}
 .urow input{flex:1}
+/* the search plan: one collapsed row per field, with its phrasing count on the row */
+.fplan{margin:18px 0 4px;border:1px solid var(--line2);border-radius:12px;overflow:hidden}
+.fplan-h{padding:11px 14px;border-bottom:1px solid var(--line2);color:var(--muted);
+  font-size:13px;background:rgba(255,255,255,.02)}
+details.fp{border-bottom:1px solid var(--line)}
+details.fp:last-child{border-bottom:0}
+details.fp summary{list-style:none;cursor:pointer;padding:11px 14px;display:flex;
+  align-items:center;gap:10px;justify-content:space-between}
+details.fp summary::-webkit-details-marker{display:none}
+details.fp summary::before{content:"▸";color:var(--faint);font-size:12px;margin-right:2px}
+details.fp[open] summary::before{content:"▾"}
+details.fp summary:hover{background:rgba(255,255,255,.03)}
+.fp-name{font-weight:600;flex:1}
+.fp-vars{padding:2px 14px 0}
+.fp-add{padding:0 14px 12px}
+.fp-add .fp-in{flex:1}
+.chip-own{border-color:var(--accent);color:var(--accent)}
 .chips{display:flex;flex-wrap:wrap;gap:8px;margin:4px 0 14px}
 .chip{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);
   border-radius:12px;background:var(--chip);padding:5px 8px 5px 12px;font-family:var(--mono);
@@ -281,7 +298,7 @@ var SLOW_FACTOR = 1.5;         /* §4.2: past 1.5x the soft expectation -> calm 
 var state = {
   step: 1,
   email: "", intent: "pre_phd", country: "", universities: [], uniMode: "all",
-  field: "", fields: [], variants: [], expansionOff: false, merged: null, topicTotal: 0,
+  field: "", fields: [], plan: [], variants: [], expansionOff: false, merged: null, topicTotal: 0,
   jobId: null, jobStart: 0, jobEnd: 0, lastOk: 0, watching: false,
   pollTimer: null, tickTimer: null, phaseKey: "", phaseEnter: 0, slowShown: false
 };
@@ -422,7 +439,6 @@ function addUniversity(){
    "ML" + "AI safety" produces the union of both literatures to choose from. MAX_FIELDS
    mirrors cli.PLAN_MAX_FIELDS: each field costs an expansion plus one map call per phrasing,
    so this is the §5.2 throttle budget of a single click as much as it is a payload cap. */
-var MAX_FIELDS = 6;
 function renderFieldChips(){
   var host = document.getElementById("fieldChips");
   host.innerHTML = state.fields.map(function(f,i){
@@ -434,13 +450,13 @@ function renderFieldChips(){
       state.fields.splice(Number(b.getAttribute("data-fld")),1); renderFieldChips(); });
   });
 }
+/* No cap. There was one (6) and it refused the student's input to solve a cost problem that
+   belongs to the cost layer — someone working across eight areas is exactly who this is for.
+   The limiters that remain are the §5.2 throttle and the fact that every phrasing is mapped
+   in ONE request (B-001), so breadth costs one unit, not one per phrasing. */
 function addField(){
   var inp = document.getElementById("field"), v = inp.value.trim();
   if(!v) return;
-  if(state.fields.length >= MAX_FIELDS){
-    showErr("err-field","that is the most fields one search can carry ("+MAX_FIELDS+") — "+
-            "remove one to add another."); return;
-  }
   /* case-insensitive, so "ML" and "ml" are not two searches of the same thing */
   var dup = state.fields.some(function(x){ return x.toLowerCase()===v.toLowerCase(); });
   if(!dup) state.fields.push(v);
@@ -454,7 +470,14 @@ function gatherFields(){
   var all = state.fields.slice();
   if(typed && !all.some(function(x){ return x.toLowerCase()===typed.toLowerCase(); }))
     all.push(typed);
-  return all.slice(0, MAX_FIELDS);
+  return all;
+}
+/* How many phrasings to ask the expander for, PER field (step 2's slider, 1–50). The model
+   is told to return fewer rather than pad, so a narrow field yields a short honest list at
+   any setting — the number is a ceiling, never a quota. */
+function variantDepth(){
+  var el = document.getElementById("depthRange");
+  return el ? Number(el.value)||8 : 8;
 }
 function gatherYou(){
   state.email = document.getElementById("email").value.trim();
@@ -483,13 +506,17 @@ function setFieldStatus(msg){
   el.textContent = msg;
   el.classList.toggle("hidden", !msg);
 }
-function expandField(f){
+function expandField(f, count){
   return withRetry(api("/api/expand"), {method:"POST",
-    headers:{"Content-Type":"application/json"}, body: JSON.stringify({field:f})})
+    headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({field:f, count: count||8})})
     .then(function(r){
       if(r.status===200 && r.body && Array.isArray(r.body.variants) && r.body.variants.length){
         if(r.body.expanded === false) state.expansionOff = true;
-        return r.body.variants.slice(0,8);
+        /* No client-side truncation: the server already clamped to what was asked for, and
+           slicing again here would silently discard phrasings the student paid for with the
+           slider. */
+        return r.body.variants;
       }
       /* expansion unavailable -> deterministic fallback: the student's words directly */
       state.expansionOff = true; return [f];
@@ -497,14 +524,20 @@ function expandField(f){
       state.expansionOff = true; return [f];   /* any failure: proceed deterministically */
     });
 }
-function mapVariant(v){
-  var url = api("/api/map")+"?field="+encodeURIComponent(v)+
-            "&email="+encodeURIComponent(state.email);
-  return withRetry(url).then(function(r){
-    if(r.status===200 && r.body && Array.isArray(r.body.groups))
-      return {ok:true, variant:v, map:r.body};
-    return {ok:false, variant:v, status:r.status, error:(r.body && r.body.error)||""};
-  }, function(e){ return {ok:false, variant:v, status:0, error:"", err:e}; });
+/* Every phrasing in ONE request (B-001). The page used to call /api/map once per phrasing
+   and merge here, to keep a single failing phrasing from failing the click — the server now
+   reports `failed_queries`, so that honesty survives while the whole click costs one unit of
+   the 30/hour budget instead of one per phrasing. With the step-2 slider asking for up to 50
+   phrasings per field, per-phrasing calls would 429 on first use. */
+function mapMany(variants){
+  return withRetry(api("/api/map"), {method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({queries: variants, email: state.email})})
+    .then(function(r){
+      if(r.status===200 && r.body && Array.isArray(r.body.groups))
+        return {ok:true, map:r.body};
+      return {ok:false, status:r.status, error:(r.body && r.body.error)||""};
+    }, function(e){ return {ok:false, status:0, error:"", err:e}; });
 }
 /* client-side multi-query merge: /api/map takes ONE field, so the page calls it per
    variant and merges here — topics dedupe by topic_id, found_by tags the variant(s)
@@ -544,6 +577,76 @@ function mergeMaps(results){
           groups: gorder.map(function(k){ return gmap[k]; }),
           truncated: results.some(function(r){ return !!(r.map && r.map.truncated); })};
 }
+/* ── the search plan: what we will actually look for, before we look ──────────
+   One collapsed row per field the student named, with the phrasing COUNT on the row. Open
+   it and every phrasing is listed and editable — remove one that is wrong for their sense of
+   the word, add one the model missed. This is the last moment before the search is defined,
+   and it is the student's to correct: the expansion is a guess about their words, and a
+   guess they cannot see is one they cannot fix. */
+function renderFieldPlan(){
+  var host = document.getElementById("fieldPlan");
+  if(!state.plan || !state.plan.length){ host.classList.add("hidden"); host.innerHTML=""; return; }
+  var total = state.plan.reduce(function(n,e){ return n + e.variants.length; }, 0);
+  host.innerHTML =
+    '<div class="fplan-h">We will search <b>'+total+'</b> phrasing'+(total===1?"":"s")+
+    ' across <b>'+state.plan.length+'</b> field'+(state.plan.length===1?"":"s")+
+    ' — open any field to change what it looks for.</div>'+
+    state.plan.map(function(e,i){
+      return '<details class="fp" data-fp="'+i+'"'+(e.open?" open":"")+'>'+
+        '<summary><span class="fp-name">'+esc(e.field)+'</span>'+
+        '<span class="wchip">'+e.variants.length+' phrasing'+
+        (e.variants.length===1?"":"s")+'</span></summary>'+
+        '<div class="chips fp-vars">'+
+          e.variants.map(function(v,j){
+            var own = (v.toLowerCase()===e.field.toLowerCase());
+            return '<span class="chip'+(own?" chip-own":"")+'">'+esc(v)+
+              (own ? '' : '<button type="button" data-rmv="'+i+':'+j+
+                          '" aria-label="remove '+esc(v)+'">×</button>')+'</span>';
+          }).join('')+
+        '</div>'+
+        '<div class="urow fp-add">'+
+          '<input type="text" class="fp-in" data-addto="'+i+'" '+
+            'placeholder="add a phrasing for '+esc(e.field)+'">'+
+          '<button type="button" class="btn ghost" data-addbtn="'+i+'">+ add</button>'+
+        '</div></details>';
+    }).join('');
+  host.classList.remove("hidden");
+  /* keep a row's open/closed state across re-renders, or editing one snaps it shut */
+  host.querySelectorAll("details.fp").forEach(function(d){
+    d.addEventListener("toggle", function(){
+      var e = state.plan[Number(d.getAttribute("data-fp"))];
+      if(e) e.open = d.open;
+    });
+  });
+  host.querySelectorAll("button[data-rmv]").forEach(function(b){
+    b.addEventListener("click", function(){
+      var p = b.getAttribute("data-rmv").split(":");
+      state.plan[Number(p[0])].variants.splice(Number(p[1]),1);
+      renderFieldPlan();
+    });
+  });
+  function addTo(i, inp){
+    var v = (inp.value||"").trim(); if(!v) return;
+    var e = state.plan[i];
+    if(!e.variants.some(function(x){ return x.toLowerCase()===v.toLowerCase(); }))
+      e.variants.push(v);
+    e.open = true; inp.value = ""; renderFieldPlan();
+    var again = document.querySelector('input[data-addto="'+i+'"]'); if(again) again.focus();
+  }
+  host.querySelectorAll("button[data-addbtn]").forEach(function(b){
+    b.addEventListener("click", function(){
+      var i = Number(b.getAttribute("data-addbtn"));
+      addTo(i, document.querySelector('input[data-addto="'+i+'"]'));
+    });
+  });
+  host.querySelectorAll("input[data-addto]").forEach(function(inp){
+    inp.addEventListener("keydown", function(ev){
+      if(ev.key==="Enter"){ ev.preventDefault(); addTo(Number(inp.getAttribute("data-addto")), inp); }
+    });
+  });
+}
+
+/* Phase 1 of step 2: expand every field and SHOW the plan. Nothing is mapped yet. */
 function understand(){
   clearErrs();
   var fields = gatherFields();
@@ -558,36 +661,51 @@ function understand(){
      header, the worker log); `fields` is the real list. Derived, never a second source of
      truth. */
   state.field = fields.join(" · ");
+  var depth = variantDepth();
   setFieldStatus(fields.length>1
     ? "Understanding "+fields.length+" fields… (a cold start can take 10–30 s)"
     : "Understanding your field… (a cold start can take 10–30 s — warming up…)");
-  /* Expand each field independently, then map every phrasing from every field. One field
-     failing to expand costs that field its synonyms, never the whole click. */
+  /* Expand each field independently. One field failing to expand costs THAT field its
+     synonyms and nothing else — it falls back to the student's own words (D-068). */
   Promise.all(fields.map(function(f){
-    return expandField(f).then(function(vs){ return vs; },
-                               function(){ return [f]; });
+    return expandField(f, depth).then(function(vs){ return {field:f, variants:vs&&vs.length?vs:[f]}; },
+                                      function(){ return {field:f, variants:[f]}; });
   })).then(function(perField){
-    var variants = [], seen = {};
-    perField.forEach(function(vs){
-      (vs||[]).forEach(function(v){
-        var k = String(v).toLowerCase();
-        if(!seen[k]){ seen[k] = 1; variants.push(v); }
-      });
-    });
-    setFieldStatus("Mapping "+variants.length+" phrasing"+
-      (variants.length>1?"s":"")+" to the subject index…");
-    return Promise.all(variants.map(mapVariant));
-  }).then(function(res){
     btn.disabled = false;
-    var oks = res.filter(function(r){ return r.ok; });
-    if(!oks.length){
-      setFieldStatus("");
-      showErr("err-field", humanError(res[0].status, {error:res[0].error}, res[0].err));
+    setFieldStatus("");
+    state.plan = perField.map(function(e){ return {field:e.field, variants:e.variants, open:false}; });
+    renderFieldPlan();
+    document.getElementById("expNote").classList.toggle("hidden", !state.expansionOff);
+    document.getElementById("toMap").classList.remove("hidden");
+  });
+}
+
+/* Phase 2 of step 2: map the plan the student approved. Every phrasing goes in ONE request
+   (B-001) — per-phrasing calls would spend 50 units of a 30/hour budget on one click. */
+function mapPlan(){
+  clearErrs();
+  var variants = [], seen = {};
+  (state.plan||[]).forEach(function(e){
+    e.variants.forEach(function(v){
+      var k = String(v).toLowerCase();
+      if(!seen[k]){ seen[k]=1; variants.push(v); }
+    });
+  });
+  if(!variants.length){ showErr("err-field","nothing to search for — add a field first."); return; }
+  var btn = document.getElementById("toMap");
+  btn.disabled = true;
+  state.variants = variants;
+  setFieldStatus("Mapping "+variants.length+" phrasing"+
+    (variants.length>1?"s":"")+" to the subject index…");
+  mapMany(variants).then(function(r){
+    btn.disabled = false;
+    setFieldStatus("");
+    if(!r.ok){
+      showErr("err-field", humanError(r.status, {error:r.error}, r.err));
       return;
     }
-    state.variants = oks.map(function(r){ return r.variant; });
-    state.merged = mergeMaps(oks);
-    setFieldStatus("");
+    state.merged = r.map;
+    state.variants = (r.map.queries||variants);
     /* build the tree inside a guard: a malformed map renders an honest note, never a brick */
     try { buildTree(); }
     catch(e){
@@ -597,10 +715,12 @@ function understand(){
     }
     document.getElementById("partialBanner").classList.toggle("hidden", !state.merged.truncated);
     document.getElementById("expNote").classList.toggle("hidden", !state.expansionOff);
-    var dropped = res.length - oks.length;
+    /* The server now reports WHICH phrasings failed, so the honest note that used to come
+       from counting per-phrasing responses survives the move to one request (B-001). */
+    var failed = (state.merged.failed_queries)||[];
     var dn = document.getElementById("dropNote");
-    if(dropped>0){
-      dn.textContent = dropped+" phrasing"+(dropped>1?"s":"")+
+    if(failed.length){
+      dn.textContent = failed.length+" phrasing"+(failed.length>1?"s":"")+
         " could not be mapped — continuing with the rest.";
       dn.classList.remove("hidden");
     } else dn.classList.add("hidden");
@@ -1052,6 +1172,10 @@ document.addEventListener("DOMContentLoaded", function(){
     if(e.key==="Enter"){ e.preventDefault(); addUniversity(); } });
   document.getElementById("understand").addEventListener("click", understand);
   document.getElementById("fieldAdd").addEventListener("click", addField);
+  document.getElementById("toMap").addEventListener("click", mapPlan);
+  document.getElementById("depthRange").addEventListener("input", function(){
+    document.getElementById("depthVal").textContent = variantDepth();
+  });
   /* Enter ADDS the field rather than submitting: with a multi-value input, submitting on the
      first Enter would make a second field unreachable from the keyboard. Understand is the
      explicit button, as it already was. */
@@ -1226,11 +1350,20 @@ def build_webapp(*, api_base: str = "") -> str:
       <button type="button" class="btn ghost" id="fieldAdd">+ add</button>
     </div>
     <div class="chips" id="fieldChips"></div>
+    <div class="sliderblock" style="margin-top:18px">
+      <label for="depthRange">Related phrasings to look for, per field — synonyms, acronyms,
+        adjacent subfields</label>
+      <input type="range" id="depthRange" min="1" max="50" value="8" step="1">
+      <div class="hint"><span id="depthVal">8</span> per field · wider finds more meanings;
+        a narrow field simply returns fewer, never padding</div>
+    </div>
     <div class="err" id="err-field" role="alert"></div>
+    <div id="fieldPlan" class="fplan hidden"></div>
     <p class="note hidden" id="fieldStatus" role="status"></p>
     <div class="btnrow">
       <button type="button" class="btn ghost" id="back2">← back</button>
       <button type="button" class="btn big" id="understand">Understand →</button>
+      <button type="button" class="btn big hidden" id="toMap">Map these meanings →</button>
     </div>
   </section>
 

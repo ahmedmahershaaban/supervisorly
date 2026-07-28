@@ -58,10 +58,23 @@ def handle_subject_map(params: dict, *, transport=None, environ=None) -> tuple[i
     Returns ``(http_status, jsonable_dict)``. ``transport``/``environ`` are injectable
     for tests; production uses httpx and os.environ.
     """
+    # `queries` (a list) maps MANY phrasings in ONE request and merges them server-side;
+    # `field` (a string) is the original single-phrasing form and still works unchanged.
+    #
+    # This is the B-001 migration, taken at the trigger B-001 named. The page used to call
+    # this once per phrasing to keep per-variant failure survivable — with the step-2 slider
+    # asking for up to 50 phrasings per field, that is 50 units of a 30/hour budget for one
+    # click, i.e. the feature would 429 the moment a student used it. `subject_map_multi` now
+    # reports `failed_queries` per variant, so the honesty that kept the merge in the browser
+    # is preserved on the server and the whole click costs one unit.
+    raw_queries = params.get("queries")
+    queries = [q.strip() for q in raw_queries
+               if isinstance(q, str) and q.strip()] if isinstance(raw_queries, list) else []
     field = str(params.get("field") or "").strip()
-    if not field:
+    if not queries and not field:
         return _error(400, "missing required parameter 'field' "
-                           "(a free-text research field, e.g. ?field=NLP)")
+                           "(a free-text research field, e.g. ?field=NLP) or 'queries' "
+                           "(a list of phrasings to map and merge)")
     environ = os.environ if environ is None else environ
     email = str(params.get("email") or environ.get(preflight.CONTACT_EMAIL_ENV) or "").strip()
     if not preflight._EMAIL_RE.match(email):
@@ -80,7 +93,12 @@ def handle_subject_map(params: dict, *, transport=None, environ=None) -> tuple[i
         transport = httpx_transport(
             user_agent=f"SupervisorlyBot/0.1 (mailto:{email})")
     try:
-        smap = subjects.subject_map(field, transport, email=email, max_results=max_results)
+        if queries:
+            smap = subjects.subject_map_multi(queries, transport, email=email,
+                                              max_results=max_results)
+        else:
+            smap = subjects.subject_map(field, transport, email=email,
+                                        max_results=max_results)
     except Exception as exc:                             # never leak a stack over HTTP
         return _error(500, f"subject-map failed: {type(exc).__name__}")
     return 200, smap
@@ -166,9 +184,12 @@ def handle_expand(params: dict, *, environ=None, transport=None) -> tuple[int, d
                            "(a free-text research field, e.g. ?field=NLP)")
     environ = os.environ if environ is None else environ
     key = (environ.get(expand.ENV_KEY) or "").strip() or None
+    # How many phrasings to ask for (step 2's slider). Clamped, never rejected: a slider
+    # position is a preference, and 400-ing a scan over one would be absurd.
+    count = expand.clamp_count(params.get("count", expand.DEFAULT_VARIANTS))
     try:
         return 200, expand.expand_query(field, api_key=key, transport=transport,
-                                        environ=environ)
+                                        environ=environ, count=count)
     except Exception as exc:                             # never leak a stack over HTTP
         return _error(500, f"expand failed: {type(exc).__name__}")
 

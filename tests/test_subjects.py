@@ -392,12 +392,15 @@ def test_subject_map_multi_honest_empty_variant_contributes_nothing():
     assert [(t["topic_id"], t["found_by"]) for t in flat] == [("T1", ["causal"])]
 
 
-def test_subject_map_multi_dedupes_case_insensitively_and_caps_input_at_8():
+def test_subject_map_multi_dedupes_case_insensitively_and_caps_input_at_MAX_QUERIES():
     tp = CassetteTransport()
     for i in range(1, 9):
         tp.record(openalex.topics_url(f"q{i}", EMAIL), 200, _page([]))
     counting = _Counting(tp)
     queries = ["q1", "Q1"] + [f"q{i}" for i in range(2, 10)]       # 9 unique after dedupe
     smap = subjects.subject_map_multi(queries, counting, email=EMAIL)
-    assert smap["queries"] == [f"q{i}" for i in range(1, 9)]       # first casing kept, cap 8
-    assert len(counting.urls) == 8
+    assert smap["queries"] == [f"q{i}" for i in range(1, 10)]      # first casing kept
+    # the cap rose 8 -> 50 with the step-2 slider: one request carries every phrasing the
+    # student asked for, and capping here would silently drop what they chose.
+    assert subjects.MAX_QUERIES == 50
+    assert len(counting.urls) == 9      # one upstream call per unique phrasing

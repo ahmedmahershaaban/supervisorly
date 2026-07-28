@@ -248,8 +248,10 @@ def test_understand_flow_cold_start_timeout_retry():
     assert "var REQ_TIMEOUT_MS = 45000;" in js        # 45 s timeout (§5.1 cold starts)
     assert "withRetry" in js                          # + one retry
     assert "warming up…" in js
-    assert 'JSON.stringify({field:f})' in js          # POST /api/expand
-    assert '"?field="+encodeURIComponent(v)' in js    # GET /api/map per variant
+    assert 'JSON.stringify({field:f, count: count||8})' in js   # POST /api/expand + depth
+    # ONE POST carrying every phrasing, not a GET per variant (the B-001 migration — the
+    # step-2 slider allows 50 phrasings per field, and a call each would 429 immediately).
+    assert "JSON.stringify({queries: variants, email: state.email})" in js
     assert "PARTIAL MAP" in _norm(build_webapp())     # truncated-variant banner
 
 
