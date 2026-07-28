@@ -45,6 +45,16 @@ def _params(req) -> dict:
     return req.get_json(silent=True) or {}
 
 
+#: The D-068 expansion key, as a Secret Manager secret name. A 2nd-gen function only
+#: receives the secrets it DECLARES — putting a value in Secret Manager and setting the
+#: env var is not enough on its own, and the failure is silent: the key simply is not
+#: there at runtime and expansion fails closed as if no key existed. Declared on the two
+#: functions that can reach ``handle_expand``: ``expand`` directly, and ``api``, which
+#: routes ``/api/expand`` behind the Hosting rewrite. Nothing else needs it — the scan
+#: worker never expands.
+EXPAND_KEY_SECRET = "SUPERVISORLY_EXPAND_KEY"
+
+
 def _ip(req) -> str:
     """The client IP for the §5.2 throttles — the entry the Google front end wrote.
 
@@ -122,7 +132,7 @@ if https_fn is not None:
         return (_deny_method(req, "GET", "POST")
                 or _respond(*_core.handle_map(_params(req), ip=_ip(req))))
 
-    @https_fn.on_request()
+    @https_fn.on_request(secrets=[EXPAND_KEY_SECRET])
     def expand(req: https_fn.Request) -> https_fn.Response:
         if req.method == "OPTIONS":
             return _preflight()
@@ -183,7 +193,7 @@ if https_fn is not None:
             _core.webapp_html(), status=200,
             headers={**CORS_HEADERS, "Content-Type": "text/html; charset=utf-8"})
 
-    @https_fn.on_request()
+    @https_fn.on_request(secrets=[EXPAND_KEY_SECRET])
     def api(req: https_fn.Request) -> https_fn.Response:
         """The single router behind the Hosting ``/api/**`` rewrite."""
         if req.method == "OPTIONS":

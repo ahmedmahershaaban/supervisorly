@@ -18,7 +18,8 @@ gcloud CLI, and a billing-enabled Firebase/GCP project.
 | `<APP_CHECK_SITE_KEY>` | the page (optional, plan §5.2) | reCAPTCHA/App Check when public |
 | `SUPERVISORLY_CONTACT_EMAIL` | Functions + worker secret | your email (OpenAlex polite pool) |
 | `SUPERVISORLY_OPENALEX_KEY` | Functions + worker secret (optional) | premium key — raises the daily budget |
-| `SUPERVISORLY_EXPAND_KEY` | Functions secret (optional, fail-closed) | Kimi Code API key for D-068 expansion |
+| `SUPERVISORLY_EXPAND_KEY` | Functions secret (optional, fail-closed) | API key for D-068 expansion — see "Query expansion" below |
+| `SUPERVISORLY_EXPAND_BASE_URL` / `_MODEL` | `.env` | which provider/model does the expansion (server config, never a request param) |
 
 ## 1. Init + copy files
 
@@ -283,6 +284,61 @@ a deliberate alternative: generate it with
 ```bash
 firebase deploy        # functions + hosting + rules
 ```
+
+## Query expansion (D-068) — optional, and two traps
+
+Expansion turns a student's phrasing into search variants, so typing `NLP` also searches
+*natural language processing*. Without it the map is **empty for acronyms** — measured on
+the live site: `NLP` → 0 topics, `natural language processing` → 11. It fails honestly
+(the page says the map came back empty and offers to name professors directly), but an
+acronym is a dead end. That is the hole D-068 exists to fill; a hardcoded acronym list
+would violate [D-038](../docs/DECISIONS.md#d-038--queries-and-keywords-are-generated-per-search-never-looked-up).
+
+It is genuinely optional: with no key the engine falls back to the student's literal words
+and nothing breaks.
+
+**Trap 1 — the key's project decides your billing tier.** A Gemini key created in *this*
+project inherits its Cloud Billing (enabled for Cloud Run), so Gemini bills it as **paid
+tier** and every call returns `429 "Your prepayment credits are depleted"` until you buy
+credit. A key created in a **new project with no billing** gets the **free tier** — 1,500
+requests/day, 15/min — which is far beyond this app's own 10/hour-per-IP throttle. Create
+the key at `aistudio.google.com/apikey` and choose **"Create API key in new project"**.
+
+**Trap 2 — pinned model versions get retired.** `gemini-2.5-flash-lite` returns
+`404 "no longer available to new users"` for projects that had not used it before, so it
+looks like a broken key rather than a retired model. Use the provider's **alias**
+(`gemini-flash-lite-latest`) unless you need reproducibility more than you need it to keep
+working.
+
+```bash
+# 1. the key (new, UNBILLED project) -> Secret Manager
+firebase functions:secrets:set SUPERVISORLY_EXPAND_KEY
+
+# 2. let the runtime read it
+gcloud secrets add-iam-policy-binding SUPERVISORLY_EXPAND_KEY \
+  --member "serviceAccount:<THE_RUNTIME_SA>" --role roles/secretmanager.secretAccessor
+
+# 3. .env — provider + model are server config
+#    SUPERVISORLY_EXPAND_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai
+#    SUPERVISORLY_EXPAND_MODEL=gemini-flash-lite-latest
+```
+
+**Trap 3, the silent one — a 2nd-gen function only receives secrets it DECLARES.** Setting
+the secret and the env var is not enough; without `@https_fn.on_request(secrets=[...])` the
+key is simply absent at runtime and expansion fails closed exactly as if you had never set
+it — no error, no log, just no expansion. `main.py` declares it on `expand` and on `api`
+(which routes `/api/expand` behind the Hosting rewrite). Nothing else needs it: the scan
+worker never expands.
+
+Verify after deploying — `expanded` must be `true`:
+
+```bash
+curl -s "https://<your-site>/api/expand?field=NLP" | head -c 200
+```
+
+Any other provider works unchanged (the call is OpenAI-compatible): point
+`SUPERVISORLY_EXPAND_BASE_URL`/`_MODEL` at DeepSeek, Groq, or anything else with a
+`/chat/completions` endpoint and JSON mode.
 
 ## Local emulation
 

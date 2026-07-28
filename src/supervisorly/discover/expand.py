@@ -28,6 +28,14 @@ import os
 from ..fetch.transport import TransportError
 
 #: Server-side settings (D-068) — never request parameters a caller can smuggle in.
+#: These are only the FALLBACK defaults; a deployment sets the two env vars below.
+#:
+#: A note earned the hard way: pin a model version and it will eventually be retired under
+#: you. Configuring Gemini's ``gemini-2.5-flash-lite`` failed with HTTP 404 *"no longer
+#: available to new users"* — the model still worked for projects that had used it before,
+#: so it looked like a key problem rather than a model problem. Prefer a provider's
+#: "latest" alias for a task this simple, and pin a version only when you need
+#: reproducibility more than you need it to keep working.
 DEFAULT_BASE_URL = "https://api.kimi.com/coding/v1"
 DEFAULT_MODEL = "kimi-for-coding"
 
