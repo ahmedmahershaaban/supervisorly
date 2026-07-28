@@ -10,6 +10,100 @@ it, not by deleting it.
 
 ---
 
+## B-003 — Every hosted scan returns zero facts, and the only fix goes through a `Disallow: /`
+
+**Status:** OPEN — needs Ahmed. This is an ethics call, so no code was written for it.
+**Found:** 2026-07-28, from Ahmed's screenshot of run `run_89fc85b70a06` (job
+`5d1316cbc8a74b929425fcb5b64c7ebd`) — 331 professors, every cell either "not checked yet"
+or "awaiting your browser", not one fact.
+
+### The measured behaviour
+
+Counted from the run's own exported dashboard, all 331 people, all five fields:
+
+| state | count | renders as |
+|---|---|---|
+| `blocked` | **52** (100% of everything deep-dived) | ⏳ awaiting your browser |
+| `never_attempted` | 279 (outside the shortlist gate) | · not checked yet |
+| `value` / `searched_absent` | **0** | — |
+
+The 279 are correct and by design (`_shortlist_gate`, D-046). The **52/52 block rate** is
+the defect: a 100% failure across 52 professors at 34 institutions is systemic.
+
+### The causal chain, each step verified live
+
+1. **OpenAlex carries no homepage.** Sampled 50 authors at Cairo University
+   (`I107720978`, one of the two the run's own `partial_warning` named):
+   `homepage_url` present on **0 of 50**; 45 have an ORCID, 5 have nothing.
+2. **So `_author_url` falls back to the ORCID profile** (`discover/ladder.py:131`) — a
+   fallback added by an earlier round precisely because without it *every* target was
+   `url=None`. Its docstring calls the ORCID profile "a public, fetchable page".
+3. **It is not fetchable.** `https://orcid.org/<id>` returns 65 KB whose entire
+   "visible" text is CSS `@font-face` declarations. ORCID is a JavaScript app; the record
+   is not in the HTML.
+4. **The wall detector correctly fires.** Ran the shipped
+   `roster.detect_login_wall()` against the real page: **`True`**. So
+   `_deep_dive_one` takes the `blocked` branch (`pipeline.py:748-756`) and marks every
+   field for the human rung. Belt and braces: all five extractors were also run against
+   that HTML directly and every one returned `None`, so even without the detector there
+   was nothing to extract.
+
+Nothing here is a bug in the sense of broken code — **every component did exactly what it
+was designed to do.** The ORCID fallback turned "no URL" into "a URL that is guaranteed to
+be walled", which converts an honest `never_attempted` into an honest-looking `blocked`
+while producing the same zero facts. The states are individually truthful and the product
+outcome is still useless, which is why this needed measuring rather than reasoning about.
+
+### The fix, and why it is blocked
+
+ORCID's **public API** returns exactly what is missing, as structured JSON:
+`pub.orcid.org/v3.0/<id>/record` gives `researcher-urls` (the professor's real homepage —
+the thing OpenAlex lacks), plus employments and biography. Resolving ORCID → real homepage
+would give the deep-dive an actual page to read, for ~90% of enumerated targets.
+
+**But `https://pub.orcid.org/robots.txt` is `User-agent: * / Disallow: /`.**
+
+[D-005](DECISIONS.md#d-005--ethics-in-code) binds the tool to obey robots.txt, and this is
+the most explicit possible refusal. The tempting argument — "robots.txt governs crawlers,
+not documented API clients, and ORCID publishes this API for exactly this purpose" — is
+genuinely arguable and is the mainstream reading. It is still not mine to make.
+
+The existing precedent does **not** settle it, and I checked before assuming it did:
+
+| host | robots.txt | how the code treats it |
+|---|---|---|
+| `api.openalex.org` | **404 — none served** | raw transport, no robots gate |
+| `api.ror.org` | **403 — none served** | raw transport, no robots gate |
+| `pub.orcid.org` | **200, `Disallow: /`** | — |
+| `orcid.org` (site) | 200, selective — record pages **allowed** | robots-gated fetcher |
+
+So OpenAlex and ROR bypass the robots gate because **there is nothing to obey**, not
+because the project decided documented APIs are exempt. That decision has never actually
+been made. ORCID would be the first host where the tool overrode an explicit `Disallow`.
+Note the irony in the last row: scraping ORCID's *human* page is robots-allowed and
+useless, while its *machine* endpoint is useful and disallowed.
+
+### The decision needed from Ahmed
+
+1. **Does "obey robots.txt" (D-005) apply to documented public APIs, or only to crawling?**
+   A yes/no here is reusable — it will recur with Crossref, Semantic Scholar, and every
+   registry. If APIs are exempt, that belongs in D-005/D-039 as explicit words, not as an
+   inference from two hosts that happen to serve no robots.txt.
+2. If **exempt**: implement ORCID resolution on the API side (alongside `openalex.py` /
+   `ror.py`), with the ORCID iD as identifier, a contact header, and the JSON record as the
+   quote-verified snapshot — every D-010 guarantee unchanged.
+3. If **not exempt**: then the ORCID fallback in `_author_url` should be **removed**, not
+   kept. It currently spends a fetch and a shortlist slot to reach a page known in advance
+   to be walled, and dresses the result as "awaiting your browser" — which tells the student
+   their browser will finish the job, for 52 pages where a browser would find a real record
+   but the tool could simply never use it. Honest emptiness (D-037) is better served by
+   `never_attempted` and a shortlist spent on targets that have a real page.
+
+Until this is answered the hosted product enumerates correctly and reports nothing, which
+is the state Ahmed is looking at.
+
+---
+
 ## B-001 — The multi-phrasing subject-map merge is client-side, not `subject_map_multi`
 
 **Status:** resolved by decision (Ahmed, 2026-07-27) — documented, not refactored.
