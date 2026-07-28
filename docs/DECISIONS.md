@@ -1468,3 +1468,57 @@ throttle, so one *Understand* click can cost up to 8. If that cap starts biting 
 in normal use, the merge moves behind `/api/map` — the trigger, the migration and the
 retained implementation are written up in
 [BLOCKERS.md B-001](BLOCKERS.md#b-001--the-multi-phrasing-subject-map-merge-is-client-side-not-subject_map_multi).
+
+---
+
+## D-072 — robots.txt governs the crawler, not the documented API client
+
+**Status:** locked (Ahmed, 2026-07-28) — refines [D-005](#d-005--ethics-in-code) and
+[D-039](#d-039--api-first-public-sources-human-rung-for-the-walled); resolves
+[BLOCKERS.md B-003](BLOCKERS.md#b-003--every-hosted-scan-returns-zero-facts-and-the-only-fix-goes-through-a-disallow-)
+
+The tool reads **documented public APIs** — OpenAlex, ROR, ORCID, and their successors —
+through the injected `Transport`, and does **not** apply the robots.txt gate to them.
+robots.txt is a crawler protocol; an API client calling a published, versioned endpoint
+that its operator offers for exactly this purpose is not crawling.
+
+This was forced by a real defect, not chosen in the abstract. OpenAlex carries no homepage
+for the institutions the tool searches (0 of 50 sampled), so targets fell back to the
+author's ORCID *profile page* — a JavaScript app whose HTML holds no record. The measured
+outcome was a run with **331 professors and zero facts**: 52 of 52 deep-dived targets
+`blocked`. The same data is one documented API call away, but `pub.orcid.org/robots.txt`
+is `User-agent: * / Disallow: /`.
+
+The existing code did not already settle this and was not treated as if it had:
+`api.openalex.org` returns 404 for robots.txt and `api.ror.org` returns 403, so those
+clients bypass the gate because **there is nothing to obey** — not because a decision was
+ever made. ORCID is the first host where an explicit `Disallow` is overridden, which is why
+it went to Ahmed as [B-003](BLOCKERS.md#b-003--every-hosted-scan-returns-zero-facts-and-the-only-fix-goes-through-a-disallow-)
+rather than being decided in code.
+
+**The boundary this does NOT move.** Ahmed's ruling was "unlock everything"; everything
+means *documented APIs*, and nothing else changes:
+
+- **A login or bot-wall is still never defeated** ([D-039](#d-039--api-first-public-sources-human-rung-for-the-walled),
+  [D-043](#d-043--the-human-rung-claude-for-chrome), [D-044](#d-044--non-english-pages--social-sources)).
+  ResearchGate, LinkedIn and X researcher URLs are **skipped, not fetched** — 2 of the 6
+  URLs found in the sample were exactly these. Walled sources go to the human rung, as before.
+- **Ordinary web pages keep the robots gate.** `fetch/fetcher.py` is unchanged; every page
+  fetch still checks robots and fails closed. This decision covers the API path only.
+- **Identify yourself.** API calls carry the project user-agent and contact email
+  ([D-019](#d-019--a-contact-email-is-required-not-optional)/[D-023](#d-023--no-nationality-gate)),
+  stay inside the per-host rate limiter, and use the smallest endpoint that answers the
+  question (ORCID's `/researcher-urls`, ~3.5 KB, not `/record`, ~44 KB).
+- **Every fact still passes the quote gate** ([D-010](#d-010--every-field-carries-provenance-and-confidence)).
+  An API response is a source like any other; it earns no exemption from verification.
+
+**What it is worth, stated honestly.** Only about a quarter of ORCID records carry a
+researcher URL at all (6 of 25 sampled real professors), and some of those are walled. This
+turns "no page for anyone" into "a real page for a minority". It is a genuine improvement
+over zero and is deliberately not described as more — the first estimate offered for this
+change was ~90%, derived from ORCID *presence* rather than URL presence, and it was wrong.
+
+**Reversal condition.** If an operator asks the project to stop, or publishes terms that
+forbid this use, that host is removed from the API path — an explicit request from the
+operator outranks this decision. robots.txt alone does not, which is precisely what is
+being decided here.

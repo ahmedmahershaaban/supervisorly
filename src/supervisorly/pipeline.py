@@ -27,6 +27,7 @@ import time
 from . import preflight
 from .discover import ladder as _ladder
 from .discover import openalex as _openalex
+from .discover import orcid as orcid_mod
 from .discover import ror as _ror
 from .discover import roster as _roster
 from .ethics import optout as optout_mod
@@ -498,8 +499,22 @@ _SOCIAL_URL = re.compile(
 # This host set is page-classification structure (an enum of source types, allowed under D-038 —
 # the same class as the login-wall marker phrases), not a per-field search-term dictionary.
 # github.com / bsky.app / mastodon are deliberately absent: D-044 marks those tool-fetchable.
+#: Profile hosts that advertise a researcher but refuse machines. Fetching one can only end
+#: in a 403 or a login page, so they are routed to the human rung and never scraped
+#: (D-039/D-043/D-044) — a rule about *how* a source is reached, unaffected by
+#: [D-072](../../docs/DECISIONS.md#d-072) unlocking documented APIs.
+#:
+#: Each entry was measured, not assumed (2026-07-28, plain GET with the project user-agent):
+#:   researchgate.net  403, and its robots.txt is SELECTIVE — so the robots gate ALLOWS
+#:                     /profile/ and the wall is only discovered by being refused. This is
+#:                     the one that must be listed here, because nothing else stops it.
+#:   scholar.google.*  302 away, robots.txt Disallow: /
+#:   academia.edu      403, robots.txt Disallow: /
+#: ORCID resolution surfaced a real ResearchGate profile URL as a professor's only page,
+#: which is how the gap was found.
 _WALLED_SOCIAL = re.compile(
-    r"^https?://(?:www\.)?(?:twitter\.com|x\.com|linkedin\.com)/", re.IGNORECASE)
+    r"^https?://(?:[\w-]+\.)*(?:twitter\.com|x\.com|linkedin\.com|researchgate\.net"
+    r"|academia\.edu|scholar\.google\.[a-z.]+)/", re.IGNORECASE)
 
 
 def _first_sentence(rx, html):
@@ -709,7 +724,7 @@ def _apply_shortlist(targets: list[dict], exempt_keys: set, topic_ids: list[str]
 
 
 def _process_targets(conn, run_id, targets, fetcher, snaps, *, stats, resume,
-                     progress=None, should_stop=None) -> int:
+                     progress=None, should_stop=None, orcid_client=None) -> int:
     """Deep-dive each target (fetch → extract → claim) — the shared core of run_offline/run_live.
 
     Returns the gap count (targets with any still-``blocked`` field or an unchecked walled social
@@ -726,7 +741,8 @@ def _process_targets(conn, run_id, targets, fetcher, snaps, *, stats, resume,
     """
     total = len(targets)
     for i, t in enumerate(targets, 1):
-        _deep_dive_one(conn, run_id, t, fetcher, snaps, stats=stats, resume=resume)
+        _deep_dive_one(conn, run_id, t, fetcher, snaps, stats=stats, resume=resume,
+                       orcid_client=orcid_client)
         _emit_progress(progress, ("deep_dive_progress", i, total))
         if _stop_requested(should_stop):
             stats["cancelled"] = True
@@ -734,14 +750,42 @@ def _process_targets(conn, run_id, targets, fetcher, snaps, *, stats, resume,
     return sum(1 for t in targets if _target_open_gap(conn, t["id"]))
 
 
-def _deep_dive_one(conn, run_id, t, fetcher, snaps, *, stats, resume) -> None:
+def _page_url_for(t: dict, orcid_client, stats) -> str | None:
+    """The page to deep-dive — resolving an ORCID profile URL to the professor's real page.
+
+    ``ladder._author_url`` falls back to the author's ORCID profile because OpenAlex almost
+    never carries a homepage. But that profile is a JavaScript app whose HTML holds no
+    record, so fetching it can only ever produce ``blocked`` — measured at 52 of 52 targets,
+    a whole run with zero facts (`BLOCKERS.md` B-003). Asking ORCID's public API for the
+    record's researcher URLs is the same fact from a machine-readable endpoint (D-072).
+
+    Walled hosts are skipped rather than fetched: a ResearchGate or LinkedIn URL is a real
+    recruiting source the tool must NOT scrape (D-039/D-043/D-044), and the existing
+    ``walled_social`` path already routes advertised ones to the human rung.
+
+    Returning None when nothing resolves is deliberate — it SKIPS the fetch of a page known
+    in advance to be walled, so a doomed request never spends the host's rate limit.
+    """
+    url = t.get("url")
+    if orcid_client is None or t.get("url_kind") != "orcid":
+        return url
+    for candidate in orcid_client.researcher_urls(t.get("orcid") or url):
+        if _WALLED_SOCIAL.search(candidate):
+            continue
+        stats["orcid_resolved"] = stats.get("orcid_resolved", 0) + 1
+        return candidate
+    return None
+
+
+def _deep_dive_one(conn, run_id, t, fetcher, snaps, *, stats, resume,
+                   orcid_client=None) -> None:
     """One target of ``_process_targets``: fetch → extract → claim (semantics per its docstring)."""
     pid = t["id"]
     if resume and runs.target_stage_done(conn, "person", pid, "deep_dive"):
         stats["resumed_skipped"] += 1
         return
     task = runs.add_task(conn, run_id, "person", pid, stage="deep_dive")
-    url = t.get("url")
+    url = _page_url_for(t, orcid_client, stats)
     res = fetcher.fetch(url) if url else None
     if res is not None and res.ok:
         html = snaps.load(res.snapshot_hash)
@@ -792,7 +836,15 @@ def _deep_dive_one(conn, run_id, t, fetcher, snaps, *, stats, resume) -> None:
     else:
         for field in _EXTRACTORS:
             _record_blocked(conn, pid, field)
-        err = res.error if res is not None else "no page url — open for the human rung"
+        if res is not None:
+            err = res.error
+        elif t.get("url_kind") == "orcid":
+            # Distinct from "no page url": the target HAS an ORCID, its public record was
+            # read, and it simply lists no page we may fetch. Saying so keeps the human-rung
+            # note actionable — the reader knows the registry was checked, not skipped.
+            err = "ORCID record lists no fetchable researcher URL — open for the human rung"
+        else:
+            err = "no page url — open for the human rung"
         runs.set_task_status(conn, task, "blocked", last_error=err)
 
 
@@ -960,8 +1012,12 @@ def run_live(plan: dict, transport: Transport, snap_root, *, email: str,
         # the same PARTIAL disclosure the coverage line carries, as a §4.1 event (D-037)
         _emit_progress(progress, ("partial_warning",
                                   _partial_warning_message(stats["truncated"])))
+    # Live runs only: resolves an ORCID profile URL to the professor's real page (D-072).
+    # Built here rather than inside the deep-dive so the offline/demo path stays network-free
+    # and every existing cassette test keeps passing unchanged (D-011/D-063).
     gaps = _process_targets(conn, run_id, deep_dive, fetcher, snaps, stats=stats,
-                            resume=resume, progress=progress, should_stop=should_stop)
+                            resume=resume, progress=progress, should_stop=should_stop,
+                            orcid_client=orcid_mod.OrcidClient(transport))
     if stats.get("cancelled"):
         # cancelled wins the status audit: a stopped run NEVER reports a finalized
         # status, whatever the gap count of the processed targets says.
