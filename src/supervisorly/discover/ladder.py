@@ -28,13 +28,45 @@ def _country_of(plan: dict) -> str | None:
     return plan.get("country") or (plan.get("countries") or [None])[0]
 
 
+def plan_fields(plan: dict) -> list[str]:
+    """Every field the student named, de-duplicated, best-effort order preserved.
+
+    Accepts both shapes so one reader serves old plans and new: ``fields`` (a list, what the
+    wizard now sends) and ``field``/``subfield`` (a single string, what every plan before it
+    carried and what the CLI still writes).
+    """
+    def clean(values) -> list[str]:
+        out: list[str] = []
+        for v in values:
+            if isinstance(v, str) and v.strip() and v.strip() not in out:
+                out.append(v.strip())
+        return out
+
+    # `fields` WINS OUTRIGHT when present — it is not merged with `field`. The page sends
+    # both, with `field` as the readable join ("ML · AI safety"), so merging them would add a
+    # phantom third field named after the join, which nobody works in and which OpenAlex
+    # would resolve to nothing (or worse, to something).
+    listed = clean(plan.get("fields") or [])
+    return listed or clean([plan.get("field"), plan.get("subfield")])
+
+
 def resolve_topic_ids(plan: dict, oa) -> list[str]:
-    """The plan's topic IDs, or resolve them from the free-text field via OpenAlex (D-058)."""
+    """The plan's topic IDs, or resolve them from the free-text field(s) via OpenAlex (D-058).
+
+    With several fields this resolves EACH and merges, order preserved and de-duplicated —
+    "ML" and "AI safety" are two doors into overlapping literatures and the union is the
+    honest answer. Joining them into one query string instead would ask OpenAlex for a field
+    nobody works in.
+    """
     ids = list(plan.get("resolved_topic_ids") or [])
     if ids:
         return ids
-    field = plan.get("field") or plan.get("subfield")
-    return oa.topic_ids(field) if field else []
+    merged: list[str] = []
+    for field in plan_fields(plan):
+        for tid in (oa.topic_ids(field) or []):
+            if tid not in merged:
+                merged.append(tid)
+    return merged
 
 
 def _matches(inst: dict, w: str) -> bool:

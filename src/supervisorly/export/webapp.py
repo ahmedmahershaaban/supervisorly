@@ -281,7 +281,7 @@ var SLOW_FACTOR = 1.5;         /* §4.2: past 1.5x the soft expectation -> calm 
 var state = {
   step: 1,
   email: "", intent: "pre_phd", country: "", universities: [], uniMode: "all",
-  field: "", variants: [], expansionOff: false, merged: null, topicTotal: 0,
+  field: "", fields: [], variants: [], expansionOff: false, merged: null, topicTotal: 0,
   jobId: null, jobStart: 0, jobEnd: 0, lastOk: 0, watching: false,
   pollTimer: null, tickTimer: null, phaseKey: "", phaseEnter: 0, slowShown: false
 };
@@ -415,6 +415,47 @@ function addUniversity(){
   if(v && state.universities.indexOf(v)<0){ state.universities.push(v); renderChips(); }
   inp.value = ""; inp.focus();
 }
+/* ── step 2: several fields, not one ──────────────────────────────────────────
+   Most people work across more than one area, and being made to pick a single phrase first
+   is the tool narrowing the search on the student's behalf before it has shown them
+   anything. Each field is expanded and mapped independently and the topics are merged, so
+   "ML" + "AI safety" produces the union of both literatures to choose from. MAX_FIELDS
+   mirrors cli.PLAN_MAX_FIELDS: each field costs an expansion plus one map call per phrasing,
+   so this is the §5.2 throttle budget of a single click as much as it is a payload cap. */
+var MAX_FIELDS = 6;
+function renderFieldChips(){
+  var host = document.getElementById("fieldChips");
+  host.innerHTML = state.fields.map(function(f,i){
+    return '<span class="chip">'+esc(f)+
+      '<button type="button" data-fld="'+i+'" aria-label="remove '+esc(f)+'">×</button></span>';
+  }).join("");
+  host.querySelectorAll("button[data-fld]").forEach(function(b){
+    b.addEventListener("click", function(){
+      state.fields.splice(Number(b.getAttribute("data-fld")),1); renderFieldChips(); });
+  });
+}
+function addField(){
+  var inp = document.getElementById("field"), v = inp.value.trim();
+  if(!v) return;
+  if(state.fields.length >= MAX_FIELDS){
+    showErr("err-field","that is the most fields one search can carry ("+MAX_FIELDS+") — "+
+            "remove one to add another."); return;
+  }
+  /* case-insensitive, so "ML" and "ml" are not two searches of the same thing */
+  var dup = state.fields.some(function(x){ return x.toLowerCase()===v.toLowerCase(); });
+  if(!dup) state.fields.push(v);
+  inp.value = ""; inp.focus(); renderFieldChips();
+}
+/* Everything the student meant: the chips PLUS whatever is still sitting unadded in the box.
+   Forgetting to press "+ add" before Understand is the obvious mistake, and silently
+   dropping that text would search for something they did not ask for. */
+function gatherFields(){
+  var typed = (document.getElementById("field").value||"").trim();
+  var all = state.fields.slice();
+  if(typed && !all.some(function(x){ return x.toLowerCase()===typed.toLowerCase(); }))
+    all.push(typed);
+  return all.slice(0, MAX_FIELDS);
+}
 function gatherYou(){
   state.email = document.getElementById("email").value.trim();
   var r = document.querySelector('input[name="intent"]:checked');
@@ -505,13 +546,34 @@ function mergeMaps(results){
 }
 function understand(){
   clearErrs();
-  var f = document.getElementById("field").value.trim();
-  if(!f){ showErr("err-field","describe your field first — a few words are enough."); return; }
+  var fields = gatherFields();
+  if(!fields.length){
+    showErr("err-field","describe your field first — a few words are enough."); return; }
   var btn = document.getElementById("understand");
   btn.disabled = true;
-  state.field = f;
-  setFieldStatus("Understanding your field… (a cold start can take 10–30 s — warming up…)");
-  expandField(f).then(function(variants){
+  state.fields = fields;
+  renderFieldChips();
+  document.getElementById("field").value = "";
+  /* `field` stays a single readable string for every existing consumer (the plan, the run
+     header, the worker log); `fields` is the real list. Derived, never a second source of
+     truth. */
+  state.field = fields.join(" · ");
+  setFieldStatus(fields.length>1
+    ? "Understanding "+fields.length+" fields… (a cold start can take 10–30 s)"
+    : "Understanding your field… (a cold start can take 10–30 s — warming up…)");
+  /* Expand each field independently, then map every phrasing from every field. One field
+     failing to expand costs that field its synonyms, never the whole click. */
+  Promise.all(fields.map(function(f){
+    return expandField(f).then(function(vs){ return vs; },
+                               function(){ return [f]; });
+  })).then(function(perField){
+    var variants = [], seen = {};
+    perField.forEach(function(vs){
+      (vs||[]).forEach(function(v){
+        var k = String(v).toLowerCase();
+        if(!seen[k]){ seen[k] = 1; variants.push(v); }
+      });
+    });
     setFieldStatus("Mapping "+variants.length+" phrasing"+
       (variants.length>1?"s":"")+" to the subject index…");
     return Promise.all(variants.map(mapVariant));
@@ -707,6 +769,10 @@ function startScan(){
     country: state.country,
     resolved_topic_ids: checkedTopics(),
     field: state.field,
+    /* The list is the truth; `field` above is its readable join. Both travel so an older
+       reader keeps working and a newer one can tell "ML · AI safety" from a field actually
+       named that. */
+    fields: state.fields.slice(),
     university_mode: state.uniMode,
     universities: state.universities.slice(),
     targets: parseProfs(document.getElementById("profs").value),
@@ -985,8 +1051,12 @@ document.addEventListener("DOMContentLoaded", function(){
   document.getElementById("uniInput").addEventListener("keydown", function(e){
     if(e.key==="Enter"){ e.preventDefault(); addUniversity(); } });
   document.getElementById("understand").addEventListener("click", understand);
+  document.getElementById("fieldAdd").addEventListener("click", addField);
+  /* Enter ADDS the field rather than submitting: with a multi-value input, submitting on the
+     first Enter would make a second field unreachable from the keyboard. Understand is the
+     explicit button, as it already was. */
   document.getElementById("field").addEventListener("keydown", function(e){
-    if(e.key==="Enter"){ e.preventDefault(); understand(); } });
+    if(e.key==="Enter"){ e.preventDefault(); addField(); } });
   document.getElementById("back2").addEventListener("click", function(){ showStep(1); });
   document.getElementById("toStep4").addEventListener("click", step3Next);
   document.getElementById("back3").addEventListener("click", function(){ showStep(2); });
@@ -1145,11 +1215,17 @@ def build_webapp(*, api_base: str = "") -> str:
   <section class="step hidden" id="s2">
     <div class="step-head"><span class="step-code">STEP 02</span><h2>Field</h2></div>
     <p class="why">A few words in your own phrasing — "NLP", "mechanistic interpretability",
-      "causal ML". <b>Understand</b> expands the phrasing (best-effort) and maps it to the
-      OpenAlex subject index. If smart expansion is unavailable, your words are used
-      directly — never a fake result.</p>
-    <label for="field">Your field, in your words</label>
-    <input type="text" id="field" placeholder="e.g. mechanistic interpretability">
+      "causal ML". Add <b>as many as you like</b>: most people work across more than one, and
+      "ML", "AI safety" and "NLP" are three doors into overlapping literatures. Each one is
+      expanded (best-effort) and mapped to the OpenAlex subject index, and the results are
+      merged into one set of meanings to choose from. If smart expansion is unavailable, your
+      words are used directly — never a fake result.</p>
+    <label for="field">Your field(s), in your words</label>
+    <div class="urow">
+      <input type="text" id="field" placeholder="e.g. machine learning">
+      <button type="button" class="btn ghost" id="fieldAdd">+ add</button>
+    </div>
+    <div class="chips" id="fieldChips"></div>
     <div class="err" id="err-field" role="alert"></div>
     <p class="note hidden" id="fieldStatus" role="status"></p>
     <div class="btnrow">

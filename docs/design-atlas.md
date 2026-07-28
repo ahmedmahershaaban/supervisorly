@@ -335,9 +335,9 @@ terminal state is resumable, so there is no dead end.
 %%{init:{'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif,system-ui,sans-serif','fontSize':'14px','primaryColor':'#e6edfb','primaryBorderColor':'#3f5bc4','primaryTextColor':'#18203a','lineColor':'#95a0b5','secondaryColor':'#eef1f6','tertiaryColor':'#f6f8fb','clusterBkg':'#f6f8fb','clusterBorder':'#cbd3e2','edgeLabelBackground':'#ffffff'}}}%%
 flowchart TD
   W1["1 You — intent · country · email<br/>email is not a login"]
-  W2["2 Field — Understand"]
-  EXP["/api/expand — variants<br/>fail-closed: no key → your own words"]
-  MAP["/api/map — once per phrasing<br/>merged in the browser (D-070)"]
+  W2["2 Fields — up to 6, Understand<br/>ML · AI safety · NLP"]
+  EXP["/api/expand — per FIELD<br/>fail-closed: no key → your own words"]
+  MAP["/api/map — once per phrasing, all fields<br/>merged in the browser (D-070)"]
   W3["3 Topics — checkbox tree<br/>or name professors directly"]
   W4["4 Scope — universities · shortlist<br/>cost stated BEFORE it is spent"]
   START["POST /api/scan"]

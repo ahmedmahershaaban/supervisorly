@@ -319,6 +319,11 @@ PLAN_REQUIRED_KEYS = ("intent_kind", "country", "resolved_topic_ids", "field",
                       "university_mode", "universities")
 
 # Valid enum values a plan may carry — mirrors the argparse choices of the overriding flags.
+#: How many distinct fields one plan may carry. Each one costs an expansion and a map call
+#: per phrasing, so this bounds the §5.2 throttle spend of a single "Understand" click as
+#: much as it bounds the payload.
+PLAN_MAX_FIELDS = 6
+
 PLAN_UNIVERSITY_MODES = ("all", "prioritise", "only")
 PLAN_INTENT_KINDS = ("training", "pre_master", "pre_phd", "mentor", "master", "phd",
                      "postdoc")
@@ -372,6 +377,19 @@ def _plan_value_errors(data: dict) -> list[str]:
 
     check_str_list("resolved_topic_ids")
     check_str_list("universities")
+    check_str_list("fields")
+    # A student rarely has exactly one way to say what they work on: "ML", "AI safety" and
+    # "NLP" are three doors into overlapping literatures, and making them pick one door first
+    # is the tool deciding their scope for them. `fields` carries all of them; `field` remains
+    # the single human-readable string every existing consumer already reads, derived from
+    # them, so nothing downstream has to learn a new shape.
+    fields = data.get("fields")
+    if isinstance(fields, list):
+        if len(fields) > PLAN_MAX_FIELDS:
+            errors.append(f"'fields' accepts at most {PLAN_MAX_FIELDS} entries, "
+                          f"got {len(fields)}")
+        if any(isinstance(f, str) and not f.strip() for f in fields):
+            errors.append("'fields' must not contain blank entries")
     for key in ("country", "university_mode", "intent_kind", "field", "email"):
         v = data.get(key)
         if v is not None and not isinstance(v, str):
