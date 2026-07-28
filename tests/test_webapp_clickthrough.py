@@ -209,6 +209,7 @@ const snap = (label) => ({
   step: sandbox.state.step,
   phase: byId("phaseLine").textContent,
   warn: byId("warnList").innerHTML,
+  err: byId("err-progress").textContent,
   cancel: vis("cancelBtn"), resume: vis("resumeBtn"), openDash: vis("openDash"),
 });
 
@@ -250,6 +251,11 @@ let threw = null;
     /* step 5 — watch, then CANCEL */
     fireIntervals(); await flush();             // poll -> running
     trace.push(snap("running"));
+
+    /* plant a stale error, exactly as a timed-out click would, and prove the next
+       authoritative status clears it rather than letting the two coexist */
+    sandbox.showErr("err-progress", "a click that failed earlier");
+    trace.push(snap("stale error planted"));
     byId("cancelBtn").fire("click");
     await flush();
     trace.push(snap("cancel requested"));
@@ -268,8 +274,15 @@ let threw = null;
     await flush();
     trace.push(snap("after open dashboard"));
 
+    const he = sandbox.humanError;
     console.log(JSON.stringify({threw, trace, requests, opened, topicValues, phaseLog,
-                                jobNote: byId("jobNote").innerHTML}));
+                                jobNote: byId("jobNote").innerHTML,
+                                humanError: {
+                                  offline: he(0, null, {offline: true}),
+                                  timeout: he(0, null, {name: "AbortError"}),
+                                  generic: he(0, null, new Error("boom")),
+                                  http500: he(500, null, null),
+                                }}));
   } catch (e) {
     console.log(JSON.stringify({threw: String((e && e.stack) || e), trace, requests,
                                 opened, topicValues: [], phaseLog, jobNote: ""}));
@@ -441,6 +454,37 @@ def test_a_hostile_api_never_reaches_the_dom_unescaped(tmp_path):
     # the hostile topic name reached the tree markup — escaped, and still selectable
     assert rep["topicValues"] == ["T1"]
     assert all("<img" not in s["warn"] for s in rep["trace"])
+
+
+def test_a_stale_error_never_survives_into_a_terminal_state(tmp_path):
+    """Ahmed hit this on the live site: a finished scan showed BOTH "Done — your dashboard
+    is ready" and "you seem to be offline" at once. An earlier failed click left its banner
+    up, and renderStatus never cleared it, so the page asserted two contradictory things
+    and the stale one looked like the current one."""
+    rep = _run(tmp_path, _scenario())
+
+    # the plant must actually have landed, or the assertions below prove nothing
+    planted = _at(rep, "stale error planted")
+    assert planted["err"] == "a click that failed earlier", \
+        "the harness failed to plant an error — this test would pass vacuously"
+
+    # …and the next authoritative status must have cleared it
+    done = _at(rep, "done")
+    assert done["phase"] == "Done — your dashboard is ready."
+    assert done["err"] == "", f"a stale error survived into 'done': {done['err']!r}"
+    assert _at(rep, "after open dashboard")["err"] == ""
+
+
+def test_only_a_real_offline_state_is_reported_as_offline(tmp_path):
+    """The offline message used to fire on ANY rejection, so a request that merely timed
+    out told a connected student their network was down — sending them to check the wifi
+    instead of pressing the button again."""
+    rep = _run(tmp_path, _scenario())
+    h = rep["humanError"]
+    assert "offline" in h["offline"], h["offline"]
+    assert "offline" not in h["timeout"] and "longer than we allow" in h["timeout"], h["timeout"]
+    assert "offline" not in h["generic"] and "could not be completed" in h["generic"], h["generic"]
+    assert "offline" not in h["http500"], h["http500"]
 
 
 def test_the_client_side_merge_is_the_documented_choice(run):

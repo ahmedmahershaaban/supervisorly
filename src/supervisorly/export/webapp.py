@@ -301,9 +301,20 @@ function humanError(status, body, err){
     /* OpenAlex itself 429'd: the honest midnight-UTC message (§5.2), never a fake empty */
     return msg || "OpenAlex's free daily budget is exhausted — it resets at midnight UTC. "+
                   "Nothing was lost; try again then.";
-  if(err || (navigator.onLine === false))
+  /* Only claim the student is offline when they actually are. This used to fire on ANY
+     rejection (`if(err || ...)`), so a request that merely timed out — a cold start
+     overrunning REQ_TIMEOUT_MS, say — told a perfectly connected user they had no
+     network. A wrong diagnosis is worse than a vague one: it sends them to check their
+     wifi instead of pressing the button again. */
+  if((err && err.offline) || navigator.onLine === false)
     return "you seem to be offline — nothing was lost; your place is kept. "+
            "Reconnect and try again.";
+  if(err && (err.name === "AbortError" || err.aborted))
+    return "that took longer than we allow for one request — nothing was lost; your "+
+           "place is kept. Try again.";
+  if(err)
+    return "that request could not be completed — nothing was lost; your place is kept. "+
+           "Try again.";
   if(status === 429) return msg || "too many requests — wait a little and try again.";
   if(status >= 500) return "something went wrong on our side — nothing was lost. "+
                           "Try again in a moment.";
@@ -735,6 +746,13 @@ function checkSlow(phase, counts){
   }
 }
 function renderStatus(b){
+  /* A fresh status from the server supersedes any earlier transient error. Without this a
+     click that timed out (cancel, resume, open) left its red banner on screen, so a
+     finished scan showed "Done — your dashboard is ready" and "you seem to be offline"
+     at the same time — two contradictory claims, one of them stale. The server's current
+     state is the truthful one; clear the older complaint. */
+  var ep = document.getElementById("err-progress");
+  if(ep && ep.textContent){ ep.textContent = ""; ep.classList.remove("on"); }
   var counts = b.counts || {};
   var prog = Array.isArray(b.progress) ? b.progress : [];
   var last = prog.length ? prog[prog.length-1] : null;
