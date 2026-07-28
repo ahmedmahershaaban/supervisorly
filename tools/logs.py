@@ -1,6 +1,7 @@
 """Read the deployed backend's logs without remembering gcloud filter syntax.
 
     python tools/logs.py errors            # anything at ERROR or worse (default 6h)
+    python tools/logs.py client            # what BROWSERS reported went wrong (D-071)
     python tools/logs.py job <job_id>      # everything about one scan, both tiers
     python tools/logs.py tail              # recent activity across functions + worker
     python tools/logs.py runs              # Cloud Run job executions, one per scan
@@ -9,13 +10,24 @@
     --hours N   how far back to look (default 6)
     --limit N   max entries (default 50)
 
-Two tiers produce logs, and they answer different questions:
+Three tiers produce logs, and they answer different questions:
 
   * the **Functions** (`api`, `expand`, `map`, `scan_*`, `webapp`) — every HTTP request.
     A 500 from the page shows up here with a Python traceback.
   * the **Cloud Run worker** (`supervisorly-scan-worker`) — one execution per scan, with
     every phase event: start (country, field, scope), enumerated, deep_dive_progress,
     partial_warning, scoring, exported, finished (counts + warnings).
+  * the **browser** (D-071) — errors the page itself hit. This is the only tier that sees a
+    failure which never reached the server, and those are the expensive ones: the "Open
+    dashboard" button was broken for every user while the backend logged a healthy day,
+    because the browser blocked the request before it was ever sent. `client` mode reads
+    them; they are WARNING, so `errors` mode will NOT show them.
+
+**Every `/api/**` path is served by ONE function, `api`.** The per-endpoint functions
+(`clientlog`, `scan_start`, `map`, …) are deployed as direct-invocation aliases and normally
+receive NO traffic, because Hosting rewrites `/api/**` to `api` (firebase.json). So filtering
+on `service_name="clientlog"` to find browser reports returns nothing while the feature works
+perfectly — verified the hard way. Filter on the payload, not the service.
 
 **Read `jsonPayload`, not `textPayload`.** The worker prints one JSON object per event, and
 Cloud Logging parses those into `jsonPayload` — so a query that only formats `textPayload`
@@ -74,7 +86,8 @@ def read(filt: str, hours: int, limit: int, fmt: str) -> str:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("mode", choices=["errors", "job", "tail", "runs", "where"])
+    ap.add_argument("mode",
+                    choices=["errors", "client", "job", "tail", "runs", "where"])
     ap.add_argument("job_id", nargs="?")
     ap.add_argument("--hours", type=int, default=6)
     ap.add_argument("--limit", type=int, default=50)
@@ -95,6 +108,17 @@ def main() -> int:
         out = read("severity>=ERROR", a.hours, a.limit,
                    FMT).strip()
         print(out or f"  no errors in the last {a.hours}h")
+        return 0
+
+    if a.mode == "client":
+        # Payload-filtered, NOT service-filtered — see the module docstring. `source="client"`
+        # is stamped by the server, never by the browser, so a page cannot forge its way into
+        # (or out of) this view.
+        out = read('jsonPayload.source="client"', a.hours, a.limit,
+                   ("value(timestamp,jsonPayload.kind,jsonPayload.job,jsonPayload.message,"
+                    "jsonPayload.where,jsonPayload.ua)")).strip()
+        print(out or f"  no browser reported an error in the last {a.hours}h")
+        print("\n  (a clean run reports NOTHING by design — empty here is the good case)")
         return 0
 
     if a.mode == "tail":
