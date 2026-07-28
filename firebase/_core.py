@@ -46,28 +46,6 @@ STATUS_LIMIT_PER_HOUR = 3000
 #: it is the one route that writes attacker-influenced text into our own logging.
 CLIENTLOG_LIMIT_PER_HOUR = 40
 
-# ═══════════════════════════════════════════════════════════════════════════════════════
-# TEMPORARY_THROTTLE_LIFT — MUST BE REVERTED. Ahmed asked for the caps to be removed for a
-# multi-subject test pass (law / science / sport / engineering), which needs far more than
-# 5 scans an hour, and to be put back afterwards.
-#
-# This is ONE self-contained block so restoring is deleting it, not re-typing numbers into
-# the constants above and hoping each one goes back to what it was. `git revert` of the
-# commit that added it is the intended undo.
-#
-# While this is live the endpoints are effectively open: the §5.2 caps exist to protect a
-# SHARED source budget (OpenAlex/ROR are used by everyone, not just us) and to bound the
-# bill, so this must not outlive the test pass.
-_TEMPORARY_THROTTLE_LIFT = True
-if _TEMPORARY_THROTTLE_LIFT:                                    # noqa: SIM108
-    EXPAND_LIMIT_PER_HOUR = 10_000
-    MAP_LIMIT_PER_HOUR = 10_000
-    SCAN_LIMIT_PER_HOUR = 10_000
-    RESUME_LIMIT_PER_HOUR = 10_000
-    CANCEL_LIMIT_PER_HOUR = 10_000
-    RESULT_LIMIT_PER_HOUR = 10_000
-# ═══════════════════════════════════════════════════════════════════════════════════════
-
 #: §5 — expansion results are cached per normalized field for 30 days.
 CACHE_TTL_DAYS = 30
 
