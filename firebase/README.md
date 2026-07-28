@@ -251,6 +251,27 @@ source change is skipped entirely (`No changes detected`) and proves nothing.
 firebase deploy --only functions,firestore,storage
 ```
 
+> ### ⚠️ Changing engine code? The tag must move, or the deploy is a no-op
+>
+> `firebase/*.py` deploys from local disk. **`src/supervisorly/**` does not** — the
+> Functions pip-install it from the tag pinned in `requirements.txt`. Edit the engine,
+> commit, deploy, and Cloud Build happily installs the OLD package: exit code 0, every
+> function healthy, live site unchanged. Nothing errors. This has now cost two deploys.
+>
+> ```bash
+> git tag -a web-vN -m "..." && git push origin web-vN
+> # then repoint the tarball URL in firebase/requirements.txt to web-vN
+> ```
+>
+> **Then prove it took**, rather than trusting the exit code:
+>
+> ```bash
+> python tools/verify_deploy.py
+> ```
+>
+> It builds the page from your working tree and compares it byte-for-byte with what the
+> live site serves. Mismatch = stale tag.
+
 **On PowerShell, quote the list** — `--only "functions,firestore,storage"`. Unquoted,
 PowerShell splits on the commas and passes three separate arguments, and the CLI answers
 `Cannot understand what targets to deploy/serve`.

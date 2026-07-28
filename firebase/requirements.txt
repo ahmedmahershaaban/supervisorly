@@ -5,4 +5,4 @@ google-cloud-storage>=2.16
 # Installed from the release TARBALL, not git+https: the python:3.11-slim base image (and
 # some buildpacks) ship no `git`, and pip then dies with "Cannot find command 'git'".
 # A tag tarball needs no git binary and is still immutable — tags don't float, branches do.
-supervisorly @ https://github.com/ahmedmahershaaban/supervisorly/archive/refs/tags/web-v2.tar.gz
+supervisorly @ https://github.com/ahmedmahershaaban/supervisorly/archive/refs/tags/web-v3.tar.gz
