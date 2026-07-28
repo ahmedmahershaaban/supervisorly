@@ -10,6 +10,104 @@ it, not by deleting it.
 
 ---
 
+## B-004 — Rendering JS pages and LLM extraction: what the decisions actually permit
+
+**Status:** OPEN — needs Ahmed, but **less of a reversal than I first told him.**
+**Raised:** 2026-07-28, after Ahmed asked why the tool does not drive a browser and hand the
+page to an LLM to extract fields as JSON.
+
+### First, a correction I owe the record
+
+I told Ahmed this was forbidden: *"Driving a browser server-side and sending page text to an
+LLM to extract fields is what D-009 forbids and what D-043/D-044 assign to your browser."*
+I then read the decisions instead of trusting my memory of them, and **two of those three
+claims are wrong.**
+
+**D-009 does not forbid it — it describes it, and it is not even locked.** Status:
+*provisional*. Text: *"Scripts fetch, parse, normalise and cache; language models are used
+only where judgement is genuinely required (classification, summarisation, ambiguous
+matching)."* Deciding whether a page means "I am recruiting PhD students" **is
+classification**. D-009 is the split Ahmed is asking for, not a prohibition on it. What the
+repo enforces today — zero model calls inside `src/supervisorly/{discover,fetch,model,score,
+export}` — is one *implementation* of D-009 (the LLM lives in `.claude/agents/`), not the
+decision itself.
+
+**D-043/D-044 assign WALLED sources to the human rung, not JavaScript ones.** D-044 is
+explicit that the professor's own linked pages "are public and are fetched directly …
+first-class treatment, not enrichment", and routes to the human only what is *walled*:
+login, bot-wall, X/LinkedIn. An ORCID profile is **public and robots-allowed** — it merely
+needs JavaScript to render. That is a limitation of our fetcher, not a wall we are
+respecting. I conflated "we cannot read it" with "we are not permitted to read it".
+
+**The one claim that holds is D-068**, and only partly: *"The deterministic layer stays
+LLM-free for facts."* That constrains **where** the model may run, not whether it may.
+
+### The two questions are separable — and only one is a decision
+
+**(a) Render JavaScript before extracting.** Needs no reversal of anything. It is a fetcher
+capability: same robots gate, same snapshot, same quote gate, same refusal to touch walled
+hosts. It would have to be honest about one thing — a rendered snapshot is what the *browser*
+built, not bytes the server sent, so the snapshot record should say so.
+
+**(b) Let a model read the snapshot and propose claims.** This is the real question, and
+D-009 already answers it in principle. What is missing is not permission but a **place**:
+the hosted tier has no interpretation step at all. The CLI surface has one — five agents in
+`.claude/agents/` — and the web product simply never got the equivalent.
+
+### The roles, as they exist today
+
+| role | where it lives | what it decides | reaches the student? |
+|---|---|---|---|
+| discovery ladder | `discover/` | which institutions and people exist | yes, as names |
+| fetcher | `fetch/` | what bytes a URL returned, robots-gated | as snapshots |
+| deterministic extractors | `pipeline._EXTRACTORS` | regex-shaped signals only | yes, quote-gated |
+| **quote gate** | `model/claims.py` | **rejects any claim whose quote is absent from its snapshot** | it is the gate |
+| `recruiting-analyst` | `.claude/agents/` | is this person recruiting, for which cycle | **CLI only** |
+| `eligibility-analyst` | `.claude/agents/` | admissions rules, funding, language bands | **CLI only** |
+| `evidence-auditor` | `.claude/agents/` | re-verifies a risk-weighted sample | **CLI only** |
+| `profile-synthesist` | `.claude/agents/` | the per-professor narrative | **CLI only** |
+| human rung (D-043) | Claude for Chrome | walled pages, returned as MD with quotes | yes, quote-gated |
+
+The web product ships rows 1–4 and none of 5–8. That is the actual gap Ahmed keeps hitting:
+**the hosted tier has no judgement layer, so it can only report what a regex found.**
+
+### What must NOT move, whatever is decided
+
+- **D-010 quote gate.** A model may *propose* a claim; it may never *be* the evidence. The
+  quote it returns must be found verbatim in the stored snapshot or the claim is rejected in
+  code. This already exists and is the reason an LLM extractor is safe here at all — a
+  hallucinated deadline dies at the gate rather than reaching a student.
+- **D-024.** Model judgements do not export; facts with citations do.
+- **D-039/D-005.** Robots stays; a login or bot-wall is still never defeated. Rendering JS on
+  a *public* page is not defeating anything; running a headless browser at ResearchGate to
+  get past its 403 would be, and must stay refused.
+- **D-068 fail-closed.** No key, any error → the step is skipped and the scan still finishes.
+  Nobody's search dies because a model was unavailable.
+
+### Recommendation
+
+**Do (a) now, and do (b) as an explicitly-bounded new decision.** Concretely:
+
+1. **Render-then-extract for public JS pages.** Highest value per unit of risk, and it is
+   the direct fix for the ORCID/Cairo class of failure. Note the honest limit found on
+   2026-07-28: it will *not* rescue `cu.edu.eg`, whose TLS chain is broken at the server, and
+   `scholar.cu.edu.eg` 403s bots — a browser does not fix either.
+2. **An interpretation step in the worker**, fail-closed, shortlist-only. The D-009 cost
+   rationale ("an LLM call per professor across several hundred professors") was written
+   before the shortlist gate existed; the gate already bounds this to ~25 professors per
+   scan, which is affordable on Flash-Lite and is the same budget shape as D-068.
+3. **Every proposed claim goes through the existing quote gate unchanged.** No new trust
+   path, no exemption, no "the model said so" field.
+4. Record it as a decision that *supersedes the provisional D-009 wording* rather than
+   contradicting it — D-009 is provisional precisely so it can be settled once the real
+   shape is known, and this is that moment.
+
+The reason to write it down rather than just build it: the difference between "a model
+proposes claims that code verifies" and "a model produces the answer" is one refactor wide,
+and only the first is defensible. Ahmed should own that line explicitly, as he did with D-072.
+
+---
+
 ## B-003 — Every hosted scan returns zero facts, and the only fix goes through a `Disallow: /`
 
 **Status:** decided and shipped ([D-072](DECISIONS.md#d-072--robotstxt-governs-the-crawler-not-the-documented-api-client),
