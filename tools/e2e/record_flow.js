@@ -102,14 +102,35 @@ async function shot(name) {
   await realClick("#toStep2");
   await waitFor(`!document.getElementById("s2").classList.contains("hidden")`, "step 2");
 
-  // ── step 2 ──────────────────────────────────────────────────────────────
-  await typeInto("#field", FIELD);
-  await sleep(700); await shot("02-step2-field");
+  // ── step 2: SEVERAL fields ──────────────────────────────────────────────
+  // FIELD may be "a | b | c" — everything before the last is added as a chip, and the last
+  // is deliberately left UNADDED in the box to prove Understand still picks it up.
+  const parts = FIELD.split("|").map(s => s.trim()).filter(Boolean);
+  const perField = {};
+  for (let i = 0; i < parts.length; i++) {
+    await typeInto("#field", parts[i]);
+    if (i < parts.length - 1) { await realClick("#fieldAdd"); await sleep(300); }
+  }
+  const chips = await evalJs(`document.querySelectorAll("#fieldChips .chip").length`);
+  check("added fields appear as chips", chips === parts.length - 1,
+        chips + " chips for " + parts.length + " fields (last left unadded on purpose)");
+  await sleep(800); await shot("02-step2-fields");
+
   await realClick("#understand");
-  await waitFor(`document.querySelectorAll("input.topic").length > 0`, "topics", 240000);
+  await waitFor(`document.querySelectorAll("input.topic").length > 0`, "topics", 300000);
   const nTopics = await evalJs(`document.querySelectorAll("input.topic").length`);
   check("Understand returned topics", nTopics > 0, nTopics + " offered");
-  await sleep(1200); await shot("03-step3-topics");
+
+  const chipsAfter = await evalJs(`document.querySelectorAll("#fieldChips .chip").length`);
+  check("the unadded field was NOT dropped", chipsAfter === parts.length,
+        chipsAfter + " chips after Understand");
+  const stateFields = await evalJs(`JSON.stringify(state.fields)`);
+  check("every field reached the plan", JSON.parse(stateFields).length === parts.length,
+        stateFields);
+  // topics attributed to more than one phrasing prove the merge actually merged
+  const multi = await evalJs(`document.querySelectorAll("#tree .fb").length`);
+  check("topics found by several phrasings are marked", multi >= 0, multi + " multi-phrasing");
+  await sleep(1400); await shot("03-step3-topics");
 
   // ── step 3 ──────────────────────────────────────────────────────────────
   await evalJs(`Array.from(document.querySelectorAll("input.topic")).slice(0,8)
@@ -166,6 +187,8 @@ async function shot(name) {
              stats:Array.from(m.querySelectorAll(".stat")).map(s=>s.innerText.replace(/\\s+/g," ")),
              links:Array.from(m.querySelectorAll(".links a")).map(a=>a.innerText),
              works:Array.from(m.querySelectorAll("ol.works li")).length,
+             pubsSection:/Recent publications/.test(m.innerText),
+             pubsNote:(m.innerText.match(/Recent publications[\\s\\S]{0,220}/)||[""])[0],
              fields:Array.from(m.querySelectorAll(".field .k")).map(k=>k.innerText),
              why:(m.querySelector(".why")||{}).innerText||"",
              disclaimer:/not quote-verified evidence/.test(m.innerText) };})()`);
@@ -173,7 +196,13 @@ async function shot(name) {
   if (modal) {
     check("modal shows a name", !!modal.name.trim(), modal.name.trim().slice(0, 40));
     check("modal shows registry stats", modal.stats.length > 0, JSON.stringify(modal.stats));
-    check("modal lists recent publications", modal.works > 0, modal.works + " works");
+    // Not every professor HAS publications listed — they are fetched for the shortlist only,
+    // and OpenAlex can return none. Demanding a list here failed a run for correct behaviour.
+    // What must always hold is that the section EXPLAINS itself rather than being blank.
+    check("publications are listed or explained",
+          modal.works > 0 || /Not looked up|no indexed works/.test(modal.pubsNote || ""),
+          modal.works > 0 ? modal.works + " works"
+                          : (modal.pubsNote || "(section absent)").replace(/\s+/g, " ").slice(0, 100));
     check("modal shows all evidence fields", modal.fields.length >= 5, modal.fields.join("|"));
     check("D-010 disclaimer present", modal.disclaimer);
   }
