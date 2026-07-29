@@ -260,11 +260,13 @@ class BatchRenderer(ChromiumRenderer):
     Everything still fails closed: no Playwright, a browser that will not launch, a host that
     times out — each is ``None`` for that URL and never an exception for the batch.
 
-    **There is no production caller yet.** P1's admissions crawl and P2's directory walk are
-    the phases that fetch many pages at once; today's pipeline deep-dives one target at a
-    time, so wiring this into it would add concurrency with nothing to be concurrent about.
-    CC-3 is listed as a prerequisite for exactly that reason — this is the primitive those
-    phases are meant to build on, and it is tested as one.
+    **Its production caller is the render-all deep dive.** This class spent a while as a
+    tested primitive with nothing calling it, and the reason was sound: while Chromium was a
+    fallback that fired on one page in twenty, a batch had nothing to be concurrent about.
+    ``--render-all`` inverts that — every deep-dive target now wants a browser — so
+    ``pipeline._prerender_batch`` renders them as one batch before the per-target loop, and
+    ``_render_page`` consumes the result. P1's admissions crawl and P2's directory walk are
+    still the other intended callers.
     """
 
     def __init__(self, robots_check, *, max_concurrent: int = pool_mod.DEFAULT_MAX_CONCURRENT,

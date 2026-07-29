@@ -1685,3 +1685,71 @@ Three rounds, three defects, all three found by a real run rather than by the su
 student only met on the last click, a 409 that turned a healthy job into a dead end, and a
 success message for a copy that never happened. The pattern is the same each time — **the
 product reported an outcome it had not checked.**
+
+---
+
+## Round AJ — the reader stops being a fallback, and the 88% gets a fix
+
+**Asked for:** move the work client-side, open many pages, drop the rules that get in the way,
+and make Chromium the main reader rather than a fallback.
+
+**The diagnosis first, because it changed what got built.** `spike_page_supply.py` on a real
+GB · ML scan of 49 shortlisted professors: **88% had no page on record at all**, 12% a registry
+profile, **0% a page the professor controls** — and of 16 such pages read, *none* said anything
+about recruiting. Fields come back `NOT_FOUND` because there is nothing to read, not because
+the reader is weak. So "read harder" was necessary but nowhere near sufficient; the supply had
+to be fixed too.
+
+Six things, each off by default and each fail-closed:
+
+| What | Where | Switch |
+|---|---|---|
+| Chromium as the **main reader** | `_deep_dive_one` | `--render-all` |
+| Batch concurrency (its first production caller) | `_prerender_batch`, `BatchRenderer` | `--concurrency N` |
+| **Rung 7** — one generated search query per professor → their own page | `discover/websearch.py` | `SUPERVISORLY_SEARCH_KEY` |
+| Bounded lab crawl (depth 2, same host, 20 pages, link-text filtered) | `discover/sitecrawl.py`, `_crawl_more` | `--crawl` |
+| robots override | `Fetcher.obey_robots` | `--ignore-robots` |
+| **D-073 model extraction, finally wired** | `_model_claims`, `extract/llm_client.py` | `SUPERVISORLY_EXTRACT_KEY` |
+
+`llm_claims.py` had been built, tested and **called by nothing** — the largest single reason
+dashboards were thin. It now runs shortlist-only, batched per page, gap-filling only (a regex
+hit stands; the model is asked about the rest), and every proposal goes through the quote gate
+twice.
+
+**Three places the work refused to do what was asked, and why.**
+
+*The quote gate stays.* It was on the list of "rules that restrict this". It does not restrict
+reach at all — it stops the model inventing professors and deadlines. Removing it yields more
+*fiction*, not more data.
+
+*`--ignore-robots` cannot lie about itself.* Enforcement is the operator's call; what the
+export claims is not. `robots_verdict()` is still consulted and stored per source, so a run
+that ignored robots never produces a dashboard asserting consent nobody gave. It also lands a
+`robots_override` phase row and a warning that outlives the terminal. Measured, incidentally,
+it buys little: refusals hit 5 of 10 Egyptian institutions, 0 of 4 UK ones, and **nothing**
+against the 88%.
+
+*No automating the student's logged-in session.* The one capability a Chrome extension would
+have added over Playwright is the one that is circumvention rather than impoliteness — and the
+account it gets terminated is the student's. The human rung already covers it, human-paced.
+Which is also why the extension was not built: weeks of native-messaging and store review to
+unlock the single thing that would be declined.
+
+**The bug worth recording.** `_model_claims` first recorded `confidence="medium"`, which is not
+in `VALID_CONFIDENCE`, so every model claim was silently rejected by `record_claim` while the
+proposal counter cheerfully reported success. A test asserting the claim actually landed caught
+it. It is now `derived` — the sentence is the page's, the reading is the model's, and flattening
+that into `quoted_official` would hide which cells a model decided.
+
+**A fixture that tested nothing.** The crawl integration fixture used `Join the group` as the
+staff-card link text; `extract_recruiting_signal` matched the anchor text, so the card answered
+its own question and all six tests passed for the wrong reason. Changed to `Vacancies`.
+
+**63 new tests** across `test_render_all.py`, `test_model_extraction_wired.py`,
+`test_websearch_rung.py`, `test_sitecrawl.py`, `test_crawl_wired.py`, `test_robots_override.py`.
+The render-all fallback path was mutation-checked: reverting `elif walled:` to the old
+always-block behaviour fails two tests, so the guard is real.
+
+`test_no_seed_urls.py` correctly flagged the two search endpoints; they are allowlisted as
+infrastructure alongside the LLM endpoints, with the reasoning written down — they are asked
+"where is THIS person's page", from a name discovery already found, and narrow nothing.

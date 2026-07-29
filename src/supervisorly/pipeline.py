@@ -31,11 +31,16 @@ from .discover import openalex as _openalex
 from .discover import orcid as orcid_mod
 from .discover import ror as _ror
 from .discover import roster as _roster
+from .discover import sitecrawl
+from .discover import websearch
 from .ethics import optout as optout_mod
 from .extract import chrome_prompt
+from .extract import llm_claims
+from .extract import llm_client
 from .export import dashboard as dash
 from .export import json_export as jx
 from .fetch import browser_rung
+from .fetch import pool as pool_mod
 from .fetch import render as render_mod
 from .fetch import walls
 from .fetch.fetcher import Fetcher
@@ -567,6 +572,109 @@ _EXTRACTORS = {
 }
 
 
+def _crawl_more(conn, pid, entry_url, fetcher, snaps, *, filled, stats, complete=None,
+                max_pages=sitecrawl.MAX_PAGES):
+    """Walk a few pages out from the professor's own page, looking for the fields still empty.
+
+    **Why the entry page is usually not enough.** Rung 7 finds the page a professor controls,
+    and that page is typically a staff card — title, email, publications. "I am recruiting PhD
+    students for 2027" lives one click away on *Join the group* or *Vacancies*. Reading only
+    the entry point measurably finds nothing.
+
+    Bounded by ``sitecrawl`` (depth 2, same host, 20 pages, link-text filtered) and bounded
+    again here: the walk **stops as soon as every field has an answer**, so a professor whose
+    staff card already says everything costs one extra request, not twenty.
+
+    Politeness is not re-implemented — pages come through the ordinary ``Fetcher``, so robots,
+    rate limiting, snapshots and the ``--ignore-robots`` override all keep their single
+    definition. A page this walk cannot read is simply a branch that ends.
+    """
+    want = [f for f in _EXTRACTORS if f not in filled]
+    if not want or not entry_url:
+        return
+
+    def fetch(u):
+        res = fetcher.fetch(u)
+        return (bool(res and res.ok), snaps.load(res.snapshot_hash) if res and res.ok else "")
+
+    pages, truncated = sitecrawl.crawl(entry_url, fetch, max_pages=max_pages)
+    if truncated:
+        stats["crawl_truncated"] = stats.get("crawl_truncated", 0) + 1
+    for page_url, html in pages[1:]:                  # [0] is the entry page, already read
+        if not want:
+            break
+        stats["crawl_pages"] = stats.get("crawl_pages", 0) + 1
+        src_id = claims.record_web_source(
+            conn, page_url, snapshot_hash=content_hash(html), http_status=200,
+            source_tier=_source_tier(page_url),
+            robots_allowed=fetcher.robots_verdict(page_url),
+        )
+        still: list[str] = []
+        for field in want:
+            found = _EXTRACTORS[field](html)
+            if not found:
+                still.append(field)
+                continue
+            # A value found here is a real find on a real page — record it, and do NOT record
+            # an absence for the fields this page happens not to mention. The entry page
+            # already recorded the honest `searched_absent`; a second absence per crawled page
+            # would bury it under noise without adding a fact.
+            rec = _record_evidence(conn, pid, field, found, src_id=src_id,
+                                   snapshot_hash=content_hash(html), html=html)
+            if rec and rec.ok:
+                stats["crawl_claims"] = stats.get("crawl_claims", 0) + 1
+            else:
+                still.append(field)
+        if complete is not None and still:
+            _model_claims(conn, pid, html=html, url=page_url, src_id=src_id,
+                          snapshot_hash=content_hash(html), complete=complete,
+                          filled=set(_EXTRACTORS) - set(still), stats=stats)
+        want = still
+
+
+def _model_claims(conn, pid, *, html, url, src_id, snapshot_hash, complete, filled, stats):
+    """The D-073 pass: let a model point at sentences the regexes could not shape-match.
+
+    **It fills gaps; it never overrules a regex.** Where a deterministic extractor already
+    found a value that value stands — it is free, reproducible, and was quote-gated too, and
+    a model that disagrees about a date it can also see is not evidence of anything. So
+    ``filled`` is subtracted from the fields we ask about, which also shrinks the prompt.
+
+    Everything the model returns is a *proposal* until ``llm_claims.verify`` finds its quote
+    verbatim in this snapshot, and ``record_claim`` then applies the identical gate a second
+    time on the way into the database. A hallucinated deadline cannot survive either pass.
+
+    Rejections are counted rather than swallowed (D-073 bound 6): a model whose quotes stop
+    matching is a signal worth seeing, not a quiet fade back to an empty dashboard.
+    """
+    fields = tuple(f for f in llm_claims.PROPOSABLE_FIELDS if f not in filled)
+    if not fields:
+        return
+    text = main_text(html)[:llm_claims.MAX_PAGE_CHARS]
+    try:
+        raw = complete(llm_claims.build_prompt(text, url, fields=fields))
+    except Exception:                      # noqa: BLE001 — fail-closed by design (D-068/D-073)
+        stats["model_unavailable"] = stats.get("model_unavailable", 0) + 1
+        return
+    kept, dropped = llm_claims.verify(llm_claims.parse_proposals(raw, fields=fields), html)
+    stats["model_proposals"] = stats.get("model_proposals", 0) + len(kept) + len(dropped)
+    stats["model_rejected"] = stats.get("model_rejected", 0) + len(dropped)
+    for p in kept:
+        rec = claims.record_claim(
+            conn, entity_kind="person", entity_id=pid, field=p.field,
+            value=p.value, quote=p.quote, source_id=src_id, snapshot_hash=snapshot_hash,
+            snapshot_html=html, observed_at=utcnow(), extractor_agent="model",
+            # `derived`, not `quoted_official`: the SENTENCE is official and verbatim, but the
+            # reading of it — "this means recruiting" — is the model's. A regex that matched a
+            # literal cue earns `quoted_official`; an interpretation of prose does not, and
+            # flattening the two would hide which cells a model decided.
+            confidence="derived",
+        )
+        if rec.ok:
+            claims.supersede_prior(conn, "person", pid, p.field, rec.claim_id)
+            stats["model_claims"] = stats.get("model_claims", 0) + 1
+
+
 def _record_evidence(conn, pid, field, found, *, src_id, snapshot_hash, html):
     """Record one field's deterministic result with correct precedence.
 
@@ -733,7 +841,8 @@ def _apply_shortlist(targets: list[dict], exempt_keys: set, topic_ids: list[str]
 
 def _process_targets(conn, run_id, targets, fetcher, snaps, *, stats, resume,
                      progress=None, should_stop=None, orcid_client=None,
-                     renderer=None) -> int:
+                     renderer=None, render_all=False, complete=None, search=None,
+                     crawl=False) -> int:
     """Deep-dive each target (fetch → extract → claim) — the shared core of run_offline/run_live.
 
     Returns the gap count (targets with any still-``blocked`` field or an unchecked walled social
@@ -748,10 +857,15 @@ def _process_targets(conn, run_id, targets, fetcher, snaps, *, stats, resume,
     (an honest "not checked yet"), their completed siblings' claims persist, and the
     caller reports the run ``cancelled`` instead of a finalized status.
     """
+    urls, prerendered = _prerender_batch(conn, targets, renderer, orcid_client,
+                                         stats=stats, resume=resume, render_all=render_all,
+                                         search=search)
     total = len(targets)
     for i, t in enumerate(targets, 1):
         _deep_dive_one(conn, run_id, t, fetcher, snaps, stats=stats, resume=resume,
-                       orcid_client=orcid_client, renderer=renderer)
+                       orcid_client=orcid_client, renderer=renderer, render_all=render_all,
+                       url_override=urls.get(t["id"]), prerendered=prerendered,
+                       complete=complete, search=search, crawl=crawl)
         _emit_progress(progress, ("deep_dive_progress", i, total))
         if _stop_requested(should_stop):
             stats["cancelled"] = True
@@ -759,7 +873,44 @@ def _process_targets(conn, run_id, targets, fetcher, snaps, *, stats, resume,
     return sum(1 for t in targets if _target_open_gap(conn, t["id"]))
 
 
-def _page_url_for(t: dict, orcid_client, stats) -> str | None:
+def _prerender_batch(conn, targets, renderer, orcid_client, *, stats, resume, render_all,
+                     search=None):
+    """Resolve every deep-dive URL and render them all concurrently, once, before the loop.
+
+    Returns ``(url_by_target_id, page_by_url)``. Both are empty when render-all is off or the
+    renderer cannot batch, and the run then behaves exactly as it did before.
+
+    **Why this exists.** ``BatchRenderer`` was built as a primitive with no production caller,
+    because a deep dive that renders one page in twenty has nothing to be concurrent about.
+    Render-all changes that: now every target wants a browser, so the serial loop would pay
+    one page-load latency per professor, in sequence. Rendering them as a batch is the same
+    pages, the same refusal gate, the same politeness — ``HostPool`` keeps one host strictly
+    serial (CC-3.3/CC-3.4) — just not one-at-a-time across *different* hosts.
+
+    **The URL is resolved here, not twice.** ``_page_url_for`` can ask ORCID's API for a
+    professor's real page, so calling it in both this pass and the loop would double those
+    requests. It is called once and the answer handed to the loop.
+
+    Resume-skipped targets are neither resolved nor rendered: a resumed run must not pay for
+    work whose whole point is that it is already done.
+    """
+    if not render_all or renderer is None or not hasattr(renderer, "render_many"):
+        return {}, {}
+    urls: dict[str, str] = {}
+    for t in targets:
+        if resume and runs.target_stage_done(conn, "person", t["id"], "deep_dive"):
+            continue
+        url = _page_url_for(t, orcid_client, stats, search)
+        if url:
+            urls[t["id"]] = url
+    if not urls:
+        return urls, {}
+    pages = renderer.render_many(urls.values())
+    stats["render_batch_size"] = len(pages)
+    return urls, pages
+
+
+def _page_url_for(t: dict, orcid_client, stats, search=None) -> str | None:
     """The page to deep-dive — resolving an ORCID profile URL to the professor's real page.
 
     ``ladder._author_url`` falls back to the author's ORCID profile because OpenAlex almost
@@ -785,20 +936,35 @@ def _page_url_for(t: dict, orcid_client, stats) -> str | None:
     as it was before — one wasted request, never a fabricated fact.
     """
     url = t.get("url")
-    if orcid_client is None or t.get("url_kind") != "orcid":
-        return url
-    for candidate in orcid_client.researcher_urls(t.get("orcid") or url):
-        if _WALLED_SOCIAL.search(candidate):
-            continue
-        stats["orcid_resolved"] = stats.get("orcid_resolved", 0) + 1
-        return candidate
+    if orcid_client is not None and t.get("url_kind") == "orcid":
+        for candidate in orcid_client.researcher_urls(t.get("orcid") or url):
+            if _WALLED_SOCIAL.search(candidate):
+                continue
+            stats["orcid_resolved"] = stats.get("orcid_resolved", 0) + 1
+            return candidate
+    # Rung 7 (last resort): we are about to deep-dive nothing, or a registry profile that
+    # measurably never carries a recruiting sentence. One generated query per professor can
+    # find the page they actually control — 88% of a real shortlist had none on record.
+    # Absent a search key this is None and the target keeps exactly today's fate.
+    if search is not None and (not url or t.get("url_kind") == "orcid"):
+        names = t.get("institution_names") or []
+        hits = search(t.get("name") or "", names[0] if names else None)
+        if hits:
+            stats["search_resolved"] = stats.get("search_resolved", 0) + 1
+            return hits[0]
     return url
 
 
-def _render_page(conn, snaps, url, res, renderer, stats):
+def _render_page(conn, snaps, url, res, renderer, stats, prerendered=None, robots_allowed=True):
     """Render a JavaScript page and store it as a snapshot, or None if it stays unreadable.
 
     Returns ``(html, source_id, snapshot_hash)`` so the caller cites what it actually read.
+
+    ``prerendered`` is the batch produced by ``_prerender_batch`` before the loop started. A
+    URL present there has already been through the browser — and through the *same*
+    ``_refusal`` gate, because ``BatchRenderer`` inherits it — so we use that page instead of
+    driving a second browser for it. A URL that is present but maps to ``None`` was tried and
+    failed; it is not retried serially, or a batch of 200 dead URLs would be paid for twice.
 
     The rendered text goes through the SAME wall detector that sent us here. A login page
     renders perfectly well — it is a real page, it just is not the professor's — so without
@@ -807,14 +973,18 @@ def _render_page(conn, snaps, url, res, renderer, stats):
     consulted, and the host's normal tier applies (an institutional page is no less
     institutional for having been rendered).
     """
-    if renderer is None:
+    if prerendered is not None and url in prerendered:
+        page = prerendered[url]
+        stats["render_batched"] = stats.get("render_batched", 0) + 1
+    elif renderer is None:
         return None
-    page = renderer.render(url)
+    else:
+        page = renderer.render(url)
     if page is None:
         return None
     ingested = browser_rung.ingest_page(
         conn, snaps.root, final_url=page.final_url, text=page.text, title=page.title,
-        source_tier=_source_tier(page.final_url or url), robots_allowed=True,
+        source_tier=_source_tier(page.final_url or url), robots_allowed=robots_allowed,
     )
     html = snaps.load(ingested["snapshot_hash"])
     if _roster.detect_login_wall(html):
@@ -825,34 +995,59 @@ def _render_page(conn, snaps, url, res, renderer, stats):
 
 
 def _deep_dive_one(conn, run_id, t, fetcher, snaps, *, stats, resume,
-                   orcid_client=None, renderer=None) -> None:
-    """One target of ``_process_targets``: fetch → extract → claim (semantics per its docstring)."""
+                   orcid_client=None, renderer=None, render_all=False,
+                   url_override=None, prerendered=None, complete=None, search=None,
+                   crawl=False) -> None:
+    """One target of ``_process_targets``: fetch → extract → claim (semantics per its docstring).
+
+    ``render_all`` promotes Chromium from fallback to main reader — see the comment at the
+    render decision below. It never changes what a *failure* means: a page that fetched fine
+    and merely could not be rendered keeps its fetched text, because the alternative is
+    reporting our own missing browser as the site's wall.
+    """
     pid = t["id"]
     if resume and runs.target_stage_done(conn, "person", pid, "deep_dive"):
         stats["resumed_skipped"] += 1
         return
     task = runs.add_task(conn, run_id, "person", pid, stage="deep_dive")
-    url = _page_url_for(t, orcid_client, stats)
+    url = (url_override if url_override is not None
+           else _page_url_for(t, orcid_client, stats, search))
     res = fetcher.fetch(url) if url else None
     src_id_override = snapshot_hash_override = None
     if res is not None and res.ok:
         html = snaps.load(res.snapshot_hash)
-        if _roster.detect_login_wall(html):
-            # A robots-allowed 200 whose text is not the professor's content. Two very
-            # different things land here and they must not share a fate:
+        walled = _roster.detect_login_wall(html)
+        if walled or render_all:
+            # Two very different reasons to start a browser, and they must not share a fate.
+            #
+            # WALLED — a robots-allowed 200 whose text is not the professor's content. Two
+            # different things land here:
             #   * a LOGIN or bot wall  — a refusal; goes to the human rung untouched.
             #   * a JAVASCRIPT SHELL   — the page said yes and then needed a browser. That is
             #                            our reader's limit, not a wall (D-073).
             # So try rendering, then apply the SAME wall detector to what came back: if the
             # rendered text still looks like a wall, it was a wall, and nothing was defeated.
-            rendered = _render_page(conn, snaps, url, res, renderer, stats)
-            if rendered is None:
+            #
+            # RENDER_ALL — Chromium is the main reader, not the fallback. The HTTP read only
+            # ever sees what the server sent; anything a script writes into the page is
+            # invisible to it, and a page does not have to look broken for that to cost us a
+            # sentence. So we render whether or not the fetched text tripped the detector.
+            rendered = _render_page(conn, snaps, url, res, renderer, stats, prerendered,
+                                    robots_allowed=fetcher.robots_verdict(url))
+            if rendered is not None:
+                html, src_id_override, snapshot_hash_override = rendered
+            elif walled:
                 for field in _EXTRACTORS:
                     _record_blocked(conn, pid, field)
                 runs.set_task_status(conn, task, "blocked",
                                      last_error="login/bot wall — routed to the human rung")
                 return
-            html, src_id_override, snapshot_hash_override = rendered
+            else:
+                # Render-all asked for a browser and did not get one — no Playwright, a
+                # timeout, a robots refusal on the redirect. The page itself was fine, so
+                # falling back to the fetched HTML loses nothing that was ever there. Marking
+                # it blocked here would invent a wall out of our own missing dependency.
+                stats["render_fallback"] = stats.get("render_fallback", 0) + 1
         chash = content_hash(html)
         if xcache.lookup(conn, "person", pid, chash, PROMPT_VERSION, MODEL_ID,
                          CACHE_SCHEMA_VERSION):
@@ -867,19 +1062,39 @@ def _deep_dive_one(conn, run_id, t, fetcher, snaps, *, stats, resume,
         else:
             src_id = claims.record_web_source(
                 conn, res.final_url or url, snapshot_hash=res.snapshot_hash, http_status=200,
-                source_tier=_source_tier(res.final_url or url), robots_allowed=True,
+                source_tier=_source_tier(res.final_url or url),
+                # The real verdict, not the fact that we fetched it. On an ordinary run these
+                # are the same; under --ignore-robots they are not, and the export must carry
+                # the one that is true.
+                robots_allowed=fetcher.robots_verdict(res.final_url or url),
             )
             evidence_hash = res.snapshot_hash
         claim_ids: list[str] = []
         walled_social = None
+        filled: set[str] = set()
         for field, extractor in _EXTRACTORS.items():
             found = extractor(html)
+            if found:
+                filled.add(field)
             rec = _record_evidence(conn, pid, field, found, src_id=src_id,
                                    snapshot_hash=evidence_hash, html=html)
             if rec and rec.ok:
                 claim_ids.append(rec.claim_id)
             if field == "social" and found and _WALLED_SOCIAL.search(found[0]):
                 walled_social = found[0]
+        if complete is not None:
+            # D-073: the regexes have had their turn and `filled` says where they landed. The
+            # model is asked only about what is left, and only about this page.
+            _model_claims(conn, pid, html=html, url=res.final_url or url, src_id=src_id,
+                          snapshot_hash=evidence_hash, complete=complete,
+                          filled=filled, stats=stats)
+        if crawl:
+            # The staff card rarely says whether they are recruiting; the page it links to
+            # does. Bounded hard, and skipped entirely once every field has an answer.
+            _crawl_more(conn, pid, res.final_url or url, fetcher, snaps,
+                        filled={f for f in _EXTRACTORS if claims.live_value(
+                            conn, "person", pid, f)},
+                        stats=stats, complete=complete)
         if walled_social:
             # An advertised walled social page (X/Twitter/LinkedIn) is a known recruiting
             # source the tool must NOT scrape (D-039/044): mint an awaiting_human task for it
@@ -963,7 +1178,10 @@ def run_live(plan: dict, transport: Transport, snap_root, *, email: str,
              shortlist_size: int = DEFAULT_SHORTLIST_SIZE,
              max_institutions: int | None = None,
              progress=None, should_stop=None,
-             phase_flags: "phases_mod.PhaseFlags | None" = None) -> dict:
+             phase_flags: "phases_mod.PhaseFlags | None" = None,
+             render_all: bool = False,
+             concurrency: int = pool_mod.DEFAULT_MAX_CONCURRENT,
+             obey_robots: bool = True, crawl: bool = False) -> dict:
     """A **live** scan: preflight → discovery ladder (ROR + OpenAlex) → the *same* fetch → extract
     → claim → score → export → dashboard pipeline as ``run_offline`` (D-028), now from **discovered**
     targets rather than hand-fed ones.
@@ -1077,7 +1295,8 @@ def run_live(plan: dict, transport: Transport, snap_root, *, email: str,
     # Polite by default for a real run (per-host min-interval + real backoff sleep); tests pass
     # rate_limit=0 + a no-op backoff_sleep so the cassette suite stays fast.
     fetcher = Fetcher(transport, snaps, sleep=backoff_sleep or time.sleep,
-                      rate_limiter=HostRateLimiter(min_interval=rate_limit))
+                      rate_limiter=HostRateLimiter(min_interval=rate_limit),
+                      obey_robots=obey_robots)
     optout = optout_mod.load_optout(optout_path)
     targets, opted_out = optout_mod.filter_targets(disc["targets"], optout)
     # The D-056 shortlist gate, AFTER the opt-out filter (a suppressed person must not burn a
@@ -1093,6 +1312,17 @@ def run_live(plan: dict, transport: Transport, snap_root, *, email: str,
     stats = {"extractions": 0, "cache_hits": 0, "opted_out": opted_out, "resumed_skipped": 0,
              "discovered": len(disc["targets"]), "institutions": len(disc["institutions"]),
              "truncated": disc.get("truncated", []), "warnings": warnings}
+    if not obey_robots:
+        # Recorded on the RUN, not just printed. A run that ignored robots must still say so
+        # long after the console scrollback is gone — the warning rides the result (D-037) and
+        # the phase row keeps it in the database for any later re-export (D-019).
+        stats["warnings"].append(
+            "robots.txt was NOT obeyed on this run (--ignore-robots). Pages a site asked "
+            "machines not to read may have been read. Per-source provenance still records "
+            "what robots actually said.")
+        runs.record_phase(conn, run_id, "robots_override", attempted=0, reached=0, skipped=0,
+                          reason="--ignore-robots: robots.txt consulted for provenance, "
+                                 "not enforced")
     if len(deep_dive) < len(targets):
         stats["shortlisted"] = len(deep_dive)
         stats["unchecked"] = len(targets) - len(deep_dive)
@@ -1170,13 +1400,25 @@ def run_live(plan: dict, transport: Transport, snap_root, *, email: str,
     # both readers share one cached answer per host — two robots caches is two chances to
     # disagree, and the permissive one wins. Absent Playwright this is inert: `render()`
     # returns None and every page takes exactly the path it takes today.
-    renderer = render_mod.ChromiumRenderer(fetcher.robots_allows)
+    # ``BatchRenderer`` IS a ``ChromiumRenderer`` — it adds ``render_many`` and inherits the
+    # single-page path unchanged, so this is the old object plus a batch entry point. The
+    # sync browser inside it is created lazily, so a run whose pages were all pre-rendered
+    # never launches a second one.
+    renderer = render_mod.BatchRenderer(fetcher.robots_allows, max_concurrent=concurrency)
+    # D-073, live runs only. ``None`` when no extraction key is configured, and that is the
+    # default: the deep dive then runs on the deterministic extractors exactly as before.
+    # Built once per run so "is a model available" is answered at the top, not per page.
+    complete = llm_client.completer_from_env()
+    # Rung 7, live runs only. ``None`` without a search key, and that is the default: the
+    # deep dive then aims at exactly the URLs it aims at today.
+    search = websearch.search if websearch.configured() else None
     _t_dive = time.monotonic()
     try:
         gaps = _process_targets(conn, run_id, deep_dive, fetcher, snaps, stats=stats,
                                 resume=resume, progress=progress, should_stop=should_stop,
                                 orcid_client=orcid_mod.OrcidClient(transport),
-                                renderer=renderer)
+                                renderer=renderer, render_all=render_all, complete=complete,
+                                search=search, crawl=crawl)
     finally:
         # One browser for the whole run; leaking it would outlive the scan inside a container
         # that then gets reused for the next job.

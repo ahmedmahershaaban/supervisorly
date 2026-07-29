@@ -15,6 +15,8 @@ import sys
 from pathlib import Path
 
 from . import PRODUCT_NAME, __version__
+from .discover import sitecrawl
+from .fetch import pool as pool_mod
 from .model.db import open_db
 
 
@@ -583,6 +585,25 @@ def _progress_printer(event: tuple) -> None:
 
 
 def cmd_scan(args: argparse.Namespace) -> int:
+    # Argument validation and the robots banner come FIRST — before any directory is created,
+    # any cassette is opened and any request is made. A guard that fires after the work has
+    # started is not a guard, and a warning printed after the fetches is a receipt.
+    if args.ignore_robots:
+        # Loud, before the first request AND before any other guard can pre-empt it, naming
+        # who carries the consequence. A setting this consequential should never be
+        # discoverable only by reading the flags back.
+        print("=" * 72)
+        print("robots.txt WILL NOT BE ENFORCED on this scan (--ignore-robots).")
+        print("Sites use robots.txt to say 'do not automate me'. Ignoring it gets the")
+        print("REQUESTING IP rate-limited and then blocked - on a campus network, yours.")
+        print("Provenance still records what robots actually said, per source.")
+        print("=" * 72)
+    if args.concurrency < 1:
+        # fail loud (D-002): 0 or negative would mean "render nothing" while the flag reads
+        # as a performance setting.
+        print(f"--concurrency must be a positive integer, got {args.concurrency}.")
+        return 2
+
     out = Path(args.out)
     if out.parent != Path("") and not out.parent.exists():
         out.parent.mkdir(parents=True, exist_ok=True)   # for snapshots + the live DB
@@ -712,6 +733,10 @@ def cmd_scan(args: argparse.Namespace) -> int:
         shortlist_size=args.shortlist,
         max_institutions=args.max_institutions,
         progress=_progress_printer if args.progress else None,
+        render_all=args.render_all,
+        concurrency=args.concurrency,
+        obey_robots=not args.ignore_robots,
+        crawl=args.crawl,
     )
     # sparse-coverage preflight + discovery warnings (D-060) — ASCII-safe by construction
     # (preflight/ladder messages are ASCII-only, like the rest of this console output).
@@ -775,6 +800,26 @@ def build_parser() -> argparse.ArgumentParser:
                     help="scan only the first N institutions of the ROR enumeration "
                          "(relevance-ordered). A cap that cuts is disclosed as a warning "
                          "(D-037); unset scans all.")
+    ps.add_argument("--render-all", dest="render_all", action="store_true",
+                    help="read EVERY deep-dive page with Chromium instead of only the pages "
+                         "that fetched as a login wall or JavaScript shell. Slower and needs "
+                         "Playwright; without it the fetched text is used, never a fake wall.")
+    ps.add_argument("--crawl", action="store_true",
+                    help="from each professor's page, also read the pages it links to that "
+                         "look like 'join the group' or 'vacancies' — where a recruiting "
+                         "sentence actually lives. Bounded: depth 2, same host, "
+                         f"{sitecrawl.MAX_PAGES} pages max, and it stops as soon as every "
+                         "field has an answer.")
+    ps.add_argument("--ignore-robots", dest="ignore_robots", action="store_true",
+                    help="do NOT enforce robots.txt. Off by default. robots.txt is still read "
+                         "and the real verdict is stored per source, so the export never "
+                         "claims consent that was not given. Sites block the IP that does "
+                         "this, and on a campus network that is your IP.")
+    ps.add_argument("--concurrency", type=int, default=pool_mod.DEFAULT_MAX_CONCURRENT,
+                    metavar="N",
+                    help=f"pages rendered at once when --render-all is on "
+                         f"(default {pool_mod.DEFAULT_MAX_CONCURRENT}). One host is always "
+                         f"read strictly serially however high this goes.")
     ps.set_defaults(func=cmd_scan)
 
     pm = sub.add_parser("map-field", help="map a free-text field to a hierarchical OpenAlex "

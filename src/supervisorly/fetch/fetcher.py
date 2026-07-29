@@ -47,6 +47,7 @@ class Fetcher:
         retry: RetryPolicy | None = None,
         sleep: Callable[[float], None] = time.sleep,
         jitter: Callable[[], float] = random.random,
+        obey_robots: bool = True,
     ) -> None:
         self._t = transport
         self._snap = snapshots
@@ -55,6 +56,7 @@ class Fetcher:
         self._retry = retry or RetryPolicy()
         self._sleep = sleep
         self._jitter = jitter
+        self.obey_robots = obey_robots
         self._robots: dict[str, str | None] = {}  # host -> robots.txt text (None = unavailable)
 
     def _robots_for(self, scheme: str, host: str) -> str | None:
@@ -75,17 +77,30 @@ class Fetcher:
         self._robots[host] = text
         return text
 
-    def robots_allows(self, url: str) -> bool:
-        """Whether robots.txt permits fetching ``url``, using this fetcher's cache and agent.
+    def robots_verdict(self, url: str) -> bool:
+        """What robots.txt actually says about ``url`` — asked even when we do not obey it.
 
-        Exposed so the server-side renderer (D-073) asks the SAME question against the SAME
-        cached robots.txt this fetcher already read, rather than keeping its own opinion.
-        Two robots caches on one host is two chances to disagree, and the one that says yes
-        is the one that gets used.
+        Kept separate from ``robots_allows`` so an unpoliced run still records the *truth* in
+        provenance. "We fetched it" and "we were allowed to" are different facts, and an
+        export that conflated them would claim consent that was never given (D-019/D-023).
         """
         parts = urlsplit(url)
         robots_txt = self._robots_for(parts.scheme or "https", parts.netloc)
         return robots.is_allowed(robots_txt, url, self._ua)
+
+    def robots_allows(self, url: str) -> bool:
+        """Whether this fetcher will fetch ``url`` — the robots verdict, unless overridden.
+
+        Exposed so the server-side renderer (D-073) asks the SAME question against the SAME
+        cached robots.txt this fetcher already read, rather than keeping its own opinion.
+        Two robots caches on one host is two chances to disagree, and the one that says yes
+        is the one that gets used. That sharing is also why the override lives *here*: one
+        switch moves both readers, and a browser that quietly kept obeying while the HTTP
+        client did not would be the worst of both.
+        """
+        if not self.obey_robots:
+            return True
+        return self.robots_verdict(url)
 
     def fetch(self, url: str) -> FetchResult:
         parts = urlsplit(url)

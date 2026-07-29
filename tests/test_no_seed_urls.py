@@ -45,6 +45,11 @@ ALLOWED_HOSTS = {
     # table: the endpoint is server config, and listing verified alternatives is what stops
     # one provider becoming load-bearing.
     "api.kimi.com", "generativelanguage.googleapis.com", "api.deepseek.com", "api.groq.com",
+    # Interchangeable SEARCH endpoints (rung 7). Same reasoning as the LLM endpoints, and the
+    # same reason this is not a seed list: the engine asks them "where is THIS person's page",
+    # with a query generated from a name discovery already found. They narrow nothing — an
+    # institution the registry never returned stays unfindable, exactly as before.
+    "api.search.brave.com", "api.tavily.com",
 }
 
 #: Files whose JOB is to name hosts we must NOT touch. A refusal list is the exact inverse of
