@@ -951,7 +951,8 @@ def run_offline(plan: dict, targets: list[dict], transport: Transport, snap_root
     )
     status = "finalized_with_open_gaps" if gaps else "finalized"
     runs.set_run_status(conn, run_id, status)
-    return _build_result(conn, run_id, status, targets, stats=stats, gaps=gaps)
+    return _build_result(conn, run_id, status, targets, stats=stats, gaps=gaps,
+                         plan_intents=_ladder.plan_intents(plan))
 
 
 def run_live(plan: dict, transport: Transport, snap_root, *, email: str,
@@ -1205,7 +1206,8 @@ def run_live(plan: dict, transport: Transport, snap_root, *, email: str,
     # a cancelled run exports its partials through the same honest path (D-046 four-state
     # model: untouched targets are never_attempted, never silently "checked").
     result = _build_result(conn, run_id, status, targets, stats=stats, gaps=gaps,
-                           plan_topic_ids=plan.get("resolved_topic_ids") or ())
+                           plan_topic_ids=plan.get("resolved_topic_ids") or (),
+                           plan_intents=_ladder.plan_intents(plan))
     _emit_progress(progress, ("exported",))
     return result
 
@@ -1377,7 +1379,7 @@ def _human_prompt_for(t: dict, blocked_fields: list[str]) -> str | None:
 
 
 def _build_result(conn, run_id, status, targets, *, stats, gaps,
-                  plan_topic_ids=()) -> dict:
+                  plan_topic_ids=(), plan_intents=()) -> dict:
     """Assemble the export + dashboard from the persisted claims (no fetching here)."""
     professors = []
     for t in targets:
@@ -1439,7 +1441,11 @@ def _build_result(conn, run_id, status, targets, *, stats, gaps,
     export = jx.build_export(
         run_summary={"run_id": run_id, "status": status,
                      "counts": {"enumerated": enumerated}, "coverage": coverage,
-                     "ledger": ledger},
+                     "ledger": ledger,
+                     # MI-4.2: which supervision levels the student said they were open to,
+                     # so the dashboard can pre-tick those filter chips. A preference, not a
+                     # claim about anyone — it never gates what is recorded or exported.
+                     "intents": list(plan_intents or ())},
         field_descriptors=FIELD_DESCRIPTORS,
         professors=professors,
         claims_by_entity=claims_by_entity,

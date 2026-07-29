@@ -317,6 +317,10 @@ def handle_scan_start(params: dict, *, store, worker=None, transport=None,
                            "ISO 3166-1 alpha-2 code (e.g. EG) or an English country "
                            "name (e.g. Egypt)")
     plan = {**plan, "country": code}
+    # MI-2: the list is the truth, the scalar is derived. Done BEFORE the job key so a plan
+    # that arrives with a list and a stale scalar produces the same key as the corrected one
+    # — otherwise the §3.3 idempotency check would see two different plans for one search.
+    plan = cli.normalize_plan_intents(plan)
 
     job_key = jobs.new_job_key(email, plan)
     active = store.active_job_for(email)

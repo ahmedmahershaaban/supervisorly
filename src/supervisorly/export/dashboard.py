@@ -59,6 +59,18 @@ input,button{font:inherit}
 .vbtn:hover{border-color:var(--accent);color:var(--accent)}
 .vbtn.on{border-color:var(--accent);color:var(--accent);background:rgba(232,178,74,.09)}
 .count{font-family:var(--mono);font-size:11.5px;color:var(--faint)}
+/* supervision-level filter chips (MI-4) */
+.levels{position:relative;z-index:1;display:flex;gap:8px;flex-wrap:wrap;align-items:center;
+  padding:11px clamp(20px,4vw,56px);border-bottom:1px solid var(--line)}
+.lvl-lead{font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--faint);margin-right:2px}
+.chip{background:var(--chip);color:var(--muted);border:1px solid var(--line);border-radius:999px;
+  padding:5px 12px;cursor:pointer;font-family:var(--mono);font-size:12px}
+.chip:hover{border-color:var(--teal);color:var(--ink2)}
+.chip:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.chip.on{border-color:var(--teal);color:var(--teal);background:rgba(67,201,214,.10)}
+.chip-n{opacity:.62;margin-left:3px}
+.lvl-note{font-family:var(--mono);font-size:11px;color:var(--faint);flex:1 1 100%;padding-top:2px}
 .wrap{position:relative;z-index:1;padding:14px clamp(16px,3vw,44px) 90px}
 .hidden{display:none}
 /* table */
@@ -200,14 +212,108 @@ function cell(env){
   if(env.state==="value") return '<span class="s-value">'+esc(env.value)+'</span>'+srcLink(env.source_url);
   return '<span class="s-'+env.state+'">'+(stateLabel[env.state]||env.state)+'</span>';
 }
+/* ── MI-4/MI-5: filter by supervision level ────────────────────────────────────
+   The vocabulary is the fixed enum shared with extract/llm_claims.SUPERVISION_LEVELS and
+   cli.PLAN_INTENT_KINDS — "I want a PhD supervisor" and "this person takes PhD students"
+   were deliberately designed to be the same seven words, so no translation layer exists
+   here and none may be added. A page saying "research assistant" maps to a level because a
+   model read the sentence (P5/MI-3), never because a synonym table shipped (D-038). */
+const LEVELS = ["training","pre_master","pre_phd","mentor","master","phd","postdoc"];
+const LEVEL_LABEL = {training:"training", pre_master:"pre-master's", pre_phd:"pre-PhD",
+  mentor:"mentor", master:"master's", phd:"PhD", postdoc:"postdoc", unknown:"unknown"};
+const UNKNOWN = "unknown";
+var levelSel = null;             // Set of ticked chips; built on first render
+
+function levelsOf(p){
+  /* MI-5.1: no `supervises` claim means UNKNOWN, never "no". We did not find a statement;
+     that is not the same as the person not taking students at that level. Any non-`value`
+     state — searched_absent, blocked, never_attempted — is equally unknown here. */
+  var env = p.fields && p.fields.supervises;
+  if(!env || env.state !== "value" || !env.value) return [];
+  return String(env.value).split(",").map(function(s){return s.trim().toLowerCase();})
+    .filter(function(s){return LEVELS.indexOf(s) >= 0;});
+}
+function levelCounts(){
+  var c = {unknown:0};
+  LEVELS.forEach(function(l){c[l]=0;});
+  DATA.professors.forEach(function(p){
+    var ls = levelsOf(p);
+    if(!ls.length){ c.unknown++; return; }
+    ls.forEach(function(l){c[l]++;});      // a professor stating two levels counts in both
+  });
+  return c;
+}
+function chipKeys(counts){
+  /* Every level anyone actually states, plus every level the STUDENT asked for (so their own
+     choice is always visible and untickable even when nothing matched it yet), plus unknown
+     — which is always offered, because before P5 ships it is the only truthful answer for
+     everyone and a filter with no way back to "show me everything" is a trap. */
+  var want = (DATA.run && DATA.run.intents) || [];
+  return LEVELS.filter(function(l){return counts[l] > 0 || want.indexOf(l) >= 0;})
+    .concat([UNKNOWN]);
+}
+function initLevelSel(){
+  if(levelSel) return;
+  var want = (DATA.run && DATA.run.intents) || [];
+  /* MI-4.2 + MI-5.2: pre-tick what the student asked for — AND unknown, always. A student
+     filtering to "phd" must not silently lose the professors we simply have no statement
+     about, which today is nearly all of them. */
+  levelSel = new Set(want.filter(function(l){return LEVELS.indexOf(l) >= 0;}));
+  levelSel.add(UNKNOWN);
+  if(levelSel.size === 1){
+    // no usable intents came through: default to everything rather than to unknown alone,
+    // which would look like a broken filter hiding real rows.
+    LEVELS.forEach(function(l){levelSel.add(l);});
+  }
+}
+function matchesLevel(p){
+  initLevelSel();
+  var ls = levelsOf(p);
+  if(!ls.length) return levelSel.has(UNKNOWN);
+  return ls.some(function(l){return levelSel.has(l);});
+}
+function renderChips(){
+  initLevelSel();
+  var counts = levelCounts(), keys = chipKeys(counts);
+  var el = document.getElementById("levels");
+  if(!el) return;
+  // One real level plus unknown means nothing has been stated by anyone — say so instead of
+  // rendering a filter that appears to do nothing.
+  var stated = keys.filter(function(k){return k !== UNKNOWN && counts[k] > 0;}).length;
+  el.innerHTML =
+    '<span class="lvl-lead">Supervises</span>' +
+    keys.map(function(k){
+      return '<button class="chip'+(levelSel.has(k)?" on":"")+'" data-level="'+esc(k)+'" '+
+        'aria-pressed="'+(levelSel.has(k)?"true":"false")+'">'+
+        esc(LEVEL_LABEL[k]||k)+' <span class="chip-n">'+counts[k]+'</span></button>';
+    }).join("") +
+    (stated ? "" : '<span class="lvl-note">No professor has stated a level yet — every row '+
+      'is “unknown”, which is why that is the only chip with a count.</span>');
+}
 function filtered(){
   var q=(document.getElementById("q").value||"").toLowerCase();
+  // The two filters COMPOSE (MI-4.5): text narrows, level narrows, neither resets the other.
   return DATA.professors.filter(function(p){
+    if(!matchesLevel(p)) return false;
     if(!q) return true;
     return (p.name||"").toLowerCase().indexOf(q)>=0 ||
       Object.values(p.fields).some(function(e){return e && e.state==="value" &&
         String(e.value||"").toLowerCase().indexOf(q)>=0;});
   });
+}
+function emptyStateMessage(){
+  /* MI-5.3: say WHICH empty this is. "No results" over a hidden pile of unknowns is the
+     failure mode this whole section exists to prevent. */
+  initLevelSel();
+  var counts = levelCounts();
+  var picked = LEVELS.filter(function(l){return levelSel.has(l);});
+  if(!levelSel.has(UNKNOWN) && counts.unknown > 0){
+    return "No professor is confirmed to supervise at " +
+      (picked.length ? "this level" : "any ticked level") + ". " + counts.unknown +
+      " have no statement either way — tick “unknown” to see them.";
+  }
+  return "No professors to show — " + ((DATA.run && DATA.run.coverage) ||
+    "this search returned nothing.");
 }
 function renderTable(){
   var profs=filtered();
@@ -221,7 +327,7 @@ function renderTable(){
   });
   html+='</tbody></table></div>';
   document.getElementById("grid").innerHTML= profs.length ? html :
-    '<div class="empty">'+(DATA.professors.length? 'No professors match. Try clearing the filter.'
+    '<div class="empty">'+(DATA.professors.length? esc(emptyStateMessage())
       : 'No professors to show — '+esc((DATA.run&&DATA.run.coverage)||'this search returned nothing.'))+'</div>';
 }
 function renderDeadlines(){
@@ -476,12 +582,23 @@ function setView(v){
     document.getElementById(p[0]).classList.toggle("on",v===p[1]);});
   if(v==="how") drawDiagram();
 }
-function render(){renderTable();renderDeadlines();renderLedger();
+function render(){renderChips();renderTable();renderDeadlines();renderLedger();
   document.getElementById("count").textContent=filtered().length+" / "+DATA.professors.length+" professors";}
+function onLevelChip(e){
+  var b = e.target.closest("[data-level]");
+  if(!b) return;
+  initLevelSel();
+  var k = b.getAttribute("data-level");
+  // Untickable to zero on purpose: "nothing selected" is a state the student chose, and the
+  // empty message explains it. Silently re-ticking would override their instruction.
+  if(levelSel.has(k)) levelSel.delete(k); else levelSel.add(k);
+  render();
+}
 function onId(e,keyb){var el=e.target.closest("[data-id]");
   if(el&&(!keyb||e.key==="Enter"||e.key===" ")){if(keyb)e.preventDefault();openDetail(el.getAttribute("data-id"));}}
 document.addEventListener("DOMContentLoaded",function(){
   document.getElementById("q").addEventListener("input",render);
+  document.getElementById("levels").addEventListener("click",onLevelChip);
   document.getElementById("vTable").addEventListener("click",function(){setView("table");});
   document.getElementById("vDeadlines").addEventListener("click",function(){setView("deadlines");});
   document.getElementById("vHow").addEventListener("click",function(){setView("how");});
@@ -531,6 +648,7 @@ def build_dashboard(export_obj: dict) -> str:
   <button id="vHow" class="vbtn">How it works</button>
   <span class="count" id="count"></span>
 </div>
+<div class="levels" id="levels"></div>
 <div class="wrap">
   <div id="grid"></div>
   <div id="deadlines" class="hidden"></div>

@@ -50,6 +50,32 @@ def plan_fields(plan: dict) -> list[str]:
     return listed or clean([plan.get("field"), plan.get("subfield")])
 
 
+def plan_intents(plan: dict) -> list[str]:
+    """Every supervision level the student is open to, de-duplicated, order preserved.
+
+    The exact twin of ``plan_fields``, for the same reason: one reader serves old plans and
+    new. ``intent_kinds`` (a list, what the wizard now sends) wins outright when present;
+    otherwise the single ``intent_kind`` every earlier plan carried, and which the CLI still
+    writes.
+
+    ``intent_kinds`` **is not merged with** ``intent_kind``. That is not a style choice — it
+    is the bug ``plan_fields`` shipped with. There, the page sent both the list and a
+    human-readable join of it, the two were merged, and the join became a phantom extra field
+    named after all the others, which nobody works in. Here the scalar is the list's own first
+    element, so merging would be harmless *today* and would silently start duplicating the
+    moment either side changed. Same shape, same rule, no exception.
+    """
+    def clean(values) -> list[str]:
+        out: list[str] = []
+        for v in values:
+            if isinstance(v, str) and v.strip() and v.strip() not in out:
+                out.append(v.strip())
+        return out
+
+    listed = clean(plan.get("intent_kinds") or [])
+    return listed or clean([plan.get("intent_kind")])
+
+
 def resolve_topic_ids(plan: dict, oa) -> list[str]:
     """The plan's topic IDs, or resolve them from the free-text field(s) via OpenAlex (D-058).
 

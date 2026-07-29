@@ -119,8 +119,14 @@ const ritems = [1, 2, 3, 4, 5].map(n => { const e = new El("button");
 const radios = (name, values, checkedValue) => values.map(v => {
   const r = new El("input"); r.attrs.name = name; r.value = v;
   r.checked = v === checkedValue; return r; });
-const intentRadios = radios("intent", ["pre_phd", "pre_master", "master", "phd",
-                                       "postdoc", "mentor"], "phd");
+/* Intents are CHECKBOXES since MI-1 — several levels may be ticked at once, so the harness
+   models a group with a SET of checked values rather than a single winner. `scen.intents`
+   lets a scenario drive the tick state, including the empty case. */
+const intentValues = ["pre_phd", "pre_master", "master", "phd", "postdoc", "mentor"];
+const intentChecked = new Set(scen.intents === undefined ? ["phd"] : scen.intents);
+const intentBoxes = intentValues.map((v) => {
+  const b = new El("input"); b.attrs.name = "intent"; b.attrs.type = "checkbox";
+  b.value = v; b.checked = intentChecked.has(v); return b; });
 const uniModeRadios = radios("uniMode", ["all", "prioritise", "only"], "all");
 
 const document = {
@@ -132,10 +138,13 @@ const document = {
     if (sel.startsWith("#tree ")) return byId("tree").querySelectorAll(sel.slice(6));
     if (sel === ".ritem") return ritems;
     if (sel === ".err" || sel === ".step.bad") return [];
+    if (sel === 'input[name="intent"]:checked') return intentBoxes.filter(b => b.checked);
+    if (sel === 'input[name="intent"]') return intentBoxes;
     throw new Error("mini-DOM doc: unsupported selector " + sel);
   },
   querySelector: (sel) => {
-    if (sel === 'input[name="intent"]:checked') return intentRadios.find(r => r.checked) ?? null;
+    if (sel === 'input[name="intent"]:checked') return intentBoxes.find(b => b.checked) ?? null;
+    if (sel === 'input[name="intent"]') return intentBoxes[0] ?? null;
     if (sel === 'input[name="uniMode"]:checked') return uniModeRadios.find(r => r.checked) ?? null;
     throw new Error("mini-DOM doc: unsupported selector " + sel);
   },
@@ -145,6 +154,7 @@ const document = {
 /* ── network: a scripted router that records every request ───────────────── */
 const requests = [];
 const queues = JSON.parse(JSON.stringify(scen.responses));
+const bodies = [];                       /* what the page actually SENT, parsed */
 function respond(method, url) {
   const path = url.split("?")[0];
   const key = method + " " + path;
@@ -170,6 +180,13 @@ const sandbox = {
   clearInterval: (id) => { intervals.delete(id); },
   fetch: (url, opts) => {
     const method = (opts && opts.method) || "GET";
+    // Record the request BODY too: asserting the request sequence proves the page called the
+    // right endpoint, not that it sent the right plan.
+    if (opts && opts.body) {
+      let parsed = null;
+      try { parsed = JSON.parse(opts.body); } catch (_) { parsed = String(opts.body); }
+      bodies.push({path: String(url).split("?")[0], body: parsed});
+    }
     const r = respond(method, String(url));
     return Promise.resolve({
       status: r.status,
@@ -287,8 +304,9 @@ let threw = null;
     trace.push(snap("after open dashboard"));
 
     const he = sandbox.humanError;
-    console.log(JSON.stringify({threw, trace, requests, opened, topicValues, phaseLog,
+    console.log(JSON.stringify({threw, trace, requests, bodies, opened, topicValues, phaseLog,
                                 jobNote: byId("jobNote").innerHTML,
+                                errIntent: byId("err-intent").textContent,
                                 humanError: {
                                   offline: he(0, null, {offline: true}),
                                   timeout: he(0, null, {name: "AbortError"}),
@@ -296,7 +314,7 @@ let threw = null;
                                   http500: he(500, null, null),
                                 }}));
   } catch (e) {
-    console.log(JSON.stringify({threw: String((e && e.stack) || e), trace, requests,
+    console.log(JSON.stringify({threw: String((e && e.stack) || e), trace, requests, bodies,
                                 opened, topicValues: [], phaseLog, jobNote: ""}));
   }
 })();

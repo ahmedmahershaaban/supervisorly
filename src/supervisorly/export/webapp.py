@@ -297,7 +297,9 @@ var SLOW_FACTOR = 1.5;         /* §4.2: past 1.5x the soft expectation -> calm 
    no client-side storage of plan/email; the unguessable job id is shown, not persisted). */
 var state = {
   step: 1,
-  email: "", intent: "pre_phd", country: "", universities: [], uniMode: "all",
+  /* `intents` is a LIST (MI-1) — several levels may be ticked. It mirrors the checked cards
+     and its first element is what the derived `intent_kind` scalar becomes. */
+  email: "", intents: ["pre_phd"], country: "", universities: [], uniMode: "all",
   field: "", fields: [], plan: [], variants: [], expansionOff: false, merged: null, topicTotal: 0,
   jobId: null, jobStart: 0, jobEnd: 0, lastOk: 0, watching: false,
   pollTimer: null, tickTimer: null, phaseKey: "", phaseEnter: 0, slowShown: false
@@ -481,8 +483,12 @@ function variantDepth(){
 }
 function gatherYou(){
   state.email = document.getElementById("email").value.trim();
-  var r = document.querySelector('input[name="intent"]:checked');
-  state.intent = r ? r.value : "pre_phd";
+  /* An ARRAY now (MI-1). No fallback default: an empty tick list is reported at step 1
+     rather than quietly becoming "pre_phd" — silently searching for something the student
+     did not ask for is worse than making them tick a box. */
+  state.intents = Array.prototype.map.call(
+    document.querySelectorAll('input[name="intent"]:checked'),
+    function(r){ return r.value; });
   state.country = document.getElementById("country").value.trim();
   var m = document.querySelector('input[name="uniMode"]:checked');
   state.uniMode = m ? m.value : "all";
@@ -495,6 +501,14 @@ function step1Next(){
       "a valid email is required — it joins the OpenAlex polite pool and is never shown "+
       "on any page the tool fetches.");
     document.getElementById("email").focus();
+    return;
+  }
+  if(!state.intents.length){
+    showErr("err-intent",
+      "tick at least one thing you are looking for on this step — you can tick several "+
+      "(a PhD and a pre-PhD position, say) and filter the results by level afterwards.");
+    var first = document.querySelector('input[name="intent"]');
+    if(first) first.focus();
     return;
   }
   showStep(2);
@@ -857,8 +871,12 @@ function updatePreview(){
   buildReview();
 }
 function intentLabel(){
-  var r = document.querySelector('input[name="intent"]:checked');
-  return r ? (r.getAttribute("data-label") || r.value) : "Pre-PhD / RA";
+  /* Every ticked level, in card order — the review step must show what will actually be
+     searched, not the first of several. */
+  var labels = Array.prototype.map.call(
+    document.querySelectorAll('input[name="intent"]:checked'),
+    function(r){ return r.getAttribute("data-label") || r.value; });
+  return labels.length ? labels.join(" · ") : "—";
 }
 function buildReview(){
   var unis = state.universities;
@@ -885,7 +903,11 @@ function startScan(){
   btn.disabled = true;
   clearErrs();
   var plan = {
-    intent_kind: state.intent,
+    /* The list is the truth, the scalar is derived — the same rule `fields`/`field` follows.
+       Both travel so an older reader keeps working; the server re-derives the scalar anyway,
+       so the two can never drift apart in the stored plan. */
+    intent_kinds: state.intents.slice(),
+    intent_kind: state.intents[0],
     country: state.country,
     resolved_topic_ids: checkedTopics(),
     field: state.field,
@@ -1250,8 +1272,11 @@ def build_webapp(*, api_base: str = "") -> str:
     # verbatim for substitution; api_base is trusted build-time config by contract
     api_literal = _json.dumps(str(api_base))
 
+    # MI-1: checkboxes, not radios. A student is rarely after exactly one thing — someone open
+    # to a PhD, a pre-PhD post and a master's had to pick one and hide the rest. The card
+    # styling is unchanged on purpose: this is the same control answering a better question.
     intent_cards = "".join(
-        f'<label class="rcard"><input type="radio" name="intent" value="{key}"'
+        f'<label class="rcard"><input type="checkbox" name="intent" value="{key}"'
         f' data-label="{title}"{" checked" if key == "pre_phd" else ""}>'
         f'<span class="rc-t">{title}</span>'
         f'<span class="rc-d">{desc}</span></label>'
@@ -1312,7 +1337,8 @@ def build_webapp(*, api_base: str = "") -> str:
     <input type="email" id="email" placeholder="you@university.edu" autocomplete="email">
     <div class="err" id="err-email" role="alert"></div>
     <p class="why" style="margin-top:18px">Intent — it gates how candidates are scored.</p>
-    <div class="rcards" role="radiogroup" aria-label="intent">{intent_cards}</div>
+    <div class="rcards" role="group" aria-label="what you are looking for — tick every level you would consider">{intent_cards}</div>
+    <div class="err hidden" id="err-intent"></div>
     <p class="why" style="margin-top:18px">Country (name or ISO code) — where the
       country-wide search runs.</p>
     <input type="text" id="country" placeholder="e.g. Canada or CA">

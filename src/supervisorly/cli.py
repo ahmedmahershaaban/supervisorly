@@ -416,11 +416,51 @@ def _plan_value_errors(data: dict) -> list[str]:
     if isinstance(intent, str) and intent not in PLAN_INTENT_KINDS:
         errors.append(f"'intent_kind' must be one of {', '.join(PLAN_INTENT_KINDS)}, "
                       f"got {intent!r}")
+    # A student is rarely looking for exactly one thing — someone may be open to a PhD, a
+    # pre-PhD post or a master's. `intent_kinds` carries all of them; `intent_kind` stays as
+    # the first element, derived, so every existing consumer keeps reading the shape it
+    # already reads. Same "the list is the truth, the scalar is derived" rule as
+    # `fields`/`field`.
+    check_str_list("intent_kinds")
+    kinds = data.get("intent_kinds")
+    if isinstance(kinds, list) and all(isinstance(k, str) for k in kinds):
+        if not kinds:
+            # NOT treated as "search everything": an empty list means the intent was mangled
+            # upstream, and a search for nothing is a bug, not a wide search.
+            errors.append("'intent_kinds' must not be empty — a search for no level at all "
+                          "is a mangled intent, not a wide search")
+        bad = [k for k in kinds if k not in PLAN_INTENT_KINDS]
+        if bad:
+            errors.append(f"'intent_kinds' entries must each be one of "
+                          f"{', '.join(PLAN_INTENT_KINDS)}, got "
+                          f"{', '.join(repr(b) for b in bad)}")
     if "targets" in data:
         target_errors = _target_spec_errors(data["targets"])
         if target_errors:
             errors.append("invalid 'targets': " + "; ".join(target_errors))
     return errors
+
+
+def normalize_plan_intents(plan: dict) -> dict:
+    """A copy of ``plan`` whose ``intent_kinds`` is canonical and whose ``intent_kind`` is its
+    first element.
+
+    One function, called on both entry paths (the CLI and the web API), because "the list is
+    the truth and the scalar is derived" is only true if something actually derives it. A
+    client that sends a list and a *disagreeing* scalar is corrected here rather than trusted:
+    every existing consumer — ``scorer.gates_for``, the worker's log line — reads the scalar,
+    so letting the two drift means the run is scored for a level the student did not pick.
+
+    Deliberately NOT merged: the scalar is already the list's first element, so unioning them
+    can only ever duplicate. See ``ladder.plan_intents`` for why that rule is written down
+    rather than left to judgement.
+    """
+    from .discover.ladder import plan_intents        # lazy: keeps CLI startup import-light
+
+    kinds = plan_intents(plan)
+    if not kinds:
+        return dict(plan)          # nothing to derive from; validation reports the gap
+    return {**plan, "intent_kinds": kinds, "intent_kind": kinds[0]}
 
 
 def _load_plan(path: str) -> tuple[dict | None, str | None]:
@@ -611,7 +651,13 @@ def cmd_scan(args: argparse.Namespace) -> int:
                   "(e.g. CA) or an English country name (e.g. Canada).")
             return 2
 
-    intent = args.intent or plan_file.get("intent_kind") or "pre_phd"
+    # The CLI names ONE intent (`--intent`), but a plan file may carry several. Take the
+    # file's list when the flag was not given, so `--plan` does not quietly narrow a
+    # multi-level search back to its first entry.
+    intent_kinds = ([args.intent] if args.intent
+                    else (list(plan_file.get("intent_kinds") or [])
+                          or [plan_file.get("intent_kind") or "pre_phd"]))
+    intent = intent_kinds[0]
     university_mode = args.university_mode or plan_file.get("university_mode") or "all"
     if args.universities is not None:
         universities = [u.strip() for u in args.universities.split(",") if u.strip()]
@@ -622,9 +668,10 @@ def cmd_scan(args: argparse.Namespace) -> int:
     from .fetch.transport import httpx_transport
     from .pipeline import run_live
     openalex_key = args.openalex_key or os.environ.get(preflight.OPENALEX_KEY_ENV)
-    plan = {"intent_kind": intent, "country": country_code, "field": field,
-            "university_mode": university_mode, "universities": universities,
-            "resolved_topic_ids": topic_ids}
+    plan = normalize_plan_intents(
+        {"intent_kind": intent, "intent_kinds": intent_kinds, "country": country_code,
+         "field": field, "university_mode": university_mode, "universities": universities,
+         "resolved_topic_ids": topic_ids})
     transport = httpx_transport(user_agent=f"SupervisorlyBot/0.1 (mailto:{email})")
 
     targets_override = None
