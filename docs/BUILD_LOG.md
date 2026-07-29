@@ -1564,8 +1564,11 @@ Three defects wearing one error message:
    cap. Now **50**.
 
 **What 50 does not do is bet on an unmeasured OpenAlex OR-list width.** I tried to measure it
-and could not: the API answered `429 Insufficient budget … resets at midnight UTC` — the same
-exhausted-budget response that produced the silent-unfiltered-scan bug earlier this session.
+and could not: `429 Insufficient budget … resets at midnight UTC`. That budget is **per
+caller** — this workstation's was spent on the day's spikes, while production on its own
+address kept answering normally (`/api/map?field=natural language processing` → 5 groups,
+11 topics, no truncation, checked live during this deploy). So the number is unverified for a
+reason that has nothing to do with the product, and nothing about it is blocking students.
 So `authors_by_institution` now splits the filter into `TOPIC_FILTER_CHUNK = 25`-wide queries
 and merges them, deduped by OpenAlex id. 25 is the width that has been running in production;
 anything wider is untested, and the cap no longer depends on the answer. One failing chunk

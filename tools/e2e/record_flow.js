@@ -237,6 +237,43 @@ async function shot(name) {
   await sleep(800);
   const picked = await evalJs(`document.querySelectorAll("input.topic:checked").length`);
   check("topics selectable", picked > 0, picked + " selected");
+
+  // ── the cap is met HERE, not on the last click of the wizard ─────────────
+  // Reported from production: 111 topics offered, 49 checked, and step 4 answered
+  // "'resolved_topic_ids' must hold at most 25 topics (got 49)" — a dead end two steps from
+  // the checkboxes. These checks are what stop that shape coming back.
+  const cap = await evalJs(`typeof MAX_TOPICS === "number" ? MAX_TOPICS : -1`);
+  check("the page knows the server's cap", cap > 0, "MAX_TOPICS = " + cap);
+  const countTxt = await evalJs(`document.getElementById("selCount").textContent`);
+  check("the counter states the cap before anything goes wrong",
+        countTxt.includes("can be scanned") && countTxt.includes(String(cap)), countTxt.trim());
+
+  if (nTopics > cap) {
+    await evalJs(`Array.from(document.querySelectorAll("input.topic"))
+      .forEach(c=>{if(!c.checked){c.checked=true;c.dispatchEvent(new Event("change",{bubbles:true}));}})`);
+    await sleep(600);
+    const overTxt = await evalJs(`document.getElementById("selCount").textContent`);
+    const overCls = await evalJs(`document.getElementById("selCount").className`);
+    check("going over the cap is said at once", /too many/.test(overTxt), overTxt.trim());
+    check("and marked, not just worded", /over/.test(overCls), overCls);
+    await realClick("#toStep4");
+    await sleep(600);
+    const stillS3 = await evalJs(`!document.getElementById("s3").classList.contains("hidden")`);
+    const capErr = await evalJs(`(document.getElementById("err-topics")||{}).textContent||""`);
+    check("step 3 refuses to advance an over-cap plan", stillS3 === true, "on step 3: " + stillS3);
+    check("and says how many to uncheck", /uncheck \d+/.test(capErr), capErr.trim().slice(0, 110));
+    await shot("03b-step3-over-cap");
+    // recover: back under the cap, exercising the >25 chunked-query path in the real scan
+    await evalJs(`Array.from(document.querySelectorAll("input.topic"))
+      .forEach((c,i)=>{const want=i<${Math.min(30, 50)};if(c.checked!==want){c.checked=want;
+        c.dispatchEvent(new Event("change",{bubbles:true}));}})`);
+    await sleep(600);
+    const back = await evalJs(`document.querySelectorAll("input.topic:checked").length`);
+    check("unchecking clears the block", back > 25 && back <= cap, back + " selected");
+  } else {
+    check("SKIPPED: over-cap check needs a field offering more than " + cap + " topics",
+          true, nTopics + " offered — not exercised this run");
+  }
   await realClick("#toStep4");
   await waitFor(`!document.getElementById("s4").classList.contains("hidden")`, "step 4");
   await sleep(900); await shot("04-step4-scope");

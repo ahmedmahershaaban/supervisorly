@@ -30,11 +30,13 @@ MAX_TOPICS = 50
 #: How many topic ids may ride in ONE OpenAlex ``topics.id:a|b|c`` OR-filter.
 #:
 #: This is deliberately **not** :data:`MAX_TOPICS`. OpenAlex documents a limit on OR-list
-#: length, and we have not measured it — the day this changed, the API's daily budget was
-#: exhausted ("Insufficient budget … resets at midnight UTC"), so the honest position is
-#: that 25 is the width proven in production and anything wider is untested. Chunking makes
-#: the cap independent of that unknown: a 50-topic plan issues two 25-wide queries whose
-#: results are merged, instead of one query nobody has verified the API will accept.
+#: length and we have not measured it: the attempt hit `429 Insufficient budget … resets at
+#: midnight UTC` — OpenAlex's free budget is **per caller**, and this workstation's was spent
+#: on the day's spikes while production, on its own address, kept answering normally. So the
+#: number stays unverified for a reason unrelated to the product. 25 is the width already
+#: proven by every scan that has run; anything wider is untested. Chunking makes the cap
+#: independent of that unknown: a 50-topic plan issues two 25-wide queries whose results are
+#: merged, instead of one query nobody has confirmed the API will accept.
 #:
 #: The cost is one extra request per institution per chunk, and only for students who
 #: deliberately choose more than 25 topics. If a measurement later shows a wider OR-list is
