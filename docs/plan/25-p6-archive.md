@@ -1,5 +1,34 @@
 # P6 — Historical cycles *(what the deadline was last year)*
 
+# SPIKE-6 RESULT, 2026-07-29 — **PASS (50%, gate 25%)**, but P6 is blocked upstream.
+
+`tools/spikes/spike_wayback.py`, run against the admissions URLs **SPIKE-1's crawl actually
+found** — P1 was never built, so there is no harvest to draw from, and the archive is queried
+only for URLs discovery produced rather than any we authored (D-038).
+
+| url | usable cycles |
+|---|---|
+| `asu.edu.eg/postgraduate` | **6** (2021–2026) |
+| `aisegypt.com/admissions/application-help` | **5** (2022–2026) |
+| `must.edu.eg/…/graduate-studies` | 1 |
+| `ohi.edu.eg/training-courses` | 0 — not archived |
+
+**2/4 = 50% have ≥ 3 cycles**, against a 25% gate. Cycles are counted **per year**
+(`collapse=timestamp:4`) and only 2xx captures count: fifty captures in one busy year is one
+cycle, and a 404 capture records that a URL existed, not a deadline anyone could read.
+
+**So the archive is not the problem — but P6 still cannot be built.** P6 projects a next
+deadline from past ones on *admissions pages P1 discovered*. P1 is `[!]` (SPIKE-1 = 0% on the
+real cohort, cause upstream in [B-006](../BLOCKERS.md)). With no P1 there is no URL harvest to
+project from; four hand-carried URLs from a spike are not a pipeline.
+
+**This is a good state to be in**: when P1 lands, its URLs go straight into a projection whose
+feasibility is already measured. Re-run then — 4 URLs is thin and the number is indicative.
+
+P6-1 stays `[!]`, blocked on **P1**, not on its own gate.
+
+---
+
 ← [`README.md`](README.md) · [`00-invariants.md`](00-invariants.md) · gate: **SPIKE-6** in [`01-spikes.md`](01-spikes.md)
 
 **Size: S · Risk: low.** Isolated — it can fail entirely and nothing else notices.
@@ -19,7 +48,7 @@ cycles.
 
 ---
 
-## P6-1 · Archive client `[ ]`
+## P6-1 · Archive client `[!]` blocked on P1 — SPIKE-6 itself PASSED (50%)
 
 **Files**: `src/supervisorly/discover/archive.py` *(new)*, `tests/test_archive.py` *(new)*
 

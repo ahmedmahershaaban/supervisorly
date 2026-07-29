@@ -1,5 +1,24 @@
 # P7 — Bring your own model key
 
+> ## STATUS, 2026-07-29 — **the UI half is shipped; the backend switch is not.**
+>
+> **[FE-5](30-frontend.md#fe-5--optional-model-key-x--the-ui-half-of-p7) is live** at
+> `web-v22`: a collapsed "Use my own model key (optional)" panel on step 1, a password input,
+> "Test key" (one cheap call **straight to Google**, never proxied through us), and one-click
+> Clear.
+>
+> **P7's security rules are already enforced structurally**, not merely promised — the key
+> never enters `state` (which is what gets serialised into a plan); tests assert that no line
+> touching the key mentions `api(` or `/api/`, that the POSTed plan carries no key-shaped
+> field, and that the **D-071 error beacon cannot reach it** (that beacon posts error text to
+> our servers and is the real leak path). Browser→Gemini CORS was re-confirmed working.
+>
+> **What is NOT done:** the expansion step still runs server-side on
+> `SUPERVISORLY_EXPAND_KEY`. Making the *student's* key drive it — and failing closed to their
+> own words when it is invalid or quota-exhausted — is the remaining P7-1 work.
+
+---
+
 ← [`README.md`](README.md) · [`00-invariants.md`](00-invariants.md)
 
 **Size: S · Risk: low.** Independent of the harvest chain — can be built in parallel.

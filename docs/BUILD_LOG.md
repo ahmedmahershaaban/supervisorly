@@ -1462,3 +1462,22 @@ cohorts are small *because of B-006* — the UK sample is 4 institutions, all th
 ones ROR's first 100 GB rows contain. Fixing B-006 widens every future cohort.
 
 **Next step, cheap and unblocked:** re-run on 2–3 more countries. It needs no OpenAlex.
+
+## round AC — SPIKE-6 passes, and the P7 UI ships
+
+**SPIKE-6 = 50% (2/4), gate 25% → PASS.** `asu.edu.eg/postgraduate` has six archived cycles
+and `aisegypt.com/admissions/…` five. Cycles are counted **per year** and only 2xx captures
+count — fifty captures in one busy year is one cycle, and a 404 capture records that a URL
+existed, not a deadline anyone could read.
+
+**But P6 is still blocked**, on P1 rather than on its own gate: it projects from admissions
+pages P1 would discover, and P1 is `[!]`. Four hand-carried URLs from SPIKE-1's crawl are not
+a pipeline. This is a good state — when P1 lands, its URLs feed a projection whose feasibility
+is already measured.
+
+**P7 is `◐`:** FE-5 shipped the UI half and the security rules are enforced by tests rather
+than promised. The remaining work is switching the expansion step from the server key to the
+student's, failing closed to their own words.
+
+**Session totals:** 1035 tests passing (from 907); deployed web-v19 → v22 with the worker
+digest confirmed changing at every step; the e2e went 33 → 54 checks against production.
