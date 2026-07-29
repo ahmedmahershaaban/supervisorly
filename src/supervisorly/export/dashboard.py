@@ -153,6 +153,13 @@ ol.works .yr{font-family:var(--mono);font-size:11px;color:var(--faint);margin-ri
 .field .k{font-family:var(--mono);font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--faint)}
 .field .v{margin-top:4px;color:var(--ink2)}
 .field blockquote{margin:6px 0 0;padding-left:10px;border-left:2px solid var(--line2);color:var(--muted);font-size:13px}
+/* T-1 translation marker — the original quote stays; this labels a display translation */
+.tmark{display:inline-block;margin-left:6px;padding:0 5px;border:1px solid var(--line2);
+  border-radius:5px;font-family:var(--mono);font-size:11px;color:var(--teal);cursor:help}
+.tmark:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.tline{margin:5px 0 0 10px;color:var(--muted);font-size:12.5px;font-style:italic}
+.tlabel{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--faint);font-style:normal;margin-right:6px}
 /* ── diagram engine (cells + filaments) ── */
 .stage{position:relative;width:100%;min-width:760px;aspect-ratio:1040/560;
   border:1px solid var(--line);border-radius:14px;overflow:hidden;
@@ -441,6 +448,24 @@ function fallbackCopyText(txt){
   document.body.removeChild(ta);
 }
 
+/* ── T-1: the translation marker ───────────────────────────────────────────────
+   The quote above is ALWAYS the source-language sentence — it is what the D-010 gate
+   verified against the snapshot, and it is what stays on screen. A translation is shown
+   BELOW it, labelled, never in place of it. The icon exists so a student knows the reading
+   depends on a machine translation and that the original is the thing to check. */
+function transMark(env){
+  if(!env || !env.quote_translated) return '';
+  var by = env.translated_by ? ' by '+env.translated_by : '';
+  return ' <span class="tmark" tabindex="0" role="img" aria-label="machine-translated'+
+    esc(by)+' — check the original before relying on it" title="Machine-translated'+
+    esc(by)+'. The quote above is the page’s own wording; check it before relying '+
+    'on this.">文</span>';
+}
+function transLine(env){
+  if(!env || !env.quote_translated) return '';
+  return '<div class="tline"><span class="tlabel">machine translation</span> “'+
+    esc(env.quote_translated)+'”</div>';
+}
 function openDetail(id){
   var p=DATA.professors.find(function(x){return x.id===id;}); if(!p) return;
   var anyBlocked=false;
@@ -448,7 +473,8 @@ function openDetail(id){
     var env=p.fields[f.id]||{state:"never_attempted"}, v;
     if(env.state==="value"){
       v='<div class="v s-value">'+esc(env.value)+'</div>'+
-        (env.quote?'<blockquote>“'+esc(env.quote)+'”</blockquote>':'')+srcLink(env.source_url)+
+        (env.quote?'<blockquote>“'+esc(env.quote)+'”'+transMark(env)+'</blockquote>':'')+
+        transLine(env)+srcLink(env.source_url)+
         (env.confidence?' <span class="count">'+esc(env.confidence)+(isWatch(env)?' · watch':'')+'</span>':'');
     } else {
       if(env.state==="blocked") anyBlocked=true;

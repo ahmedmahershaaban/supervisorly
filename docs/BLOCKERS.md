@@ -10,6 +10,50 @@ it, not by deleting it.
 
 ---
 
+## B-008 — CC-4.1 asks to store the field and country in `localStorage`; D-069 forbids it
+
+**Status:** OPEN, small, and already handled conservatively in code — recorded so the choice
+is Ahmed's rather than mine. Found 2026-07-29 building CC-4 / FE-1.
+
+### The contradiction
+
+- **CC-4.1** (`plan/10-cross-cutting.md`): "Keep a **local list** of past job ids + field /
+  country / date in `localStorage`."
+- **[D-069](DECISIONS.md#d-069)** item 3: "No personal data is stored client-side (**no
+  localStorage/cookies for plan or email**)."
+
+The field and country *are* the plan. A locked decision outranks a plan task, so the shipped
+list stores **the job id and the date only** and nothing else. A test pins the stored shape
+and fails if `state.email`, `state.fields`, `state.country` or the plan ever appears in a
+`localStorage.setItem` line.
+
+### What that costs, honestly
+
+The panel reads *"29 July 2026, 14:05 · 7a3df6…"* instead of *"cardiovascular disease —
+Egypt · 29 July"*. With several past searches that is materially harder to tell apart, which
+is most of FE-1's point. The feature works; it is just less legible than intended.
+
+### The decision needed from Ahmed
+
+Is a **field name and country** personal data in the sense D-069 means?
+
+They describe the *search*, not the student, and they are already in the URL bar during the
+session. The risk D-069 addresses is a shared or seized device revealing who the user is and
+what they are applying for — a country plus a niche field could contribute to the second half
+of that.
+
+1. **Keep it as shipped** (id + date). Safest; least useful.
+2. **Amend D-069** to permit non-identifying search labels in `localStorage`, and restore
+   CC-4.1 as written. This is a *decision change*, so it belongs in `DECISIONS.md` with a
+   dated note — not a quiet edit here.
+3. **Middle option:** store the field but not the country, or truncate the field. Probably
+   the worst of both — it complicates the rule without clearly reducing the risk.
+
+Whichever is chosen, `10-cross-cutting.md` CC-4.1 and D-069 must end up agreeing, so this
+cannot resurface.
+
+---
+
 ## B-007 — The deep-dive has no supply of pages that could contain a recruiting claim
 
 **Status:** OPEN. Measured 2026-07-29 while trying to run SPIKE-4. Needs a sequencing

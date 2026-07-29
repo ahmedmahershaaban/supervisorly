@@ -121,7 +121,7 @@ Start at 8–10 concurrent pages (~1–2 GB against the worker's 4 GiB) and meas
 
 ---
 
-## CC-4 · Sessions the student can re-open `[ ]`
+## CC-4 · Sessions the student can re-open `[x]`
 
 *(Ahmed, 2026-07-29.)* A finished result is kept and re-openable from the UI; starting a new
 search never deletes an old one.
@@ -131,17 +131,24 @@ search never deletes an old one.
 - `tests/test_sessions.py` *(new)*
 
 **Subtasks**
-- [ ] CC-4.1 Keep a **local list** of past job ids + field / country / date in `localStorage`
-- [ ] CC-4.2 "Your past searches" panel on step 1 — open one, or start fresh
-- [ ] CC-4.3 Starting a new scan **never** clears the list
-- [ ] CC-4.4 A job past its 7-day TTL shows as expired **with the reason**, not as an error
-- [ ] CC-4.5 "Forget this search" removes it locally — their device, their choice
-- [ ] CC-4.6 Tests: the list survives a new scan; expired entries degrade honestly
+- [x] CC-4.1 Keep a **local list** of past job ids ~~+ field / country~~ + date in `localStorage`
+      — **field and country deliberately omitted: they are plan data and D-069 forbids plan
+      data in browser storage. See [B-008](../BLOCKERS.md); the decision is Ahmed's.**
+- [x] CC-4.2 "Your past searches" panel on step 1 — open one, or start fresh
+- [x] CC-4.3 Starting a new scan **never** clears the list
+- [x] CC-4.4 A job past its 7-day TTL shows as expired **with the reason**, not as an error
+- [x] CC-4.5 "Forget this search" removes it locally — their device, their choice
+- [x] CC-4.6 Tests: the list survives a new scan; expired entries degrade honestly
 
 **Constraint** — the job id **is** the access token (D-069). The list is local only, never
 server-side, and jobs stay unlistable.
 
-**Review** `[ ]`
+**Done, 2026-07-29.** UI half is FE-1 in [`30-frontend.md`](30-frontend.md), where the notes
+live. The one thing to carry forward: a `localStorage` write is wrapped in `try`/`catch`
+everywhere, so private mode or disabled storage degrades to "no past searches" and can never
+fail a scan.
+
+**Review** `[R]`
 
 ---
 

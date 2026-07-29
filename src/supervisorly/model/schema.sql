@@ -157,7 +157,16 @@ CREATE TABLE IF NOT EXISTS claim (
     CHECK (confidence IS NULL OR confidence IN
       ('quoted_official','derived','inferred','unconfirmed','action_needed')),
   superseded_by  TEXT REFERENCES claim(claim_id),
-  created_at     TEXT NOT NULL
+  created_at     TEXT NOT NULL,
+  -- T-1 (schema v5). A DISPLAY translation travelling BESIDE the verbatim quote, never
+  -- replacing it. `quote` stays in the SOURCE language because that is what the D-010 gate
+  -- verifies against the snapshot; storing an English quote for an Arabic page would
+  -- manufacture a sentence the page never contained — fabricating evidence with good
+  -- intentions. `record_claim` never verifies against these columns, and a test pins it.
+  -- Both nullable and added to an existing table by `_add_missing_columns` in db.py, which
+  -- is idempotent (plain ALTER in this file would fail on the second migrate).
+  quote_translated TEXT,
+  translated_by    TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_claim_entity ON claim(entity_kind, entity_id, field);
 

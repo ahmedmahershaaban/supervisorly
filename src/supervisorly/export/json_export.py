@@ -109,7 +109,7 @@ def _envelope(claim: dict | None) -> dict:
                 "source_url": None, "snapshot_hash": None, "observed_at": None,
                 "confidence": None, "extractor": None}
     state = claim.get("state", "value")
-    return {
+    env = {
         "state": state,
         "value": _redact_pii(claim.get("value")) if state == "value" else None,
         "quote": _redact_pii(claim.get("quote")),
@@ -119,6 +119,13 @@ def _envelope(claim: dict | None) -> dict:
         "confidence": claim.get("confidence"),
         "extractor": claim.get("extractor_agent"),
     }
+    # T-1: a display translation travels BESIDE the verbatim quote, and only when one exists.
+    # `quote` above is still the source-language sentence the D-010 gate verified — these keys
+    # never replace it, and their absence is what makes the dashboard's marker meaningful.
+    if claim.get("quote_translated"):
+        env["quote_translated"] = _redact_pii(claim.get("quote_translated"))
+        env["translated_by"] = claim.get("translated_by")
+    return env
 
 
 def build_export(

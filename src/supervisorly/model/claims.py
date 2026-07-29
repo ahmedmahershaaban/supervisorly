@@ -44,6 +44,8 @@ def record_claim(
     state: str = "value",
     value=None,
     quote: str | None = None,
+    quote_translated: str | None = None,
+    translated_by: str | None = None,
     source_id: str | None = None,
     snapshot_hash: str | None = None,
     snapshot_html: str | None = None,
@@ -82,6 +84,11 @@ def record_claim(
                 return RecordResult(None, "value claim has no snapshot to verify against")
             if not quote:
                 return RecordResult(None, "value claim has no quote to verify (D-010)")
+            # ``quote``, NEVER ``quote_translated`` (T-1). The snapshot is in the page's own
+            # language, so a translation cannot appear in it — and if the gate ever fell back
+            # to the translation, an English sentence no page ever contained would become
+            # verified evidence. That is fabrication with good intentions, which is the exact
+            # failure D-010 exists to prevent. The translation is display-only, and pinned so.
             if not quote_in_snapshot(quote, snapshot_html):
                 return RecordResult(None, "quote not found in snapshot — rejected (D-010)")
         # human-assisted value claims: sourced+dated, no snapshot to verify (D-043)
@@ -90,12 +97,14 @@ def record_claim(
     import json
     conn.execute(
         "INSERT INTO claim(claim_id, entity_kind, entity_id, field, state, value, quote, "
+        "quote_translated, translated_by, "
         "source_id, snapshot_hash, observed_at, extractor_agent, extractor_model, "
         "prompt_version, schema_version, confidence, created_at) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (claim_id, entity_kind, entity_id, field, state,
          json.dumps(value) if value is not None else None,
-         quote, source_id, snapshot_hash, observed_at, extractor_agent, extractor_model,
+         quote, quote_translated, translated_by,
+         source_id, snapshot_hash, observed_at, extractor_agent, extractor_model,
          prompt_version, schema_version, confidence, utcnow()),
     )
     conn.commit()

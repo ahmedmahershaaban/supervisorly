@@ -13,14 +13,31 @@ Independent of the harvest chain except where noted, so it can run in parallel.
 
 ---
 
-## FE-1 · Past searches on step 1 `[ ]` — *(the UI half of CC-4)*
+## FE-1 · Past searches on step 1 `[x]` — *(the UI half of CC-4)*
 
-- [ ] FE-1.1 Panel above the email field: past searches with field, country, date, status
-- [ ] FE-1.2 "Open" re-enters step 5 for a finished job; "Start fresh" clears the form only
-- [ ] FE-1.3 An expired job (7-day TTL) says so and offers "run it again" — **never an error**
-- [ ] FE-1.4 On a first visit the panel is absent entirely — no empty box
+- [x] FE-1.1 Panel above the email field: past searches with ~~field, country,~~ date, status
+      — **field and country are NOT stored**, see below
+- [x] FE-1.2 "Open" re-enters step 5 for a finished job; "Start fresh" clears the form only
+- [x] FE-1.3 An expired job (7-day TTL) says so and offers "run it again" — **never an error**
+- [x] FE-1.4 On a first visit the panel is absent entirely — no empty box
 
-**Review** `[ ]`
+**Done, 2026-07-29, with one deliberate reduction.** CC-4.1 asks for "job ids + field /
+country / date" in `localStorage`; [D-069](../DECISIONS.md#d-069) says "no localStorage /
+cookies for **plan** or email", and the field and country *are* the plan. A locked decision
+outranks a plan task, so the list stores **the job id and the date only** and the conflict is
+recorded as **[B-008](../BLOCKERS.md)** for Ahmed rather than resolved in favour of the nicer
+label. The cost is real and stated there: rows read `29 July 2026, 14:05 · 7a3df6…`.
+
+- Remembered at **scan start**, not completion — a scan the student walked away from mid-run
+  is exactly the one they need the id for later.
+- `pastOpen` re-enters step 5 and lets the normal poller decide what the job *is* now. Two
+  places deciding job state is how they drift apart.
+- Expiry is a 404/410 from the status endpoint, rendered as an explanation and a "run it
+  again" button — a terminal state is never a dead end (D-070).
+- Every storage call is wrapped: private mode, disabled storage and corrupt JSON all degrade
+  to "no past searches". A convenience feature must never be able to fail a scan.
+
+**Review** `[R]`
 
 ## FE-2 · Step 2 polish `[ ]`
 
@@ -92,14 +109,28 @@ That is fabricating evidence, with good intentions.
 | **translation** | display only, labelled |
 
 **Subtasks**
-- [ ] T-1.1 Snapshot and quote stay in the source language; the gate verifies against the original
-- [ ] T-1.2 Optional `quote_translated` + `translated_by` travel **beside** the quote, never
+- [x] T-1.1 Snapshot and quote stay in the source language; the gate verifies against the original
+- [x] T-1.2 Optional `quote_translated` + `translated_by` travel **beside** the quote, never
       replacing it
-- [ ] T-1.3 Dashboard shows a **translation icon**; hover explains it is machine-translated and
+- [x] T-1.3 Dashboard shows a **translation icon**; hover explains it is machine-translated and
       that the original should be checked before relying on it
-- [ ] T-1.4 The original sentence is **always reachable** from the UI
-- [ ] T-1.5 Tests: a translated quote never satisfies the gate; the icon appears only when a
+- [x] T-1.4 The original sentence is **always reachable** from the UI
+- [x] T-1.5 Tests: a translated quote never satisfies the gate; the icon appears only when a
       translation exists
+
+**Done, 2026-07-29** (schema v5 — two nullable columns on `claim`).
+
+- **The gate reads `quote`, never `quote_translated`.** The snapshot is in the page's own
+  language, so a translation cannot appear in it; a gate that fell back to the translation
+  would turn an English sentence no page ever contained into verified evidence. That is the
+  one test in this file that is about D-010 rather than presentation.
+- The export keys are **absent, not null**, when there is no translation — their presence is
+  what makes the marker meaningful.
+- Adding columns needed `_add_missing_columns` in `db.py`: `CREATE TABLE IF NOT EXISTS` is a
+  no-op on an existing table, so a new column in `schema.sql` reaches a *new* database and
+  never an old one, and a plain `ALTER` in that file is not idempotent.
+- Nothing produces translations yet — P5 would. This is the display contract and the gate
+  boundary, landed ahead of it so the boundary exists before anything can cross it.
 
 **Note** — no translation step is needed for *extraction*. Models read Arabic natively;
 translation was only ever required for the English regex triage, and P4-1.4 already handles

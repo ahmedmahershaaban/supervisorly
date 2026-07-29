@@ -223,6 +223,21 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 .jobid{font-family:var(--mono);font-size:12px;color:var(--teal);word-break:break-all}
 .err{display:none;color:var(--coral);font-family:var(--mono);font-size:11.5px;margin-top:8px}
 .err.on{display:block}
+/* CC-4 / FE-1: past searches. Absent entirely on a first visit — no empty box. */
+.past{border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:18px;
+  background:var(--chip)}
+.past-h{margin:0;font-family:var(--mono);font-size:11px;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--accent);font-weight:700}
+.past-note{margin:6px 0 10px;color:var(--faint);font-size:12px}
+.past-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:7px}
+.past-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.past-label{flex:1;min-width:180px;font-size:13.5px;color:var(--ink2)}
+.past-open,.past-forget{background:transparent;border:1px solid var(--line);border-radius:8px;
+  padding:5px 12px;cursor:pointer;font-family:var(--mono);font-size:12px;color:var(--ink2)}
+.past-open:hover{border-color:var(--teal);color:var(--teal)}
+.past-forget:hover{border-color:var(--coral);color:var(--coral)}
+.past-open:focus-visible,.past-forget:focus-visible{outline:2px solid var(--focus);
+  outline-offset:2px}
 .step.bad{border-color:rgba(240,131,154,.6)}
 #toast{position:fixed;bottom:26px;left:50%;transform:translateX(-50%);z-index:70;
   background:var(--chip);border:1px solid var(--teal);color:var(--teal);border-radius:10px;
@@ -402,6 +417,79 @@ function humanError(status, body, err){
 }
 
 /* ── wizard shell ── */
+/* ── CC-4 / FE-1: past searches ────────────────────────────────────────────────
+   A finished result is kept and re-openable; starting a new search NEVER deletes an old one.
+
+   WHAT IS STORED: the job id and the date. NOTHING ELSE.
+
+   CC-4.1 asks for "job ids + field / country / date", but D-069 says in as many words: "No
+   personal data is stored client-side (no localStorage/cookies for **plan** or email)" — and
+   the field and country ARE the plan. A locked decision wins over a plan task, so the labels
+   are left out and the conflict is recorded in BLOCKERS.md (B-008) rather than silently
+   resolved in favour of the nicer UI.
+
+   The job id is the access token (D-069), so this list lives in this browser and nowhere
+   else — jobs stay unlistable server-side and none of it ever reaches our API. Anyone holding
+   the id can open the result, which is exactly the property the link already has; "forget
+   this search" removes it from this device on request. */
+var PAST_KEY = "supervisorly.past";
+var PAST_MAX = 20;
+
+function pastLoad(){
+  try {
+    var raw = window.localStorage.getItem(PAST_KEY);
+    var list = raw ? JSON.parse(raw) : [];
+    return Array.isArray(list) ? list.filter(function(e){ return e && e.id; }) : [];
+  } catch(_){ return []; }        /* private mode, disabled storage, corrupt JSON */
+}
+function pastSave(list){
+  try { window.localStorage.setItem(PAST_KEY, JSON.stringify(list.slice(0, PAST_MAX))); }
+  catch(_){}                      /* storage is a convenience; a scan must never fail on it */
+}
+function pastRemember(id){
+  if(!id) return;
+  var list = pastLoad().filter(function(e){ return e.id !== id; });
+  list.unshift({id: String(id), at: new Date().toISOString()});
+  pastSave(list);                 /* unshift + filter: re-opening one moves it to the top */
+}
+function pastForget(id){
+  pastSave(pastLoad().filter(function(e){ return e.id !== id; }));
+  renderPast();
+}
+function pastLabel(e){
+  /* Date plus a short id fragment. Not the field or country — see the note above: those are
+     plan data, and D-069 keeps plan data out of browser storage. The full id is never shown
+     in the list because it is the access token; the row is for recognising, and Open carries
+     the real id. */
+  var when = "";
+  try { when = new Date(e.at).toLocaleString(); } catch(_){}
+  return (when || "an earlier search") + " · " + String(e.id).slice(0, 6) + "…";
+}
+function renderPast(){
+  var host = document.getElementById("past");
+  if(!host) return;
+  var list = pastLoad();
+  /* FE-1.4: on a first visit the panel is ABSENT, not an empty box saying "no searches". */
+  host.classList.toggle("hidden", list.length === 0);
+  if(!list.length){ host.innerHTML = ""; return; }
+  host.innerHTML =
+    '<h2 class="past-h">Your past searches</h2>' +
+    '<p class="past-note">Kept in this browser only — never sent to us. Starting a new '+
+    'search does not remove them.</p>' +
+    '<ul class="past-list">' + list.map(function(e){
+      return '<li class="past-row"><span class="past-label">'+esc(pastLabel(e))+'</span>'+
+        '<button type="button" class="past-open" data-past-open="'+esc(e.id)+'">Open</button>'+
+        '<button type="button" class="past-forget" data-past-forget="'+esc(e.id)+'" '+
+        'aria-label="Forget the search for '+esc(pastLabel(e))+'">Forget</button></li>';
+    }).join("") + '</ul>';
+}
+function pastOpen(id){
+  /* Re-enter step 5 and let the normal poller decide what this job IS now — done, running,
+     cancelled or expired. Guessing here would mean two places that decide job state. */
+  state.jobId = String(id);
+  showStep(5);
+  beginWatching();
+}
 function showStep(n){
   state.step = n;
   for(var i=1;i<=5;i++)
@@ -929,6 +1017,12 @@ function startScan(){
     if((r.status===202 || r.status===200) && r.body && r.body.job_id){
       /* 200 existing:true = a double-click/refresh — jump straight to progress */
       state.jobId = String(r.body.job_id);
+      /* CC-4.3: remembered at START, not at completion. A scan the student walked away from
+         mid-run is exactly the one they need the id for later, and a list that only recorded
+         finished jobs would lose it. Recording the same id twice moves it to the top rather
+         than duplicating it. */
+      pastRemember(state.jobId);
+      renderPast();
       beginWatching();
       showStep(5);
     } else if(r.status===429){
@@ -1064,6 +1158,22 @@ function renderStatus(b){
     checkSlow(phase, counts);
   }
 }
+function showExpired(){
+  /* FE-1.3. Results live 7 days (D-069), so a job the student kept a link to WILL eventually
+     be gone. That is the system working, not a failure — so it reads as an explanation and an
+     offer, never as an error banner. A terminal state is never a dead end (D-070). */
+  stopPolling();
+  state.jobEnd = Date.now();
+  setBar(null);
+  document.getElementById("phaseLine").textContent =
+    "This search has expired. Results are kept for 7 days and then deleted — that is on "+
+    "purpose, because they are personal data. You can run it again.";
+  document.getElementById("cancelBtn").classList.add("hidden");
+  document.getElementById("resumeBtn").classList.add("hidden");
+  document.getElementById("openDash").classList.add("hidden");
+  document.getElementById("againBtn").classList.remove("hidden");
+  hideSlow(); hideLost();
+}
 function poll(){
   if(!state.jobId) return;
   fetchJson(api("/api/scan/"+state.jobId)).then(function(r){
@@ -1071,6 +1181,8 @@ function poll(){
       state.lastOk = Date.now();
       hideLost();
       renderStatus(r.body);
+    } else if(r.status===404 || r.status===410){
+      showExpired();          /* gone, not broken */
     } else pollError();
   }, function(){ pollError(); });
 }
@@ -1181,6 +1293,21 @@ function resumeById(){
 document.addEventListener("DOMContentLoaded", function(){
   /* wire every control FIRST — a failing API call can then never take down the page */
   renderChips();
+  renderPast();
+  /* FE-1.2 / CC-4.5: delegated, because the rows are re-rendered whenever the list changes. */
+  document.getElementById("past").addEventListener("click", function(e){
+    var open = e.target.closest("[data-past-open]");
+    if(open){ pastOpen(open.getAttribute("data-past-open")); return; }
+    var forget = e.target.closest("[data-past-forget]");
+    if(forget) pastForget(forget.getAttribute("data-past-forget"));
+  });
+  document.getElementById("againBtn").addEventListener("click", function(){
+    /* Back to step 1 with the form intact, so "run it again" is one click and then Start.
+       The expired job's own id is NOT reused — a new scan is a new job. */
+    state.jobId = null;
+    document.getElementById("againBtn").classList.add("hidden");
+    showStep(1);
+  });
   document.getElementById("email").addEventListener("input", function(e){
     var v = e.target.value.trim();
     var err = document.getElementById("err-email");
@@ -1329,6 +1456,7 @@ def build_webapp(*, api_base: str = "") -> str:
   </nav>
 
   <section class="step" id="s1">
+    <div id="past" class="past hidden"></div>
     <div class="step-head"><span class="step-code">STEP 01</span><h2>You</h2></div>
     <p class="why">Who to contact and what you're looking for. The email is required — it
       identifies you to the OpenAlex polite pool and is never shown on any page the tool
@@ -1471,6 +1599,7 @@ def build_webapp(*, api_base: str = "") -> str:
       <button type="button" class="btn ghost" id="cancelBtn">Cancel scan</button>
       <button type="button" class="btn hidden" id="resumeBtn">Resume scan</button>
       <button type="button" class="btn big hidden" id="openDash">Open dashboard ↗</button>
+      <button type="button" class="btn hidden" id="againBtn">Run this search again</button>
       <button type="button" class="btn ghost" id="copyDiag">Copy diagnostics</button>
     </div>
     <div class="hint">cancel stops after the current page and keeps everything gathered —

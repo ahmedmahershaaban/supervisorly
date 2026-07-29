@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from importlib import resources
 from pathlib import Path
 
-SCHEMA_VERSION = "4"
+SCHEMA_VERSION = "5"
 
 
 def new_id(prefix: str) -> str:
@@ -186,6 +186,27 @@ def _rebuild_run(conn: sqlite3.Connection) -> None:
         conn.execute("PRAGMA foreign_keys=ON")
 
 
+#: Columns added to existing tables after their CREATE was first shipped. Purely additive and
+#: nullable — the whole point is that a column can be introduced without the rename-aside
+#: rebuild a CHECK widening needs. `CREATE TABLE IF NOT EXISTS` is a no-op on a table that
+#: already exists, so a new column in schema.sql reaches a NEW database and never an old one;
+#: this closes that gap. A plain `ALTER TABLE ADD COLUMN` in schema.sql cannot: it is not
+#: idempotent, and `migrate` runs the whole script on every startup.
+_ADDED_COLUMNS: dict[str, dict[str, str]] = {
+    "claim": {"quote_translated": "TEXT", "translated_by": "TEXT"},   # T-1, schema v5
+}
+
+
+def _add_missing_columns(conn: sqlite3.Connection) -> None:
+    for table, columns in _ADDED_COLUMNS.items():
+        if not _table_exists(conn, table):
+            continue                     # a fresh DB gets them from CREATE TABLE
+        have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+        for name, decl in columns.items():
+            if name not in have:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+
+
 def migrate(conn: sqlite3.Connection) -> None:
     """Apply the schema. Idempotent — safe to call on every startup. A leftover
     ``web_source_old``/``run_old`` means an earlier rebuild crashed mid-way; it is
@@ -195,6 +216,7 @@ def migrate(conn: sqlite3.Connection) -> None:
     if _run_check_is_stale(conn) or _table_exists(conn, "run_old"):
         _rebuild_run(conn)
     conn.executescript(_load_schema())
+    _add_missing_columns(conn)
     conn.execute(
         "INSERT INTO meta(key, value) VALUES('schema_version', ?) "
         "ON CONFLICT(key) DO UPDATE SET value = excluded.value",

@@ -53,10 +53,31 @@ def test_self_contained_except_api_fetches():
     for bad in ("<link", "<script src", "@import", "url(", "<img", "<iframe",
                 "XMLHttpRequest", "googleapis", "cdn", "alert("):
         assert bad not in html, f"external-request vector present: {bad}"
-    # D-069: MAY fetch the API, but nothing is ever persisted client-side
+    # D-069: MAY fetch the API. Client-side persistence is limited to the CC-4 past-searches
+    # list, which holds job ids and dates ONLY.
     assert "fetch(" in html
-    assert "localStorage" not in html and "sessionStorage" not in html
+    assert "sessionStorage" not in html
     assert "document.cookie" not in html
+
+
+def test_nothing_but_job_ids_is_persisted_client_side():
+    """D-069, stated as the rule it actually is: "No personal data is stored client-side (no
+    localStorage/cookies for **plan** or email)".
+
+    This replaced a blanket "no localStorage at all", which CC-4 (re-openable sessions) had to
+    change. The blanket version would have been satisfied by deleting the feature and says
+    nothing about the risk; this one fails if the email, the plan, or a professor ever reaches
+    browser storage — which is what D-069 is protecting.
+    """
+    js = _js(build_webapp())
+    writes = [ln for ln in js.splitlines() if "localStorage.setItem" in ln]
+    assert writes, "the past-searches list is expected to write to localStorage"
+    for banned in ("state.email", "state.plan", "state.fields", "state.country",
+                   "state.merged", "state.variants", "plan)", "professors"):
+        for ln in writes:
+            assert banned not in ln, f"{banned!r} must never be persisted client-side (D-069)"
+    # The stored shape is pinned directly: id + timestamp, nothing else.
+    assert "list.unshift({id: String(id), at: new Date().toISOString()});" in js
 
 
 def test_only_fetch_targets_are_the_endpoint_paths():
