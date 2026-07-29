@@ -21,7 +21,7 @@ import json
 import os
 from pathlib import Path
 
-from supervisorly import jobs, preflight
+from supervisorly import jobs, phases, preflight
 from supervisorly.fetch.transport import httpx_transport
 
 import _core
@@ -118,6 +118,11 @@ def main(environ=None, *, store=None, transport=None, storage_client=None,
         print(f"job {job_id} cancelled before start", flush=True)
         return 0
     run_params = job.get("run_params") or {}
+    # FLAG-1/FLAG-3: the phase flags come from the WORKER'S environment and are read once,
+    # before any work starts. `run_params` and `plan` are request-derived and deliberately
+    # not consulted — a phase that is off because it is not ready must not be switchable
+    # from a browser (D-068).
+    _phase_flags = phases.PhaseFlags.from_env(environ)
     store.set_status(job_id, "running")
     # What this scan was actually asked to do. Without it the event stream starts at
     # "enumerated" and a zero-result run gives no way to tell a thin country from a wrong
@@ -134,6 +139,11 @@ def main(environ=None, *, store=None, transport=None, storage_client=None,
                       "universities": len(_plan.get("universities") or []),
                       "shortlist": run_params.get("shortlist", 40),
                       "max_institutions": run_params.get("max_institutions"),
+                      # FLAG-1: read ONCE, here, from the worker's own environment — never
+                      # from the job doc, so a request can neither enable a phase nor read
+                      # which are on. Logged because a deploy whose PHASES did not take
+                      # effect is otherwise indistinguishable from a phase that did nothing.
+                      "phases": _phase_flags.summary(),
                       "resuming": bool(job.get("progress"))},
                      ensure_ascii=True), flush=True)
     root = Path(work_root or environ.get("SUPERVISORLY_WORK_ROOT")
@@ -153,6 +163,7 @@ def main(environ=None, *, store=None, transport=None, storage_client=None,
         shortlist=run_params.get("shortlist", 40),
         max_institutions=run_params.get("max_institutions"),
         resume=bool(job.get("progress")),   # a re-invoked job resumes its checkpoints
+        phase_flags=_phase_flags,           # the same object the start line logged
         **paths)
     final = store.get(job_id) or {}
     status = final.get("status")

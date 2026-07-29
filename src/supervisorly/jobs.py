@@ -74,7 +74,8 @@ class JobExists(Exception):
 def run_scan_job(plan: dict, hooks, *, transport, db_path, snap_root, out_html, out_json,
                  email: str, openalex_key=None, shortlist: int = 40,
                  max_institutions=None, resume: bool = False,
-                 rate_limit: float = 1.0, backoff_sleep=None) -> dict | None:
+                 rate_limit: float = 1.0, backoff_sleep=None,
+                 phase_flags=None) -> dict | None:
     """Run one scan job against any storage backend (§3.1, §6 item 5).
 
     ``hooks`` is the storage seam — an object with ``on_event(dict)``,
@@ -91,6 +92,12 @@ def run_scan_job(plan: dict, hooks, *, transport, db_path, snap_root, out_html, 
     ``resume`` forwards to the engine's checkpoint skip (a fresh DB makes it a no-op);
     ``rate_limit``/``backoff_sleep`` mirror ``run_live``'s own politeness knobs so
     cassette runs stay fast.
+
+    ``phase_flags`` (plan FLAG) is forwarded verbatim; ``None`` lets ``run_live`` read the
+    ``PHASES`` environment variable itself. The caller is always server-side — the worker,
+    which reads its own environment — so this parameter carries **server configuration,
+    never a request value** (D-068). It exists so the flags the worker LOGS at start and the
+    flags the run actually USES are one object rather than two reads that could disagree.
     """
     from . import pipeline
 
@@ -105,7 +112,7 @@ def run_scan_job(plan: dict, hooks, *, transport, db_path, snap_root, out_html, 
             plan, transport, snap_root, email=email, openalex_key=openalex_key,
             db_path=db_path, shortlist_size=shortlist, max_institutions=max_institutions,
             resume=resume, rate_limit=rate_limit, backoff_sleep=backoff_sleep,
-            progress=_progress, should_stop=hooks.should_stop)
+            progress=_progress, should_stop=hooks.should_stop, phase_flags=phase_flags)
         out_html, out_json = Path(out_html), Path(out_json)
         out_html.parent.mkdir(parents=True, exist_ok=True)
         out_html.write_text(result["html"], encoding="utf-8")

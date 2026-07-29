@@ -24,6 +24,7 @@ import logging
 import re
 import time
 
+from . import phases as phases_mod
 from . import preflight
 from .discover import ladder as _ladder
 from .discover import openalex as _openalex
@@ -960,7 +961,8 @@ def run_live(plan: dict, transport: Transport, snap_root, *, email: str,
              targets_truncated: list[str] | None = None,
              shortlist_size: int = DEFAULT_SHORTLIST_SIZE,
              max_institutions: int | None = None,
-             progress=None, should_stop=None) -> dict:
+             progress=None, should_stop=None,
+             phase_flags: "phases_mod.PhaseFlags | None" = None) -> dict:
     """A **live** scan: preflight → discovery ladder (ROR + OpenAlex) → the *same* fetch → extract
     → claim → score → export → dashboard pipeline as ``run_offline`` (D-028), now from **discovered**
     targets rather than hand-fed ones.
@@ -1008,8 +1010,17 @@ def run_live(plan: dict, transport: Transport, snap_root, *, email: str,
     ``never_attempted``), and the result carries ``stats["cancelled"] = True``.
     Completed-target claims persist, so a fresh run with ``resume=True`` skips them and
     finishes the remainder (D-029). A raising hook means "keep going".
+
+    ``phase_flags`` (plan FLAG) decides which gated phases may run. It defaults to reading
+    the ``PHASES`` environment variable — **server configuration, never a request
+    parameter** (the D-068 rule): a student's browser must not be able to switch on a phase
+    that is off because it is not ready. Read exactly once, here, so no scan can take two
+    different code paths inside one run. Every phase a flag turns off writes a CC-1 ledger
+    row saying so: off must be *visible*, never silent, which is the whole reason the flag
+    and the ledger landed together.
     """
     preflight.require_credentials({preflight.CONTACT_EMAIL_ENV: email})
+    flags = phase_flags if phase_flags is not None else phases_mod.PhaseFlags.from_env()
     ror_client = _ror.RorClient(transport, email=email)
     oa_client = _openalex.OpenAlexClient(transport, email=email, key=openalex_key)
     country = plan.get("country") or (plan.get("countries") or [None])[0]
@@ -1121,6 +1132,28 @@ def run_live(plan: dict, transport: Transport, snap_root, *, email: str,
         runs.record_phase(conn, run_id, "optout", attempted=opted_out, reached=0,
                           skipped=opted_out,
                           reason="on the opt-out list — never requested (D-023)")
+
+    # ── FLAG: an off phase is SKIPPED AND SAID SO ─────────────────────────────
+    # The single place off-rows are written, so each phase's own call site is just
+    # ``if flags.is_on(...)`` and cannot forget to explain itself. The skipped count is the
+    # shortlist size because every gated phase here is shortlist-scoped: "p0 skipped 40" is
+    # the honest shape of what an off flag actually cost this run.
+    for _off in flags.off():
+        runs.record_phase(conn, run_id, _off, attempted=0, reached=0,
+                          skipped=len(deep_dive), reason=flags.off_reason(_off))
+    if flags.unknown or flags.not_yet_built:
+        # A typo'd flag that silently does nothing is how "I turned it on" and "it is on"
+        # drift apart. Zero counts: nothing was skipped BECAUSE of this — it is a
+        # configuration note, and inflating a skip count to carry it would be a lie about
+        # coverage. record_phase permits a reason without a skip for exactly this case.
+        runs.record_phase(
+            conn, run_id, "phase_flags", attempted=0, reached=0, skipped=0,
+            reason=(f"{phases_mod.PHASES_ENV} names "
+                    + "; ".join(filter(None, [
+                        (f"{', '.join(flags.not_yet_built)} — recognised but not built yet"
+                         if flags.not_yet_built else ""),
+                        (f"{', '.join(flags.unknown)} — not a phase"
+                         if flags.unknown else "")]))))
 
     # What the professor has actually been publishing — the single most useful thing a
     # student weighing a supervisor can see, and the one signal that survives a blocked
