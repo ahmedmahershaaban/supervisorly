@@ -39,52 +39,91 @@ label. The cost is real and stated there: rows read `29 July 2026, 14:05 · 7a3d
 
 **Review** `[R]`
 
-## FE-2 · Step 2 polish `[ ]`
+## FE-2 · Step 2 polish `[x]`
 
-- [ ] FE-2.1 Live cost preview — *"N fields × M phrasings ≈ K lookups"*
-- [ ] FE-2.2 **Warn, never block**, above a large phrasing total. The cap was removed on purpose
-- [ ] FE-2.3 Keyboard path end to end: type → Enter adds → Tab → Understand
-- [ ] FE-2.4 Plan rows remember open/closed across re-renders — already true; pin it in a test
+- [x] FE-2.1 Live cost preview — *"N fields × M phrasings ≈ K lookups"*
+- [x] FE-2.2 **Warn, never block**, above a large phrasing total. The cap was removed on purpose
+- [x] FE-2.3 Keyboard path end to end: type → Enter adds → Tab → Understand *(already shipped;
+      Enter adds rather than submits, so a second field stays reachable from the keyboard)*
+- [x] FE-2.4 Plan rows remember open/closed across re-renders — already true; pin it in a test
 
-**Review** `[ ]`
+**Done, 2026-07-29.** The preview counts **topic lookups**, not requests: `/api/map` carries
+every phrasing in ONE request (B-001), so "requests" would understate a wide search by a
+factor of 50 and "lookups" is what actually gets spent. The warning above `COST_WARN_AT`
+says the search *will still run* — D-074 removed the field cap on purpose, and a refusal would
+make someone hide part of their own research. The e2e asserts the preview exists **and** that
+it contains no blocking language.
 
-## FE-3 · Progress that explains itself `[ ]`
+**Review** `[R]`
 
-- [ ] FE-3.1 Phase names in the student's words for each new phase (P0/P1/P2/P5)
-- [ ] FE-3.2 Ledger surfaced live — *"read 4 of 12 admissions pages"*
-- [ ] FE-3.3 A long phase shows **what it is waiting on**, not a spinner
+## FE-3 · Progress that explains itself `[~]` — partially blocked
 
-**Depends on** CC-1. **Review** `[ ]`
+- [!] FE-3.1 Phase names in the student's words for each new phase (P0/P1/P2/P5) — **none of
+      those phases is built** (P0 ✗, P1 ✗, P4/P5 ?, P2 not started), so there are no new phase
+      names to translate. The §4.1 phase table already covers every phase that exists.
+- [!] FE-3.2 Ledger surfaced live — *"read 4 of 12 admissions pages"*. The CC-1 ledger is
+      written and **exported**, and the dashboard renders it after the run; surfacing it
+      *during* a run needs the worker to stream ledger rows into the job document, which no
+      phase currently produces rows for beyond the five that already exist.
+- [x] FE-3.3 A long phase shows **what it is waiting on**, not a spinner *(shipped: the §4.2
+      slow state names the phase and the target count, and the bar is indeterminate ONLY
+      before the first count arrives — never a faked percentage)*
 
-## FE-4 · The professor modal, final shape `[ ]`
+**Depends on** CC-1 *(done)* and on the phases themselves *(not built)*. **Review** `[ ]`
 
-- [ ] FE-4.1 Identity: name, current role + department (P0), institution
-- [ ] FE-4.2 Former appointments collapsed and labelled
-- [ ] FE-4.3 Admissions block inherited from the institution, **with its scope and source shown**
-- [ ] FE-4.4 Evidence fields with quote, source link, confidence
-- [ ] FE-4.5 Translation marker + hover (T-1); the original is always reachable
-- [ ] FE-4.6 "Is this them?" confirmation for `unverified` matches (P2-3)
-- [ ] FE-4.7 Actions for blocked rows — shipped; keep working
+## FE-4 · The professor modal, final shape `[~]` — blocked on the phases that feed it
 
-**Review** `[ ]`
+- [!] FE-4.1 Identity: name, current role + department (P0), institution — **P0 not built**
+      (SPIKE-0 = 22%). Name and institution already show.
+- [!] FE-4.2 Former appointments collapsed and labelled — same, needs P0's data
+- [!] FE-4.3 Admissions block inherited from the institution, with scope and source —
+      **P1 not built** (SPIKE-1 = 0% on the real cohort)
+- [x] FE-4.4 Evidence fields with quote, source link, confidence *(shipped)*
+- [x] FE-4.5 Translation marker + hover (T-1); the original is always reachable
+- [!] FE-4.6 "Is this them?" confirmation for `unverified` matches — **P2-3 not started**
+- [x] FE-4.7 Actions for blocked rows — shipped; verified still working (e2e, 54/54)
 
-## FE-5 · Optional model key `[ ]` — *(the UI half of P7)*
+Four of seven need data no shipped phase produces. Building the UI for them now would be
+rendering empty blocks and calling it done.
 
-- [ ] FE-5.1 Collapsed "Use my own model key (optional)" on step 1
-- [ ] FE-5.2 Plain statement: **stays in this browser, sent only to Google, never to us**
-- [ ] FE-5.3 "Test key" button — one cheap call, clear pass/fail
-- [ ] FE-5.4 Clearing it is one click and immediate
+**Review** `[ ]` — reopen with P0/P1/P2
 
-**Review** `[ ]`
+## FE-5 · Optional model key `[x]` — *(the UI half of P7)*
 
-## FE-6 · Accessibility and honesty sweep `[ ]`
+- [x] FE-5.1 Collapsed "Use my own model key (optional)" on step 1
+- [x] FE-5.2 Plain statement: **stays in this browser, sent only to Google, never to us**
+- [x] FE-5.3 "Test key" button — one cheap call, clear pass/fail
+- [x] FE-5.4 Clearing it is one click and immediate
 
-- [ ] FE-6.1 Every new control keyboard-reachable, labelled, focus-visible
-- [ ] FE-6.2 `prefers-reduced-motion` respected by any new animation
-- [ ] FE-6.3 **No new state renders blank** — every empty says *which* empty it is
-- [ ] FE-6.4 `tools/e2e/record_flow.js` extended to assert each new surface
+**Done, 2026-07-29.** The promise is enforced structurally, not just written on the panel:
+the key never enters `state` (which is what gets serialised into a plan), tests assert no
+line touching the key mentions `api(` or `/api/`, the POSTed plan carries no key-shaped field,
+and a separate test reads the D-071 beacon's body and fails if it can reach the key at all —
+that beacon is the real leak path, since it posts error text to us.
 
-**Review** `[ ]`
+`Test key` calls Google **directly from the browser**, deliberately not through our API:
+proxying it would be exactly what the panel promises never happens. It fails **soft** — a
+blocked or offline request says nothing about the key, and the product does not need one.
+
+The e2e asserts the panel's shape and its promise, and never pastes a real key: a test that
+did would be putting a credential into a screencast.
+
+**Review** `[R]`
+
+## FE-6 · Accessibility and honesty sweep `[x]`
+
+- [x] FE-6.1 Every new control keyboard-reachable, labelled, focus-visible *(the chips, the
+      past-search Open/Forget buttons, the key panel and its inputs, the translation marker —
+      all `:focus-visible` outlined; the marker carries `tabindex` + `aria-label`, because a
+      `title` alone is invisible to a keyboard or screen-reader user)*
+- [x] FE-6.2 `prefers-reduced-motion` respected by any new animation *(no new animation was
+      added — the existing `reducedMotion()` guard still covers everything that moves)*
+- [x] FE-6.3 **No new state renders blank** — the level filter says which empty it is, the
+      expired job explains itself and offers a re-run, the past-searches panel is absent
+      rather than empty on a first visit, and the ledger names its zero-reach phases
+- [x] FE-6.4 `tools/e2e/record_flow.js` extended to assert each new surface
+
+**Review** `[R]` — 54/54 against production, up from 33 at the start of this work.
 
 ---
 

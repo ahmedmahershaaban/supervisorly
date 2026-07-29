@@ -1410,3 +1410,24 @@ also caught an em-dash in the new warning — CLI output asserts `printed.isasci
 15 of 17 pages as unreadable JS apps — a blocker that was really its own measurement gap,
 since the deployed worker reaches 10 of 40 targets on the same cohort. A spike that skips a
 rung the product has measures a product nobody ships.
+
+## round AA — the front end (web-v22)
+
+**Built:** CC-4/FE-1 past searches, T-1 translation display, FE-2 cost preview, FE-5 model-key
+panel, FE-6 sweep. FE-3 and FE-4 are `[~]`: seven of their subtasks need data from P0/P1/P2/P5,
+none of which is built, and rendering empty blocks for them is not "done".
+
+**Ran:** `python -m pytest` → **1035 passed**. Deployed `web-v22`; worker digest `764f672d…` →
+`2edd2068…`; real scan `34948a813698…` verified headful — **54/54**, up from 33 when this
+session started.
+
+**Two decisions worth carrying forward:**
+- **CC-4.1 vs D-069.** The plan asks to store "job ids + field / country / date" in
+  `localStorage`; D-069 forbids `localStorage` for *plan* or email, and the field and country
+  are plan. A locked decision outranks a plan task, so the list stores id + date only and the
+  conflict is **B-008** for Ahmed. A blanket "no localStorage" guard test became a precise one
+  that fails if the email, plan, fields, country or a professor ever reaches a `setItem`.
+- **FE-5's promise is enforced, not asserted.** The key never enters `state`; tests check that
+  no line touching it mentions `api(`, that the POSTed plan has no key-shaped field, and that
+  the D-071 error beacon cannot reach it — that beacon posts error text to us and is the real
+  leak path. `Test key` calls Google directly and fails soft.
