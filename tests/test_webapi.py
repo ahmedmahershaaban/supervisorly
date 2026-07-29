@@ -183,7 +183,9 @@ def test_scan_start_enforces_the_server_caps(tmp_path):
     assert status == 400 and "'plan'" in body["error"]
     cases = [
         (dict(PLAN, field="x" * 201), "'field'"),
-        (dict(PLAN, resolved_topic_ids=[f"T{i}" for i in range(26)]), "'resolved_topic_ids'"),
+        # off the constant, not a literal: the cap moved 25 -> 50 when a real student hit it
+        (dict(PLAN, resolved_topic_ids=[f"T{i}" for i in range(webapi.MAX_TOPICS + 1)]),
+         "'resolved_topic_ids'"),
         (dict(PLAN, universities=[f"U{i}" for i in range(51)]), "'universities'"),
         (dict(PLAN, targets=[f"https://openalex.org/A{i}" for i in range(101)]), "'targets'"),
     ]

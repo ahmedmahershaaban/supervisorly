@@ -1538,3 +1538,46 @@ time.**
 
 Three decisions wait on Ahmed: **B-006** (institution enumeration), **B-007** (page supply /
 phase ordering), **B-008** (D-069 vs CC-4.1 storage).
+
+---
+
+## Round AG — the 25-topic wall (reported from production)
+
+**Reported by Ahmed with a screenshot and diagnostics**, which is the only reason this was
+found: `job 05e8eabd…`, field "Machine Learning · NLP", nine phrasings, **111 topics offered**.
+He checked 49, and the last click of the wizard answered
+
+```
+'resolved_topic_ids' must hold at most 25 topics (got 49)
+```
+
+Three defects wearing one error message:
+
+1. **The cap was invisible until the final click.** Step 3's counter said "49 of 111 topics
+   selected" and never mentioned a limit; step 4 refused the scan. The fix — the checkboxes
+   and the cap are on the same screen — is the actual bug fix. D-069/D-070: never a dead end.
+2. **The page and the server held separate numbers**, so the page *could not* have shown it.
+   The §3.5 caps moved to `src/supervisorly/caps.py`; `webapi` imports them and the page
+   renders `MAX_TOPICS` from the same constant. A test asserts `updateCount` contains no
+   numeric literal of its own.
+3. **25 was too low for a real field.** It was never an API limit — it was our own collection
+   cap. Now **50**.
+
+**What 50 does not do is bet on an unmeasured OpenAlex OR-list width.** I tried to measure it
+and could not: the API answered `429 Insufficient budget … resets at midnight UTC` — the same
+exhausted-budget response that produced the silent-unfiltered-scan bug earlier this session.
+So `authors_by_institution` now splits the filter into `TOPIC_FILTER_CHUNK = 25`-wide queries
+and merges them, deduped by OpenAlex id. 25 is the width that has been running in production;
+anything wider is untested, and the cap no longer depends on the answer. One failing chunk
+records truncation and the others still run — an honest partial, not an empty institution.
+
+**Cost:** one extra request per institution, and only for a student who deliberately picks
+more than 25 topics. 25 or fewer is byte-for-byte the same single request as before, which is
+its own test.
+
+**Still unverified:** whether OpenAlex accepts a 50-wide OR-list. If a later measurement says
+it does, raising `TOPIC_FILTER_CHUNK` halves those requests and nothing else changes.
+
+**Not touched:** `export/studio.py` also emits `resolved_topic_ids` and has no counter at all;
+its plans go to the CLI, which has no topic cap, so chunking makes wide Studio plans work
+rather than fail. A Studio plan of >50 topics uploaded to the *web* API would still 400.

@@ -196,13 +196,14 @@ def handle_expand(params: dict, *, environ=None, transport=None) -> tuple[int, d
 
 # ── POST /api/scan: validation + server-side cost guards (§3.5) ──────────────
 
-PLAN_MAX_BYTES = 64 * 1024        # plan JSON ≤ 64 KB serialized
-MAX_TOPICS = 25                   # resolved_topic_ids per plan
-MAX_UNIVERSITIES = 50             # universities per plan
-MAX_TARGETS = 100                 # named targets per plan
-SHORTLIST_MIN, SHORTLIST_MAX = 1, 200
-MAX_INSTITUTIONS_MIN, MAX_INSTITUTIONS_MAX = 1, 300
-FIELD_MAX_CHARS = 200
+# Defined in `caps.py`, NOT here: the page renders the same numbers, and a cap the student
+# only meets on the final click is a dead end (see that module). Re-exported under the old
+# names so callers and tests keep working.
+from .caps import (                                          # noqa: E402  (grouped with §3.5)
+    PLAN_MAX_BYTES, MAX_TOPICS, MAX_UNIVERSITIES, MAX_TARGETS,
+    SHORTLIST_MIN, SHORTLIST_MAX, MAX_INSTITUTIONS_MIN, MAX_INSTITUTIONS_MAX,
+    FIELD_MAX_CHARS,
+)
 
 #: Local dev default for job working dirs + the JSON store (output/ is git-ignored, D-005).
 DEFAULT_WORK_ROOT = Path("output/jobs")

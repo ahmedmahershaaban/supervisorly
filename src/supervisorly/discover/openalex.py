@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 from urllib.parse import urlencode
 
+from .. import caps
 from ..fetch.transport import Transport, TransportError
 
 OPENALEX_API = "https://api.openalex.org"
@@ -249,25 +250,43 @@ class OpenAlexClient:
         ``topic_ids`` narrows the enumeration server-side to authors in those topics (the plan's
         resolved topics, D-058) — authors with missing topic metadata are excluded BY THE API,
         which the caller surfaces as a coverage warning.
+
+        More topics than one OR-filter is proven to carry are issued as **several queries and
+        merged** (``caps.TOPIC_FILTER_CHUNK``), deduped by OpenAlex id: a student may pick a
+        broad field without the plan depending on an OR-list width nobody has measured. One
+        chunk failing does not discard the others — it records truncation and the rest run.
         """
         out: list[dict] = []
-        page = 1
-        while page <= max_pages:
-            data = self._get_json(authors_url(institution_id, self._email, self._key,
-                                              page=page, topic_ids=topic_ids))
-            if not data:
-                # a page fetch failed mid-enumeration (transport / non-200 / bad JSON) — we do NOT
-                # know what those pages held, so record truncation: coverage reports PARTIAL, never
-                # a false "complete" (D-037). A legit empty institution returns 200/[] above, not None.
-                self.truncated_sources.append(
-                    f"authors@{_short_id(institution_id) or institution_id}")
-                return out
-            results = data.get("results", [])
-            out.extend(_map_author(a) for a in results)
-            if len(results) < PER_PAGE:          # last page reached
-                return out
-            page += 1
-        self.truncated_sources.append(f"authors@{_short_id(institution_id) or institution_id}")
+        seen: set[str] = set()
+        marker = f"authors@{_short_id(institution_id) or institution_id}"
+        # no topics -> a single unfiltered enumeration, exactly as before
+        chunks = caps.chunk_topics(topic_ids) or [None]
+        for chunk in chunks:
+            page = 1
+            while page <= max_pages:
+                data = self._get_json(authors_url(institution_id, self._email, self._key,
+                                                  page=page, topic_ids=chunk))
+                if not data:
+                    # a page fetch failed mid-enumeration (transport / non-200 / bad JSON) — we do
+                    # NOT know what those pages held, so record truncation: coverage reports
+                    # PARTIAL, never a false "complete" (D-037). A legit empty institution returns
+                    # 200/[] above, not None.
+                    self.truncated_sources.append(marker)
+                    break
+                results = data.get("results", [])
+                for a in results:
+                    mapped = _map_author(a)
+                    # the same author can match two chunks; count them once, keep first order
+                    key = mapped.get("openalex_id") or id(a)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    out.append(mapped)
+                if len(results) < PER_PAGE:      # last page for this chunk
+                    break
+                page += 1
+            else:
+                self.truncated_sources.append(marker)
         return out
 
     def works_by_author(self, author_id: str) -> list[dict]:

@@ -85,6 +85,16 @@ and not a pass. `◐` = UI half shipped, backend not. `~` = partly blocked on an
 | **P4 triage** | **`[!]` SPIKE-4 INCONCLUSIVE — no positive set exists to measure recall against** | 2026-07-29 |
 | **P5 model extraction** | **`[!]` SPIKE-5 not run — it would measure the model on registry profiles** | 2026-07-29 |
 
+> ### The 25-topic wall — fixed 2026-07-29 (round AG in [`../BUILD_LOG.md`](../BUILD_LOG.md))
+>
+> Reported from production with a screenshot: 111 topics offered, 49 checked, and the final
+> click answered `'resolved_topic_ids' must hold at most 25 topics (got 49)`. The cap is now
+> **50**, defined once in `src/supervisorly/caps.py` and rendered into the page, and step 3
+> refuses to advance instead of step 4 refusing to scan. Wide selections are issued as
+> `TOPIC_FILTER_CHUNK = 25`-wide OpenAlex queries and merged, so the cap does not depend on an
+> OR-list width nobody has measured — the measurement was attempted and the API answered
+> `429 Insufficient budget`.
+
 > ### ⚠ Read [B-006](../BLOCKERS.md) before planning anything else
 >
 > SPIKE-1 measured 0%, but **not because admissions pages are hard to find** — Ain Shams and

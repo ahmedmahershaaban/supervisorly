@@ -38,6 +38,8 @@ from __future__ import annotations
 
 import json as _json
 
+from .. import caps
+
 #: Intent choices — the CLI's full ``PLAN_INTENT_KINDS`` enum (7), so every card the page
 #: offers is accepted by ``POST /api/scan`` server-side validation.
 INTENTS = (
@@ -192,6 +194,7 @@ details.fp summary:hover{background:rgba(255,255,255,.03)}
   background:rgba(181,140,240,.07)}
 .empty{padding:26px 8px;color:var(--muted)}
 .selcount{font-family:var(--mono);font-size:12px;color:var(--teal);margin:10px 2px 0}
+.selcount.over{color:var(--coral)}
 /* sliders + cost preview */
 .sliderblock{margin:18px 0 6px}
 .sliderblock label{font-size:14px;color:var(--ink2);margin-bottom:4px}
@@ -1069,10 +1072,17 @@ function refreshTree(){
     p.indeterminate = n>0 && n<kids.length;
   });
 }
+/* The cap is stated HERE, where the checkboxes are — not on the final click. MAX_TOPICS is
+   rendered from the server's own constant (caps.py), so the two can never drift apart and
+   leave the student over a limit the page never mentioned. */
 function updateCount(){
   var n = document.querySelectorAll("#tree input.topic:checked").length;
-  document.getElementById("selCount").textContent =
-    n+" of "+state.topicTotal+" topics selected";
+  var el = document.getElementById("selCount");
+  var over = n - MAX_TOPICS;
+  el.textContent = n+" of "+state.topicTotal+" topics selected"+
+    (over>0 ? " — "+over+" too many, at most "+MAX_TOPICS+" can be scanned"
+            : " — up to "+MAX_TOPICS+" can be scanned");
+  el.classList.toggle("over", over>0);
 }
 function checkedTopics(){
   var ids = [];
@@ -1096,10 +1106,22 @@ function parseProfs(text){
 }
 function step3Next(){
   clearErrs();
-  if(!checkedTopics().length &&
+  var picked = checkedTopics();
+  if(!picked.length &&
      !parseProfs(document.getElementById("profs").value).length){
     showErr("err-topics",
       "check at least one topic, or name at least one professor below.");
+    document.getElementById("tree").focus();
+    return;
+  }
+  /* Stop the over-cap plan HERE, one step from the checkboxes that caused it and while the
+     counter is on screen. The server rejects it too (defence in depth) — but its 400 arrives
+     on the last click of the wizard, names a JSON key, and leaves no way forward. */
+  if(picked.length > MAX_TOPICS){
+    showErr("err-topics",
+      "at most "+MAX_TOPICS+" topics can be scanned, and "+picked.length+" are checked — "+
+      "uncheck "+(picked.length-MAX_TOPICS)+" of them to go on.");
+    document.getElementById("selCount").scrollIntoView({block:"center"});
     document.getElementById("tree").focus();
     return;
   }
@@ -1734,7 +1756,8 @@ def build_webapp(*, api_base: str = "") -> str:
     <p class="note hidden" id="keyOutcome" role="status" aria-live="polite"></p>
     <p class="note hidden" id="dropNote"></p>
     <div id="tree" tabindex="0"></div>
-    <div class="selcount" id="selCount" role="status">0 of 0 topics selected</div>
+    <div class="selcount" id="selCount" role="status">0 of 0 topics selected — up to
+      {caps.MAX_TOPICS} can be scanned</div>
     <div class="err" id="err-topics" role="alert"></div>
     <p class="why" style="margin-top:18px">Named professors <span style="color:var(--faint);
       font-weight:400">(optional)</span> — deep-dive specific people directly, one per line:
@@ -1814,6 +1837,7 @@ def build_webapp(*, api_base: str = "") -> str:
 </main>
 <div id="toast" role="status"></div>
 <script>const API_BASE = {api_literal};
+const MAX_TOPICS = {caps.MAX_TOPICS};
 {_JS}</script>
 </body></html>
 """
