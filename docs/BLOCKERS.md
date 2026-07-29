@@ -10,6 +10,94 @@ it, not by deleting it.
 
 ---
 
+## B-005 — Should the browser work move to the student's machine? (and is the LLM needed at all)
+
+**Status:** analysis for Ahmed, 2026-07-29. Recommendation below; no code written.
+**Asked:** run headful Chrome on the student's own laptop, ~10 tabs at a time, gather the
+pages there, batch the text to an LLM in one session, populate the results. Cheaper for us,
+and possibly more powerful — and does the LLM earn its place at all?
+
+### First: is the LLM necessary? Split by field, and the answer differs
+
+The deterministic extractors are regexes over page text. `_RECRUIT` matches literal cues —
+`recruit*`, `looking for`, `accepting`, `seeking`, `join (my|the|our) (lab|group|team)`,
+`hiring`, `taking students`. `extract_deadline` is stricter still: a date counts only when a
+deadline verb, an application-context word and a full date share ONE clause.
+
+Where that is enough, it is **better** than a model — free, instant, reproducible, and
+already quote-gated. Measured this session: a rendered ORCID page yielded a real
+`advertised social profile` value (a LinkedIn URL) with a verified quote, from regex alone.
+
+Where it is not enough is prose. The same run: **27,357 characters of biography** —
+"Professor of Public Health; Faculty of Medicine, Ain Shams University • Chair of Research
+Department" — produced `searched_absent` on all five fields, because the page never says
+"recruiting". A page that reads *"I will be reviewing applications for the 2027 intake"* or
+*"prospective students should contact me"* means recruiting and matches no cue in that list.
+Non-English pages fail the same way, harder.
+
+So the honest split:
+
+| field | regex | model |
+|---|---|---|
+| `social` (URLs) | **sufficient** | unnecessary |
+| `deadline` (date + cue in one clause) | **sufficient and safer** | unnecessary |
+| `recruiting_signal` in prose | **misses everything not phrased with a cue word** | needed |
+| affiliation, role, supervision level | not attempted at all | needed |
+
+The model is not needed to *extract*; it is needed to *read*. And it is bounded to that:
+under D-073 it proposes `(field, value, quote)` and anything whose quote is not verbatim in
+the snapshot is dropped before it becomes a claim.
+
+### Second: would moving the browser to the student's machine be better?
+
+**For reach — yes, and this is the real argument, not cost.** A student's own logged-in
+session can see pages the server must never touch. That is exactly why D-043 exists, and it
+is already built: `extract/chrome_prompt.py` generates the prompt, `extract/page_extract.js`
+extracts the text in-page, `browser_rung.ingest_page` stores it as a normal snapshot, and the
+D-010 quote gate runs on it unchanged. The dashboard's "Copy research prompt" button is that
+path, shipped.
+
+**For cost — no, and this is worth being precise about.** The server browser is not what
+costs anything:
+
+- Cloud Run **scales to zero**; a scan is 30–90 s of a 2-CPU container a few times a day.
+- The binding constraint is the **shared upstream budget** (OpenAlex/ROR), and moving the
+  browser does not change it by one call — those are API requests, not page renders.
+- The LLM bill is per *page read*, not per *machine that read it*. Identical either way.
+
+**For the 10-tab automation specifically — two hard problems.**
+
+1. **A web page cannot do it.** A page cannot open ten tabs, drive them, and read their DOM;
+   the same-origin policy forbids exactly that. It needs a **browser extension or a desktop
+   app** — a real distribution, update and trust burden, and the reason D-043 names Claude for
+   Chrome rather than inventing one.
+2. **It moves the crawler; it does not remove it.** Ten automated tabs hitting university
+   sites from a laptop is still automated bulk retrieval — now from a residential IP, with our
+   robots discipline and rate limiting only if we re-implement both on the client, correctly,
+   in JavaScript. D-039/D-043 permit *a person reading their own session*; they do not
+   silently permit automation-at-scale wearing that person's IP. That distinction is the whole
+   ethical basis of the human rung, and this would erase it while keeping the paperwork.
+
+### Recommendation
+
+**Keep the browser on the server; put the model where the value is; keep the student's
+browser for what only it can reach.**
+
+1. **Wire the D-073 extraction step** (`extract/llm_claims.py`, built and tested, not called).
+   This is the actual missing piece — the render rung already delivers real page text and
+   nothing reads it. Shortlist-only, fail-closed, every claim through the quote gate.
+2. **Batch it, as Ahmed suggested** — this part of the proposal is right and should be taken:
+   one call per professor is wasteful when a call can carry several pages and return one
+   array. Fewer, larger calls is the cheapest correct shape.
+3. **Leave the walled sources to the human rung**, human-paced, through the prompt already on
+   the dashboard. That keeps the one genuine advantage of the student's machine — reach —
+   without turning them into a crawler.
+
+Revisit if the LLM bill ever becomes the binding cost. It is not today; **no page is read by a
+model at all right now**, which is why dashboards are thin.
+
+---
+
 ## B-004 — Rendering JS pages and LLM extraction: what the decisions actually permit
 
 **Status:** OPEN — needs Ahmed, but **less of a reversal than I first told him.**
