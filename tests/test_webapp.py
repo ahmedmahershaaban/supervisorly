@@ -57,7 +57,10 @@ def test_self_contained_except_api_fetches():
     # calling Google directly from their browser, which is the whole design — routing it
     # through us is the thing the panel promises never happens. It must appear ONLY as that
     # one endpoint constant, never as a loaded subresource, which the bans above still cover.
-    assert html.count("generativelanguage.googleapis.com") == 1
+    # Exactly two: FE-5's "Test key" probe and P7-1's browser-side expansion. Both are named
+    # constants pointing at Google, neither is a loaded subresource, and the count is pinned so
+    # a third caller has to come and justify itself here.
+    assert html.count("generativelanguage.googleapis.com") == 2
     # D-069: MAY fetch the API. Client-side persistence is limited to the CC-4 past-searches
     # list, which holds job ids and dates ONLY.
     assert "fetch(" in html
@@ -146,10 +149,13 @@ def test_only_fetch_targets_are_the_endpoint_paths():
     #   report()         — the D-071 beacon, fetch(api("/api/clientlog")…). It bypasses
     #     fetchJson on purpose: fetchJson rejects on failure, which would fire another
     #     report and risk a loop, and the beacon needs keepalive to survive page unload.
-    #   fetch(GEMINI_TEST_URL…) — FE-5's "Test key", the ONE call that deliberately does not
-    #     go to our API. It uses a named constant, not a literal, so this test still proves
-    #     no ad-hoc URL is fetched anywhere.
-    assert sorted(re.findall(r"fetch\((\w+)", js)) == ["GEMINI_TEST_URL", "api", "url"]
+    #   fetch(GEMINI_TEST_URL…)  — FE-5's "Test key"
+    #   fetch(GEMINI_GEN_URL…)   — P7-1's browser-side expansion on the student's own key
+    #     Both deliberately bypass our API — routing a key we do not own through our server is
+    #     the thing P7 exists to avoid. Both use named constants rather than literals, so this
+    #     test still proves no ad-hoc URL is fetched anywhere.
+    assert sorted(re.findall(r"fetch\((\w+)", js)) == [
+        "GEMINI_GEN_URL", "GEMINI_TEST_URL", "api", "url"]
     assert 'fetch("' not in js and "fetch('" not in js, "a literal URL is being fetched"
     paths = set(re.findall(r'api\("([^"]+)"', js))
     assert paths == {"/api/expand", "/api/map", "/api/scan", "/api/scan/", "/api/result/",

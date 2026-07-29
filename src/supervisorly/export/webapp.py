@@ -241,6 +241,7 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 .krow{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-top:10px}
 .kstatus{font-family:var(--mono);font-size:11.5px;color:var(--faint)}
 .kstatus.k-ok{color:var(--chartreuse)} .kstatus.k-bad{color:var(--coral)}
+.keyout-bad{color:var(--accent)}
 /* CC-4 / FE-1: past searches. Absent entirely on a first visit — no empty box. */
 .past{border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:18px;
   background:var(--chip)}
@@ -334,6 +335,9 @@ var state = {
      and its first element is what the derived `intent_kind` scalar becomes. */
   email: "", intents: ["pre_phd"], country: "", universities: [], uniMode: "all",
   field: "", fields: [], plan: [], variants: [], expansionOff: false, merged: null, topicTotal: 0,
+  /* P7: whether the student's OWN key drove expansion, and whether it failed. Booleans
+     only — the key itself is never in `state`, because `state` is what becomes a plan. */
+  ownKeyUsed: false, ownKeyFailed: false,
   jobId: null, jobStart: 0, jobEnd: 0, lastOk: 0, watching: false,
   pollTimer: null, tickTimer: null, phaseKey: "", phaseEnter: 0, slowShown: false
 };
@@ -685,7 +689,73 @@ function setFieldStatus(msg){
   el.textContent = msg;
   el.classList.toggle("hidden", !msg);
 }
+/* ── P7-1.2: expand with the student's OWN key, in their browser ──────────────
+   With a key set, `/api/expand` is not called at all — the phrasings come from Google
+   directly, on their quota. Without one, nothing changes and the server path runs.
+
+   This is the only reason the key exists, and it is why the key must never reach us: it is
+   the student's credential for their own quota, so proxying it would move their liability
+   onto our server and break the promise the panel makes.
+
+   FAIL CLOSED, ALWAYS (P7-1.4). An invalid, revoked or quota-exhausted key returns their own
+   words — exactly what the server path does when D-068 expansion is unavailable. A wrong key
+   must cost a wider search, never a broken one. */
+var GEMINI_GEN_URL =
+  "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
+
+function expandWithOwnKey(key, f, count){
+  var prompt =
+    "List up to " + (count || 8) + " alternative phrasings a researcher might use for the " +
+    "field \"" + f + "\". Reply with ONE phrasing per line, no numbering, no commentary.";
+  return fetch(GEMINI_GEN_URL, {
+    method: "POST",
+    headers: {"Content-Type": "application/json", "Authorization": "Bearer " + key},
+    body: JSON.stringify({model: "gemini-flash-lite-latest", temperature: 0.3,
+                          messages: [{role: "user", content: prompt}]})
+  }).then(function(r){
+    if(!r.ok) return null;                       /* refused/quota → caller falls back */
+    return r.json();
+  }).then(function(j){
+    var txt = j && j.choices && j.choices[0] && j.choices[0].message &&
+              j.choices[0].message.content;
+    if(!txt) return null;
+    var out = [];
+    String(txt).split("\n").forEach(function(line){
+      var v = line.replace(/^[\s\-\*\d\.\)]+/, "").trim();
+      if(v && v.length < 120 && out.indexOf(v) < 0) out.push(v);
+    });
+    return out.length ? out.slice(0, count || 8) : null;
+  }).catch(function(){ return null; });          /* offline / CORS / anything: fall back */
+}
+function renderKeyOutcome(){
+  /* P7-1.4: say which happened. A key that quietly did nothing is worse than no key — the
+     student believes their quota was used and that the phrasings came from a model. */
+  var el = document.getElementById("keyOutcome");
+  if(!el) return;
+  var msg = "";
+  if(state.ownKeyFailed)
+    msg = "Your model key did not work (invalid, revoked, or out of quota), so we searched "+
+          "your own words instead. Nothing is broken — the search is just narrower.";
+  else if(state.ownKeyUsed)
+    msg = "Phrasings came from your own model key, on your quota.";
+  el.textContent = msg;
+  el.classList.toggle("hidden", !msg);
+  el.classList.toggle("keyout-bad", !!state.ownKeyFailed);
+}
 function expandField(f, count){
+  var own = keyLoad();
+  if(!own) return expandFieldViaServer(f, count);
+  /* Same return shape as the server path — a bare array of phrasings — so every caller is
+     unchanged and neither branch can become the special case nobody tests. */
+  return expandWithOwnKey(own, f, count).then(function(variants){
+    if(variants && variants.length){ state.ownKeyUsed = true; return variants; }
+    /* Fail closed to THEIR OWN WORDS, and record it: a silent fallback would leave the
+       student believing their key was used when it was not. */
+    state.expansionOff = true; state.ownKeyFailed = true;
+    return [f];
+  });
+}
+function expandFieldViaServer(f, count){
   return withRetry(api("/api/expand"), {method:"POST",
     headers:{"Content-Type":"application/json"},
     body: JSON.stringify({field:f, count: count||8})})
@@ -877,6 +947,7 @@ function understand(){
     state.plan = perField.map(function(e){ return {field:e.field, variants:e.variants, open:false}; });
     renderFieldPlan();
     document.getElementById("expNote").classList.toggle("hidden", !state.expansionOff);
+    renderKeyOutcome();
     document.getElementById("toMap").classList.remove("hidden");
   });
 }
@@ -916,6 +987,7 @@ function mapPlan(){
     }
     document.getElementById("partialBanner").classList.toggle("hidden", !state.merged.truncated);
     document.getElementById("expNote").classList.toggle("hidden", !state.expansionOff);
+    renderKeyOutcome();
     /* The server now reports WHICH phrasings failed, so the honest note that used to come
        from counting per-phrasing responses survives the move to one request (B-001). */
     var failed = (state.merged.failed_queries)||[];
@@ -1659,6 +1731,7 @@ def build_webapp(*, api_base: str = "") -> str:
       more topics than shown; this map is partial, not complete. Narrow your wording for
       the rest, or pick from what is here.</div>
     <p class="note hidden" id="expNote">smart expansion is off — using your words directly.</p>
+    <p class="note hidden" id="keyOutcome" role="status" aria-live="polite"></p>
     <p class="note hidden" id="dropNote"></p>
     <div id="tree" tabindex="0"></div>
     <div class="selcount" id="selCount" role="status">0 of 0 topics selected</div>

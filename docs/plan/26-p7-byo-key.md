@@ -1,6 +1,6 @@
 # P7 — Bring your own model key
 
-> ## STATUS, 2026-07-29 — **the UI half is shipped; the backend switch is not.**
+> ## STATUS, 2026-07-29 — **P7-1 built.** UI (FE-5) + browser-side expansion on the student's key.
 >
 > **[FE-5](30-frontend.md#fe-5--optional-model-key-x--the-ui-half-of-p7) is live** at
 > `web-v22`: a collapsed "Use my own model key (optional)" panel on step 1, a password input,
@@ -13,9 +13,16 @@
 > field, and that the **D-071 error beacon cannot reach it** (that beacon posts error text to
 > our servers and is the real leak path). Browser→Gemini CORS was re-confirmed working.
 >
-> **What is NOT done:** the expansion step still runs server-side on
-> `SUPERVISORLY_EXPAND_KEY`. Making the *student's* key drive it — and failing closed to their
-> own words when it is invalid or quota-exhausted — is the remaining P7-1 work.
+> **P7-1.2 is now done too:** with a key set, `expandField` calls Gemini **directly from the
+> browser** and `/api/expand` is not called at all; without one, the server path runs
+> unchanged. Both branches return the same shape (a bare array of phrasings), so neither can
+> become the special case nobody tests.
+>
+> **Failing closed is the part that got the most care.** A refused key, an exhausted quota, an
+> unparseable completion, a CORS or offline failure — every one returns `null` and the caller
+> falls back to the student's literal words. And the student is **told which happened**: a key
+> that quietly did nothing is worse than no key, because they would believe their quota was
+> spent and that a model chose the phrasings.
 
 ---
 
@@ -48,25 +55,42 @@ for** — for logs, for Firestore, for support, for breach. Not holding it is th
 
 ---
 
-## P7-1 · Key in the page, never on the server `[ ]`
+## P7-1 · Key in the page, never on the server `[x]`
 
 **Files**: `src/supervisorly/export/webapp.py`, `tests/test_byo_key.py` *(new)*
 
-- [ ] P7-1.1 Optional key field on step 1, stored in `localStorage` **only**
-- [ ] P7-1.2 Expansion calls Gemini **directly from the browser** when a key is present;
+- [x] P7-1.1 Optional key field on step 1, stored in `localStorage` **only**
+- [x] P7-1.2 Expansion calls Gemini **directly from the browser** when a key is present;
       falls back to the server path when it is not
-- [ ] P7-1.3 The key is **never** sent to our API, never logged, never placed in an error
+- [x] P7-1.3 The key is **never** sent to our API, never logged, never placed in an error
       message or a `note` — the existing D-068 rule, applied to a key we do not own, which
       raises the stakes rather than lowering them
-- [ ] P7-1.4 Invalid / revoked / quota-exhausted → **fail closed to the student's own words**,
+- [x] P7-1.4 Invalid / revoked / quota-exhausted → **fail closed to the student's own words**,
       with a clear message. Never a broken scan
-- [ ] P7-1.5 Tests: **no code path posts the key to our origin**, and the D-071 error beacon
+- [x] P7-1.5 Tests: **no code path posts the key to our origin**, and the D-071 error beacon
       cannot carry it
 
 **Acceptance** — with a key set, `/api/expand` is not called at all and the phrasings still
 arrive. With an invalid key, the wizard continues using the student's literal words.
+**Both pinned as tests** (`tests/test_byo_key.py`), the first by asserting the server path is
+reachable only from the `if(!own)` branch.
 
-**Review** `[ ]`
+**Done, 2026-07-29.** Notes for whoever touches this next:
+
+- **The key is never in `state`.** `state` is what becomes the plan we POST, so a key placed
+  there would reach our servers with nobody having written a line to send it. Only two
+  booleans — `ownKeyUsed` / `ownKeyFailed` — travel there.
+- **Both expansion branches return the same shape** (a bare array of phrasings). A different
+  shape for the own-key path would make it the branch nobody tests.
+- **Every Google failure mode returns `null`** — non-2xx (refused / quota), unparseable
+  completion, and a `.catch` for offline/CORS. Any of them throwing would break the click,
+  and P7's whole promise is that a bad key costs a *narrower* search, never a broken one.
+- **The student is told which happened.** A key that quietly did nothing is worse than no key:
+  they would believe their quota was spent and that a model chose the phrasings.
+- The key has its **own** storage key, separate from the past-searches list, so "forget this
+  search" and "clear my key" cannot destroy one another.
+
+**Review** `[R]`
 
 ---
 
