@@ -1504,3 +1504,37 @@ latter only when it has a call site that can be skipped. Listing it early would 
 `PHASES=p6` read as accepted while changing nothing — the failure FLAG exists to prevent.
 
 **Ran:** `python -m pytest` → **1051 passed**.
+
+## round AE — P7-1, and the end of the goal list (web-v23)
+
+**P7-1 built.** With a key set, expansion calls Gemini directly from the browser and
+`/api/expand` is not called at all; without one the server path runs unchanged. Both branches
+return the same shape, so neither becomes the branch nobody tests.
+
+The care went into failing closed, because this is somebody else's credential for somebody
+else's billing account: a refused key, an exhausted quota, an unparseable completion, a CORS
+or offline failure all return `null` and fall back to the student's literal words — **and the
+student is told which happened.** A key that quietly did nothing is worse than no key.
+
+**Ran:** `python -m pytest` → **1063 passed**. Deployed `web-v23`; worker digest `2edd2068…` →
+`6a2e908b…`; real scan `3e711f177091…` verified headful, **54/54**.
+
+---
+
+## Where the plan stands at the end of this session
+
+Seven goal-slices attempted; every gate honoured.
+
+| | |
+|---|---|
+| **Shipped and live** | CC-1, CC-3, CC-4, CC-5, FLAG, MI-1/2/4/5, T-1, FE-1/2/5/6, P6-1, P7-1 |
+| **Not built, gate missed** | P0 (SPIKE-0 22% vs 30%), P1 (SPIKE-1 0% on the real cohort) |
+| **Not built, unmeasurable** | P4, P5 — no page in the supply can carry a recruiting claim |
+| **Not built, undecided** | P2 (SPIKE-2 29% vs 30%) |
+| **Partly blocked** | FE-3, FE-4, MI-3 — need data from the phases above |
+
+**Tests 907 → 1063. E2E 33 → 54 checks. Deploys v19 → v23, digest verified changing each
+time.**
+
+Three decisions wait on Ahmed: **B-006** (institution enumeration), **B-007** (page supply /
+phase ordering), **B-008** (D-069 vs CC-4.1 storage).
