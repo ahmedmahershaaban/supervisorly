@@ -48,23 +48,43 @@ cycles.
 
 ---
 
-## P6-1 · Archive client `[!]` blocked on P1 — SPIKE-6 itself PASSED (50%)
+## P6-1 · Archive client `[x]` — built as a primitive; no caller until P1 lands
 
 **Files**: `src/supervisorly/discover/archive.py` *(new)*, `tests/test_archive.py` *(new)*
 
-- [ ] P6-1.1 CDX query for a URL **P1 discovered** — never a URL we authored
-      ([`00-invariants.md`](00-invariants.md) §2)
-- [ ] P6-1.2 Fetch the snapshots, extract dates from each
-- [ ] P6-1.3 **Fewer than 3 cycles → no projection.** Two points are not a pattern; report what
+- [x] P6-1.1 CDX query for a URL **P1 discovered** — never a URL we authored
+      ([`00-invariants.md`](00-invariants.md) §2). Anything that is not an `http(s)` URL is
+      refused rather than normalised: a constructed guess arrives in exactly that shape.
+- [x] P6-1.2 Fetch the snapshots, extract dates from each — *the dates are passed IN.* This
+      module does not parse pages: the pipeline already has one date extractor and a second
+      would be a second set of bugs.
+- [x] P6-1.3 **Fewer than 3 cycles → no projection.** Two points are not a pattern; report what
       was found and stop
-- [ ] P6-1.4 A projection is labelled `watch · projected`, **never** `firm`
-- [ ] P6-1.5 Archive slow or unavailable → skip. Historical enrichment is never load-bearing
-- [ ] P6-1.6 Behind the `PHASES` flag; ledger row either way
+- [x] P6-1.4 A projection is labelled `watch · projected`, **never** `firm`
+- [x] P6-1.5 Archive slow or unavailable → skip. Historical enrichment is never load-bearing
+- [~] P6-1.6 Behind the `PHASES` flag; ledger row either way — **not yet**, and deliberately:
+      `p6` stays in `PLANNED_PHASES` because a phase joins `OPTIONAL_PHASES` only when it has
+      a **call site that can be skipped**. It has none until P1 supplies URLs. Listing it
+      early would let `PHASES=p6` read as accepted while changing nothing, which is the exact
+      failure the FLAG task exists to prevent.
 
 **Acceptance** — a URL with two snapshots yields no projected date; one with four yields a
-projected date that renders as `watch`, never as a published deadline.
+projected date that renders as `watch`, never as a published deadline. **Both pinned as tests.**
 
-**Review** `[ ]`
+**Done, 2026-07-29.** Built for the same reason CC-3 was: SPIKE-6 passed its gate, and this
+is the self-contained client that phase needs. It is exercised as a primitive, not wired in —
+P1 has no admissions URLs to give it yet.
+
+Three refusals worth keeping:
+- **Only 2xx captures count as cycles.** A 404 capture proves the URL existed, not that a page
+  was archived whose deadline could be read — counting it inflates the very history that gates
+  the projection.
+- **Enough captures but too few readable dates still refuses.** Otherwise "four cycles" would
+  license projecting from two dates, sidestepping the 3-cycle rule through the back door.
+- **A 429 is a failure, not an empty history.** The archive is a charity and throttles;
+  reporting that as "no history" turns their rate limit into our claim about an institution.
+
+**Review** `[R]`
 
 ---
 

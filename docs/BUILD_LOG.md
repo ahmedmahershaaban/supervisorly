@@ -1481,3 +1481,26 @@ student's, failing closed to their own words.
 
 **Session totals:** 1035 tests passing (from 907); deployed web-v19 → v22 with the worker
 digest confirmed changing at every step; the e2e went 33 → 54 checks against production.
+
+## round AD — P6-1, the archive client
+
+SPIKE-6 passed its gate, so P6-1 was built — for the same reason CC-3 was: it is the
+self-contained client that phase needs, exercised as a primitive rather than wired in, because
+P1 has no admissions URLs to give it yet.
+
+`discover/archive.py` reads Wayback CDX and refuses to project far more often than it
+projects, which is the point — the dangerous output here is a *date*, and a student who plans
+around a fabricated one has been badly served. Three refusals worth remembering:
+
+- **Only 2xx captures count as cycles.** A 404 capture proves the URL existed, not that a page
+  was archived whose deadline could be read.
+- **Enough captures but too few readable dates still refuses.** Otherwise "four cycles" would
+  license projecting from two dates, sidestepping the 3-cycle rule through the back door.
+- **A 429 is a failure, not an empty history.** The archive is a charity and throttles;
+  reporting that as "no history" turns their rate limit into our claim about an institution.
+
+`p6` deliberately stays in `PLANNED_PHASES` rather than `OPTIONAL_PHASES`: a phase joins the
+latter only when it has a call site that can be skipped. Listing it early would let
+`PHASES=p6` read as accepted while changing nothing — the failure FLAG exists to prevent.
+
+**Ran:** `python -m pytest` → **1051 passed**.

@@ -78,7 +78,7 @@ and not a pass. `◐` = UI half shipped, backend not. `~` = partly blocked on an
 | FE-3 / FE-4 | `[~]` partly blocked — 7 subtasks need P0/P1/P2/P5 data | |
 | CC-2 budgets | todo | |
 | **P2 directory** | **`[!]` SPIKE-2 = 29% pooled — undecided, re-run wider** | 2026-07-29 |
-| **P6 archive** | **`[!]` SPIKE-6 PASSED (50%) — blocked on P1, not on its own gate** | 2026-07-29 |
+| **P6 archive** | **`[x]` SPIKE-6 PASSED (50%); P6-1 client built as a primitive — no caller until P1** | 2026-07-29 |
 | **P7 BYO key** | **`◐` UI half shipped as FE-5; the expansion backend is not switched to it** | 2026-07-29 |
 | **P0 ORCID employments** | **`[!]` SPIKE-0 = 22%, gate is 30% — not built** | 2026-07-29 |
 | **P1 admissions** | **`[!]` SPIKE-1 = 0% on the real cohort — not built** | 2026-07-29 |
