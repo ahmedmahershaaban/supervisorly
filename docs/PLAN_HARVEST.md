@@ -114,17 +114,45 @@ So the mechanism is:
 
 1. fetch what the ladder already discovered (the institution's own URL, from ROR)
 2. **extract its links** — the site's own navigation, in whatever language and shape it uses
-3. **classify the fetched page, after fetching it** (`roster.classify_directory`) — decide
-   "this is a directory of people" from the page's content, not from its address
+3. **visit, then judge** — decide what a page is from its *text*, never from its address
 4. follow the frontier under a budget: bounded depth, a page cap per institution, robots
    obeyed, and **serial per host** even while many institutions run in parallel
 
 No step needs a path dictionary, and every step works in a language nobody anticipated.
 
-Where a model earns its place here — and it does — is step 3 on a page whose links carry no
-cue we can match: choosing which of two hundred links on an unfamiliar site is the faculty
-directory is judgement, not lookup. It proposes *which URL to try next*, never a fact, which
-keeps it on the D-068 side of the line: queries, never claims.
+#### Judge the page, not the link — and the ordering rule that makes it affordable
+
+Ahmed's correction to the previous draft, which had a model choosing *which link to click*:
+**a URL and its link text are not reliable enough to decide on.** Plenty of faculties publish
+`/en/page/1734`, or wrap the only useful link in an image, or label it in Arabic, or write
+"Click here". Judging the address is the same mistake as predicting the path, one level up.
+
+But "visit everything and let a model read it" is unaffordable in the other direction —
+hundreds of pages per institution, each costing tokens to be told it was a news archive.
+
+The resolution is a cascade, cheapest first, with one rule that keeps it honest:
+
+| stage | cost | decides |
+|---|---|---|
+| fetch the page | cheap (ms, no tokens) | nothing — never pre-judged by URL |
+| **deterministic triage** on the extracted text | free | is this a list of people? a person's page? neither? |
+| model, on what triage cannot settle | tokens | the ambiguous remainder only |
+
+**Weak signals order the queue; they never exclude from it.** Link text and URL shape are
+allowed to decide *what to visit first* — that is a scheduling hint and costs nothing if it is
+wrong. They are never allowed to decide *what to skip*, because that turns an unreliable
+signal into a silent gap. When the page budget runs out, the most promising pages have already
+been read and the coverage line reports what was left unvisited — truncation that announces
+itself, the same pattern as `truncated_sources` (D-037).
+
+`extract/page_extract.js` already produces exactly the input this needs: text only, no DOM, no
+images, boilerplate (`script/style/nav/header/footer`, hidden elements) stripped, 60 KiB cap.
+
+**What does not exist yet:** the content classifier in the middle row. `roster.classify_directory`
+answers *"could we read this page"* — OPEN / LOGIN_WALL / NOT_FOUND — not *"is this a directory
+of people"*. That classifier is new work, and it is deliberately deterministic first: a page
+listing thirty short internal links with person-shaped anchor text is a roster, and recognising
+that needs counting, not judgement.
 
 `tests/test_no_seed_urls.py` fails the build if a path dictionary starts to form.
 
