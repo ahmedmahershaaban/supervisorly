@@ -8,6 +8,7 @@ import copy
 import json
 
 import pytest
+from helpers_export import stable_bytes
 
 from supervisorly import pipeline
 from supervisorly.discover import openalex, ror
@@ -135,17 +136,9 @@ def test_no_progress_arg_matches_a_noop_callback_byte_for_byte(tmp_path):
     r_noop = pipeline.run_live(PLAN, _transport(), tmp_path / "b" / "snaps", email=EMAIL,
                                progress=lambda _e: None, **_FAST)
 
-    def _bytes(export):
-        e = copy.deepcopy(export)
-        e["run"]["run_id"] = "<run>"                  # volatile: fresh uuid per run
-        e["generated_at"] = "<ts>"                    # volatile: wall clock
-        for p in e["professors"]:
-            for env in p["fields"].values():
-                if env["observed_at"]:
-                    env["observed_at"] = "<ts>"
-        return json.dumps(e, sort_keys=True).encode()
-
-    assert _bytes(r_none["export"]) == _bytes(r_noop["export"])
+    # The volatile-field list lives in helpers_export because the phase-flag test needs the
+    # same one: run_id, the two timestamps, and the CC-1 ledger's own elapsed-time columns.
+    assert stable_bytes(r_none["export"]) == stable_bytes(r_noop["export"])
     assert r_none["stats"] == r_noop["stats"]
 
 

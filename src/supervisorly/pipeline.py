@@ -933,7 +933,21 @@ def run_offline(plan: dict, targets: list[dict], transport: Transport, snap_root
     runs.set_run_status(conn, run_id, "deep_diving")
 
     stats = {"extractions": 0, "cache_hits": 0, "opted_out": opted_out, "resumed_skipped": 0}
+    _t_dive = time.monotonic()
     gaps = _process_targets(conn, run_id, targets, fetcher, snaps, stats=stats, resume=resume)
+    # CC-1: the offline path explains itself on the same terms as a live one. A cassette run
+    # is the path every test exercises, so a ledger that only existed on the live path would
+    # be the one part of the pipeline nothing verifies.
+    if opted_out:
+        runs.record_phase(conn, run_id, "optout", attempted=opted_out, reached=0,
+                          skipped=opted_out,
+                          reason="on the opt-out list — never requested (D-023)")
+    runs.record_phase(
+        conn, run_id, "deep_dive", attempted=len(targets),
+        reached=max(len(targets) - gaps, 0), skipped=gaps,
+        reason=("page blocked, walled or absent — open for the human rung" if gaps else None),
+        seconds=time.monotonic() - _t_dive,
+    )
     status = "finalized_with_open_gaps" if gaps else "finalized"
     runs.set_run_status(conn, run_id, status)
     return _build_result(conn, run_id, status, targets, stats=stats, gaps=gaps)
@@ -1000,6 +1014,9 @@ def run_live(plan: dict, transport: Transport, snap_root, *, email: str,
     oa_client = _openalex.OpenAlexClient(transport, email=email, key=openalex_key)
     country = plan.get("country") or (plan.get("countries") or [None])[0]
     targets_truncated = list(targets_truncated or [])
+    # CC-1 timing starts before the ladder, which runs before the run row exists — the
+    # ledger rows are written just after ``create_run`` with the elapsed time carried across.
+    _t_discovery = time.monotonic()
 
     if targets_override is not None and not country:
         # named-professor run: no country/field scope, so the discovery ladder is skipped —
@@ -1041,6 +1058,7 @@ def run_live(plan: dict, transport: Transport, snap_root, *, email: str,
 
     _emit_progress(progress, ("enumerated", len(disc["targets"]),
                               len(disc["institutions"])))
+    _discovery_seconds = time.monotonic() - _t_discovery
 
     conn = open_db(db_path) if db_path is not None else open_db()
     snaps = SnapshotStore(snap_root)
@@ -1073,10 +1091,44 @@ def run_live(plan: dict, transport: Transport, snap_root, *, email: str,
         # the same PARTIAL disclosure the coverage line carries, as a §4.1 event (D-037)
         _emit_progress(progress, ("partial_warning",
                                   _partial_warning_message(stats["truncated"])))
+
+    # ── CC-1 ledger: discovery and the shortlist gate ─────────────────────────
+    # Written here rather than at the end so a run that dies mid-deep-dive still leaves
+    # behind what discovery actually did. A ledger that only survives a clean finish is a
+    # ledger that is absent exactly when it is needed.
+    runs.record_phase(
+        conn, run_id, "discovery",
+        attempted=len(disc["institutions"]),
+        reached=len(disc["targets"]),
+        skipped=len(disc.get("truncated") or []),
+        reason=(f"{len(disc['truncated'])} source(s) had more results than were "
+                f"enumerated ({', '.join(disc['truncated'])})"
+                if disc.get("truncated") else None),
+        seconds=_discovery_seconds,
+    )
+    runs.record_phase(
+        conn, run_id, "shortlist",
+        attempted=len(targets),
+        reached=len(deep_dive),
+        skipped=len(targets) - len(deep_dive),
+        reason=(f"outside the top {shortlist_size} by topic fit — listed, unchecked "
+                "(never_attempted)" if len(deep_dive) < len(targets) else None),
+    )
+    if opted_out:
+        # An opt-out is a filtered result, never a coverage gap (D-023) — so it is its own
+        # row rather than folded into the shortlist's skip count, which would misreport a
+        # person's own choice as a limit of the scan.
+        runs.record_phase(conn, run_id, "optout", attempted=opted_out, reached=0,
+                          skipped=opted_out,
+                          reason="on the opt-out list — never requested (D-023)")
+
     # What the professor has actually been publishing — the single most useful thing a
     # student weighing a supervisor can see, and the one signal that survives a blocked
     # deep-dive. `works_by_author` shipped with the OpenAlex client and was never called.
-    _attach_recent_works(deep_dive, oa_client)
+    _t_works = time.monotonic()
+    _works = _attach_recent_works(deep_dive, oa_client)
+    runs.record_phase(conn, run_id, "recent_works", seconds=time.monotonic() - _t_works,
+                      **_works)
     # Live runs only: resolves an ORCID profile URL to the professor's real page (D-072).
     # Built here rather than inside the deep-dive so the offline/demo path stays network-free
     # and every existing cassette test keeps passing unchanged (D-011/D-063).
@@ -1085,6 +1137,7 @@ def run_live(plan: dict, transport: Transport, snap_root, *, email: str,
     # disagree, and the permissive one wins. Absent Playwright this is inert: `render()`
     # returns None and every page takes exactly the path it takes today.
     renderer = render_mod.ChromiumRenderer(fetcher.robots_allows)
+    _t_dive = time.monotonic()
     try:
         gaps = _process_targets(conn, run_id, deep_dive, fetcher, snaps, stats=stats,
                                 resume=resume, progress=progress, should_stop=should_stop,
@@ -1094,6 +1147,18 @@ def run_live(plan: dict, transport: Transport, snap_root, *, email: str,
         # One browser for the whole run; leaking it would outlive the scan inside a container
         # that then gets reused for the next job.
         renderer.close()
+    # ``gaps`` counts targets with at least one blocked field, so reached is the complement:
+    # the ones whose deep-dive produced something readable. A cancelled run records what it
+    # got through rather than nothing — a stopped scan still did work, and hiding that would
+    # make cancel look like failure.
+    runs.record_phase(
+        conn, run_id, "deep_dive",
+        attempted=len(deep_dive),
+        reached=max(len(deep_dive) - gaps, 0),
+        skipped=gaps,
+        reason=("page blocked, walled or absent — open for the human rung" if gaps else None),
+        seconds=time.monotonic() - _t_dive,
+    )
     if stats.get("rendered"):
         stats["render_note"] = (f"{stats['rendered']} page(s) needed a browser to read")
     if stats.get("cancelled"):
@@ -1151,7 +1216,7 @@ def reexport(db_path, targets: list[dict], *, optout_path=None) -> dict:
 RECENT_WORKS_LIMIT = 8
 
 
-def _attach_recent_works(targets: list[dict], oa) -> None:
+def _attach_recent_works(targets: list[dict], oa) -> dict:
     """Attach each shortlisted professor's recent publications, newest first.
 
     Only the SHORTLISTED targets — one OpenAlex call each, so this is bounded by the same
@@ -1161,11 +1226,22 @@ def _attach_recent_works(targets: list[dict], oa) -> None:
     fails simply carries none, exactly as if OpenAlex had returned an empty list. That is
     honest emptiness (D-037) — the alternative, failing the scan because a *supplementary*
     signal was unavailable, would trade the whole result for a nice-to-have.
+
+    Returns the CC-1 ledger counts for this phase. It returns them rather than writing the
+    row itself so the function keeps no database handle: the phase that *does* the work and
+    the phase that *records* it stay separable, which is what let this be tested without a
+    connection at all.
     """
+    attempted = reached = 0
+    no_author_id = 0
     for t in targets:
         author_id = t.get("openalex_id")
         if not author_id:
+            # Not a failure — this target never had an OpenAlex identity to look up. Counted
+            # separately so "we could not ask" never reads as "we asked and got nothing".
+            no_author_id += 1
             continue
+        attempted += 1
         # Marked BEFORE the call, and left marked whatever happens. The modal shows a works
         # COUNT from the registry, so an empty publications list next to "4 works" reads as a
         # bug unless the page can say which it is: not looked up (outside the shortlist) or
@@ -1181,11 +1257,17 @@ def _attach_recent_works(targets: list[dict], oa) -> None:
             {"title": w.get("title"), "year": w.get("year")}
             for w in ranked[:RECENT_WORKS_LIMIT] if w.get("title")
         ]
+        if t["recent_works"]:
+            reached += 1
     # Deliberately emits NO progress event. The §4.1 phase vocabulary is consumed by the CLI
     # printer, the job-store event mapper and the web page's phase labels, and a new verb
     # would have to be taught to all three — a large surface for a step that adds a few
     # seconds inside a phase the student is already watching. It stays silent until the
     # phase list is revised for its own reasons.
+    return {"attempted": attempted + no_author_id, "reached": reached,
+            "skipped": no_author_id,
+            "reason": (f"{no_author_id} target(s) carry no OpenAlex id to look up"
+                       if no_author_id else None)}
 
 
 def _profile_for(t: dict, plan_topic_ids) -> dict:
@@ -1316,9 +1398,15 @@ def _build_result(conn, run_id, status, targets, *, stats, gaps,
     for w in (stats or {}).get("warnings", []):
         # sparse-coverage preflight + discovery-scope warnings (D-060) reach the dashboard too
         coverage += f" Warning: {w}"
+    # CC-1: what each phase attempted, reached and skipped — and why. It travels in the
+    # export rather than only in the logs because the person who needs it most is the
+    # student looking at a thin dashboard, not an operator with `gcloud logging read`.
+    # An empty list is a real answer too: no phase recorded anything.
+    ledger = runs.phase_ledger(conn, run_id)
     export = jx.build_export(
         run_summary={"run_id": run_id, "status": status,
-                     "counts": {"enumerated": enumerated}, "coverage": coverage},
+                     "counts": {"enumerated": enumerated}, "coverage": coverage,
+                     "ledger": ledger},
         field_descriptors=FIELD_DESCRIPTORS,
         professors=professors,
         claims_by_entity=claims_by_entity,

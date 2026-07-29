@@ -85,6 +85,19 @@ tr.row:focus{outline:2px solid var(--focus);outline-offset:-2px}
 .badge{font-family:var(--mono);font-size:10.5px;padding:2px 9px;border-radius:999px;border:1px solid var(--line)}
 .badge.firm{color:var(--firm);border-color:#3a6b48} .badge.watch{color:var(--watch);border-color:#7a6528}
 .note{font-family:var(--mono);font-size:11px;color:var(--faint);padding:8px 4px}
+/* phase ledger (CC-1) — what each phase attempted, reached and skipped, and why.
+   It lives under the diagram because the diagram says what the engine DOES and this
+   says what it did THIS TIME; a student reading one wants the other. */
+.ledger{margin:26px auto 0;max-width:940px}
+.ledger h2{font-family:var(--mono);font-size:11px;letter-spacing:.18em;text-transform:uppercase;
+  color:var(--accent);font-weight:700;margin:0 0 10px}
+.ledger table{min-width:0}
+.ledger .tblwrap{overflow-x:auto}
+.lg-num{font-family:var(--mono);font-size:12.5px;text-align:right;white-space:nowrap}
+.lg-phase{font-family:var(--mono);font-size:12.5px;color:var(--teal);white-space:nowrap}
+.lg-reason{color:var(--muted);font-size:13px}
+.lg-zero{color:var(--never)}
+.lg-skip{color:var(--blocked)}
 /* professor modal — a centred dialog, not a side drawer: the panel now carries a profile,
    stats, links and a publication list, and 452px of edge-anchored column made that a
    scrolling ribbon on every screen size. */
@@ -423,6 +436,38 @@ function clearHl(){
   document.querySelectorAll("#stage .cell").forEach(function(c){c.style.opacity="";c.style.filter="";});
   document.querySelectorAll("#stage g[data-edge]").forEach(function(g){g.style.opacity="";});
 }
+function renderLedger(){
+  // CC-1. The honesty rule this panel exists for: a phase that reached NOTHING still
+  // gets a row, with its reason. Rendering only the phases that found something would
+  // reproduce exactly the silence the ledger was built to end.
+  var rows=(DATA.run&&DATA.run.ledger)||[];
+  var el=document.getElementById("ledger");
+  if(!el) return;
+  if(!rows.length){
+    // Distinguish "no phase recorded anything" from "phases ran and found nothing" —
+    // the four-state honesty rule applied to the ledger itself.
+    el.innerHTML='<h2>What each phase did</h2><div class="note">No phase recorded a '+
+      'ledger row for this run. That means the phases did not report, not that they '+
+      'found nothing.</div>';
+    return;
+  }
+  var html='<h2>What each phase did</h2><div class="tblwrap"><table><thead><tr>'+
+    '<th>Phase</th><th>Attempted</th><th>Reached</th><th>Skipped</th><th>Why</th>'+
+    '<th>Time</th></tr></thead><tbody>';
+  rows.forEach(function(r){
+    var reached=Number(r.reached||0), skipped=Number(r.skipped||0);
+    html+='<tr>'+
+      '<td class="lg-phase">'+esc(r.phase)+'</td>'+
+      '<td class="lg-num">'+esc(Number(r.attempted||0))+'</td>'+
+      '<td class="lg-num'+(reached?'':' lg-zero')+'">'+esc(reached)+'</td>'+
+      '<td class="lg-num'+(skipped?' lg-skip':'')+'">'+esc(skipped)+'</td>'+
+      '<td class="lg-reason">'+esc(r.reason||(skipped?'':'—'))+'</td>'+
+      '<td class="lg-num">'+esc((Number(r.seconds||0)).toFixed(1))+'s'+
+        (Number(r.tokens||0)?' · '+esc(r.tokens)+' tok':'')+'</td>'+
+      '</tr>';
+  });
+  el.innerHTML=html+'</tbody></table></div>';
+}
 function setView(v){
   document.getElementById("grid").classList.toggle("hidden",v!=="table");
   document.getElementById("deadlines").classList.toggle("hidden",v!=="deadlines");
@@ -431,7 +476,7 @@ function setView(v){
     document.getElementById(p[0]).classList.toggle("on",v===p[1]);});
   if(v==="how") drawDiagram();
 }
-function render(){renderTable();renderDeadlines();
+function render(){renderTable();renderDeadlines();renderLedger();
   document.getElementById("count").textContent=filtered().length+" / "+DATA.professors.length+" professors";}
 function onId(e,keyb){var el=e.target.closest("[data-id]");
   if(el&&(!keyb||e.key==="Enter"||e.key===" ")){if(keyb)e.preventDefault();openDetail(el.getAttribute("data-id"));}}
@@ -492,6 +537,7 @@ def build_dashboard(export_obj: dict) -> str:
   <div id="how" class="hidden">
     <div class="stagewrap"><div class="stage" id="stage"></div></div>
     <div class="dcap">GOVERNS · public-source ladder · quote-verified claims · browser tier (your session) for the walled, MD rung as fallback</div>
+    <div id="ledger" class="ledger"></div>
   </div>
 </div>
 <div id="panel" class="hidden"></div>

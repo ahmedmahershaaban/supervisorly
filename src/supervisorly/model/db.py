@@ -8,6 +8,11 @@ stale table is rebuilt atomically in place (one transaction, foreign keys off
 during the rebuild), data preserved — schema v2 did this for the
 ``web_source.source_tier`` CHECK (D-064), schema v3 for the ``run.status``
 CHECK (the 'cancelled' terminal state).
+
+Schema v4 (``phase_ledger``, CC-1) needed no rebuild at all: a NEW table is what
+"additive" means, and ``CREATE TABLE IF NOT EXISTS`` already handles it. The
+version bump exists so a v3 database is still identifiable, not because the
+migration branches on it.
 """
 
 from __future__ import annotations
@@ -18,7 +23,7 @@ from datetime import datetime, timezone
 from importlib import resources
 from pathlib import Path
 
-SCHEMA_VERSION = "3"
+SCHEMA_VERSION = "4"
 
 
 def new_id(prefix: str) -> str:

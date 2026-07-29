@@ -205,3 +205,29 @@ CREATE TABLE IF NOT EXISTS person (
   homepage        TEXT,
   disambig_risk   TEXT               -- null|low|high (D-030/D-057)
 );
+
+-- ── PhaseLedger (CC-1, D-037) ─────────────────────────────────────────────────
+-- What each phase attempted, what it reached, and what it skipped and WHY. Purely
+-- additive (a new table, no CHECK widening), so `migrate` needs no rebuild path.
+--
+-- The point is coverage honesty: "the dashboard looks thin" must be an answerable
+-- question. A phase that reached nothing still writes a row — absence of a row means
+-- the phase never ran at all, which is itself a different and visible answer. Rows
+-- are append-only in insertion order; `rowid` is the ordering, so a phase that runs
+-- twice (resume) shows both attempts rather than overwriting the first.
+CREATE TABLE IF NOT EXISTS phase_ledger (
+  ledger_id  TEXT PRIMARY KEY,
+  run_id     TEXT NOT NULL REFERENCES run(run_id),
+  phase      TEXT NOT NULL,          -- 'p0', 'p1', 'discovery', … free text by design
+  attempted  INTEGER NOT NULL DEFAULT 0,
+  reached    INTEGER NOT NULL DEFAULT 0,
+  skipped    INTEGER NOT NULL DEFAULT 0,
+  reason     TEXT,                   -- why the skipped ones were skipped; NULL only if skipped=0
+  seconds    REAL NOT NULL DEFAULT 0,
+  tokens     INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+);
+-- run_id only: an index entry already carries the rowid as its payload, and SQLite
+-- refuses `rowid` as an indexed column outright — so this IS the (run_id, rowid)
+-- ordering the reader wants.
+CREATE INDEX IF NOT EXISTS idx_phase_ledger_run ON phase_ledger(run_id);

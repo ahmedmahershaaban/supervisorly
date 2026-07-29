@@ -94,6 +94,62 @@ def get_counts(conn: sqlite3.Connection, run_id: str) -> dict[str, Any]:
     return json.loads(row["counts_json"]) if row else {}
 
 
+# ── PhaseLedger (CC-1, D-037) ─────────────────────────────────────────────────
+def record_phase(
+    conn: sqlite3.Connection,
+    run_id: str,
+    phase: str,
+    *,
+    attempted: int = 0,
+    reached: int = 0,
+    skipped: int = 0,
+    reason: str | None = None,
+    seconds: float = 0.0,
+    tokens: int = 0,
+) -> str:
+    """Record what one phase attempted, reached and skipped — and why it skipped.
+
+    This is the answer to *"why does the dashboard look thin?"*. Three times in the
+    corpus that question cost an afternoon of log archaeology because the pipeline
+    reported only what it FOUND; a phase that reached nothing was indistinguishable
+    from a phase that never ran. So a phase that reached nothing still writes a row.
+
+    ``reason`` is required whenever anything was skipped: a skip with no reason is
+    exactly the silence this table exists to remove. Recording is never allowed to
+    kill a run — the ledger is an observer — but a *missing reason* is a programming
+    error caught here rather than discovered as a blank cell in production.
+    """
+    if skipped and not (reason or "").strip():
+        raise StateError(
+            f"phase {phase!r} skipped {skipped} without a reason — a skip with no "
+            "reason is the silence the ledger exists to remove (CC-1)"
+        )
+    ledger_id = new_id("phl")
+    conn.execute(
+        "INSERT INTO phase_ledger(ledger_id, run_id, phase, attempted, reached, "
+        "skipped, reason, seconds, tokens, created_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+        (ledger_id, run_id, phase, int(attempted), int(reached), int(skipped),
+         (reason or None), float(seconds), int(tokens), utcnow()),
+    )
+    conn.commit()
+    return ledger_id
+
+
+def phase_ledger(conn: sqlite3.Connection, run_id: str) -> list[dict[str, Any]]:
+    """Every ledger row for a run, in the order the phases wrote them.
+
+    Ordered by ``rowid`` rather than ``created_at``: timestamps are second-resolution,
+    and two phases that finish inside the same second must not reorder themselves
+    between one read and the next — a ledger that shuffles is a ledger nobody trusts.
+    """
+    rows = conn.execute(
+        "SELECT phase, attempted, reached, skipped, reason, seconds, tokens, created_at "
+        "FROM phase_ledger WHERE run_id=? ORDER BY rowid",
+        (run_id,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
 # ── Task ──────────────────────────────────────────────────────────────────────
 def add_task(
     conn: sqlite3.Connection,
