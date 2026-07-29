@@ -1,0 +1,153 @@
+# CC — Cross-cutting (do these first)
+
+← back to [`README.md`](README.md) · invariants: [`00-invariants.md`](00-invariants.md)
+
+Later phases depend on these. CC-1 and CC-3 in particular are prerequisites, not nice-to-haves.
+
+---
+
+## CC-1 · Phase ledger `[ ]`
+
+Every phase records attempted / reached / skipped-with-reason / cost, surfaced in the run
+summary and the dashboard. This turns *"the dashboard looks thin"* into an answerable question
+— the difference between this session's diagnosis taking ten minutes and taking an afternoon.
+
+**Files**
+- `src/supervisorly/model/runs.py`
+- `src/supervisorly/pipeline.py`
+- `src/supervisorly/export/json_export.py`
+- `src/supervisorly/export/dashboard.py`
+- `tests/test_phase_ledger.py` *(new)*
+
+**Subtasks**
+- [ ] CC-1.1 `runs.record_phase(conn, run_id, phase, attempted, reached, skipped, reason, seconds, tokens=0)`
+- [ ] CC-1.2 A `phase_ledger` table, or reuse the `run_counts` JSON — **additive migration only**
+- [ ] CC-1.3 `_build_result` includes `ledger` in the export
+- [ ] CC-1.4 The dashboard's "How it works" panel renders it
+- [ ] CC-1.5 Tests: a phase that reached nothing still appears, with its reason
+
+**Acceptance** — a run where P1 finds no admissions page shows
+`P1 attempted 10 · reached 0 · skipped 10 (no admissions page found)`. Never absence.
+
+**Review** `[ ]`
+
+---
+
+## CC-2 · Per-phase budgets `[ ]`
+
+**Files**
+- `src/supervisorly/fetch/budget.py` *(new)*
+- `src/supervisorly/pipeline.py`
+- `tests/test_budget.py` *(new)*
+
+**Subtasks**
+- [ ] CC-2.1 `Budget(fetches, seconds, tokens)` with `spend()` / `remaining()` / `exhausted()`
+- [ ] CC-2.2 Each phase takes a budget; exhaustion **returns**, never raises
+- [ ] CC-2.3 Exhaustion writes a ledger row with `reason="budget"`
+- [ ] CC-2.4 Tests: an exhausted budget mid-phase leaves prior work intact and the run valid
+
+**Acceptance** — cutting a budget to one fetch still produces a complete, honest dashboard.
+
+**Review** `[ ]`
+
+---
+
+## CC-3 · Per-host concurrency, across **domains** `[ ]`
+
+The unit is the **host/domain**, not the institution *(Ahmed's correction, 2026-07-29)*. One
+university spans a main site, a scholar subdomain and faculty subdomains; sources span domains
+belonging to no institution at all. Twenty concurrent means twenty **distinct hosts**.
+
+**Files**
+- `src/supervisorly/fetch/pool.py` *(new)*
+- `src/supervisorly/fetch/ratelimit.py`
+- `src/supervisorly/fetch/render.py`
+- `tests/test_pool.py` *(new)*
+
+**Subtasks**
+- [ ] CC-3.1 `HostPool(max_concurrent=10)` — N workers, **at most one in-flight request per host**
+- [ ] CC-3.2 Queue keyed by registrable domain; a host already in flight is **deferred, not dropped**
+- [ ] CC-3.3 `ChromiumRenderer` acquires and releases pages through the pool
+- [ ] CC-3.4 **Async page pool, not threads** — Playwright's sync API is bound to its creating
+      thread, so threads buy contention rather than speed
+- [ ] CC-3.5 Tests: 20 URLs across 3 hosts never issue two concurrent requests to one host
+
+**Acceptance** — a 20-URL burst against one host serialises; across 20 hosts it parallelises.
+Start at 8–10 concurrent pages (~1–2 GB against the worker's 4 GiB) and measure before raising.
+
+**Review** `[ ]`
+
+---
+
+## CC-4 · Sessions the student can re-open `[ ]`
+
+*(Ahmed, 2026-07-29.)* A finished result is kept and re-openable from the UI; starting a new
+search never deletes an old one.
+
+**Files**
+- `src/supervisorly/export/webapp.py`
+- `tests/test_sessions.py` *(new)*
+
+**Subtasks**
+- [ ] CC-4.1 Keep a **local list** of past job ids + field / country / date in `localStorage`
+- [ ] CC-4.2 "Your past searches" panel on step 1 — open one, or start fresh
+- [ ] CC-4.3 Starting a new scan **never** clears the list
+- [ ] CC-4.4 A job past its 7-day TTL shows as expired **with the reason**, not as an error
+- [ ] CC-4.5 "Forget this search" removes it locally — their device, their choice
+- [ ] CC-4.6 Tests: the list survives a new scan; expired entries degrade honestly
+
+**Constraint** — the job id **is** the access token (D-069). The list is local only, never
+server-side, and jobs stay unlistable.
+
+**Review** `[ ]`
+
+---
+
+## CC-5 · PDF text extraction `[ ]`
+
+Verified gap: the engine cannot see PDFs **at all**, and admissions information is frequently
+PDF-only. Today such a page contributes nothing and says nothing about why.
+
+**Files**
+- `src/supervisorly/fetch/pdf.py` *(new)*
+- `src/supervisorly/fetch/fetcher.py`
+- `firebase/requirements.txt`
+- `tests/test_pdf.py` *(new)*
+
+**Subtasks**
+- [ ] CC-5.1 `extract_pdf_text(data) -> str | None` via `pypdf`, wrapped as a snapshot exactly
+      like HTML so the quote gate is unchanged
+- [ ] CC-5.2 Detect `application/pdf` by **content-type and magic bytes**
+- [ ] CC-5.3 No text layer (scanned) → `blocked`, reason `"scanned PDF — no text layer"`
+- [ ] CC-5.4 Size cap — a 200 MB PDF must not be downloaded
+- [ ] CC-5.5 Tests: a text PDF extracts; a scanned PDF blocks with the reason; oversize refused
+
+**Note** — code extracts the text; a model only *reads* it. Do not ask a model to do the
+extraction.
+
+**Review** `[ ]`
+
+---
+
+## FLAG · Shipping a half-finished phase safely `[ ]`
+
+Every phase lands behind a flag, default **off**, so the branch is always deployable and a bad
+phase is one config change from gone.
+
+**Files**
+- `src/supervisorly/pipeline.py`
+- `firebase/_core.py`, `firebase/worker.py`
+- `tests/test_phase_flags.py` *(new)*
+
+**Subtasks**
+- [ ] FLAG-1 `PHASES` env var, comma-separated (`"p0,p1"`), read once at worker start
+- [ ] FLAG-2 A phase not listed is skipped **and writes a ledger row saying so** — off must be
+      visible, never silent
+- [ ] FLAG-3 Flags are **server config only**, never a request parameter (the D-068 rule)
+- [ ] FLAG-4 Test: with every phase off, output is byte-identical to today's
+
+**Why** — the render rung shipped and did nothing for two deploys because a separate change had
+quietly removed its input. A flag plus a ledger row makes that state legible instead of
+requiring log archaeology.
+
+**Review** `[ ]`
