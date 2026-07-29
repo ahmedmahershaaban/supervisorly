@@ -369,3 +369,150 @@ if the front end is being worked on separately.
 4. A ledger row exists if the task touches a phase
 5. One commit, message saying what changed, what was run, and the result
 6. Mark `[R]` only after the above
+
+---
+---
+
+# Part 2 — the gaps Part 1 left open
+
+Part 1 was a backend skeleton. This part adds what another engineer would otherwise have to
+ask for: the front end as one coherent workstream, how to ship a phase safely, how to deploy
+it, and rough sizing.
+
+**On the numbering**: there is no P3 task list because P3 (capture page text, not DOM) is
+**already shipped** — `extract/page_extract.js` + `fetch/browser_rung.py`. The gap in the
+numbers is deliberate; the phase numbers match PLAN_HARVEST.md.
+
+---
+
+# FE — Front-end workstream
+
+The student's experience as one thing rather than fragments. Independent of the harvest chain
+except where noted, so this can run in parallel.
+
+**Primary files**: `src/supervisorly/export/webapp.py` (the wizard) and
+`src/supervisorly/export/dashboard.py` (the result). Both are generated pages; tests are
+`tests/test_webapp*.py` and `tests/test_dashboard*.py`, and the real-browser harness is
+`tools/e2e/record_flow.js`.
+
+## FE-1 · Past searches on step 1 `[ ]` — *(= CC-4, shown here for the front-end view)*
+- [ ] FE-1.1 Panel above the email field: past searches with field, country, date, status
+- [ ] FE-1.2 "Open" re-enters step 5 for a finished job; "Start fresh" clears the form only
+- [ ] FE-1.3 Expired (7-day TTL) rows say so and offer "run it again", never an error
+- [ ] FE-1.4 On a first visit the panel is absent entirely — no empty box
+- **Review** `[ ]`
+
+## FE-2 · Step 2 polish `[ ]`
+- [ ] FE-2.1 Live cost preview: "N fields x M phrasings — about K lookups"
+- [ ] FE-2.2 Warn (never block) above a sensible phrasing total; the cap was removed on purpose
+- [ ] FE-2.3 Keyboard path end to end: type, Enter adds, Tab, Understand
+- [ ] FE-2.4 Plan rows remember open/closed across re-renders (already true — pin it in a test)
+- **Review** `[ ]`
+
+## FE-3 · Progress that explains itself `[ ]`
+- [ ] FE-3.1 Phase names in the student's words for each phase added (P0/P1/P2/P5)
+- [ ] FE-3.2 Ledger surfaced live: "read 4 of 12 admissions pages"
+- [ ] FE-3.3 A long phase shows what it is waiting on, not a spinner
+- **Depends on**: CC-1
+- **Review** `[ ]`
+
+## FE-4 · The professor modal, final shape `[ ]`
+- [ ] FE-4.1 Identity block: name, current role + department (P0), institution
+- [ ] FE-4.2 Former appointments collapsed and labelled
+- [ ] FE-4.3 Admissions block inherited from the institution, **with its scope and source shown**
+- [ ] FE-4.4 Evidence fields with quote, source link, confidence
+- [ ] FE-4.5 Translation marker + hover (T-1); the original is always reachable
+- [ ] FE-4.6 "Is this them?" confirmation for `unverified` matches (P2-3)
+- [ ] FE-4.7 Actions for blocked rows (shipped — keep working)
+- **Review** `[ ]`
+
+## FE-5 · Optional model key `[ ]` — *(= P7, front-end view)*
+- [ ] FE-5.1 Collapsed "Use my own model key (optional)" on step 1
+- [ ] FE-5.2 Plain statement: stays in this browser, sent only to Google, never to us
+- [ ] FE-5.3 "Test key" button — one cheap call, clear pass/fail
+- [ ] FE-5.4 Clearing it is one click and immediate
+- **Review** `[ ]`
+
+## FE-6 · Accessibility and honesty sweep `[ ]`
+- [ ] FE-6.1 Every new control keyboard-reachable, labelled, focus-visible
+- [ ] FE-6.2 `prefers-reduced-motion` respected by any new animation
+- [ ] FE-6.3 No new state renders blank — every empty says which empty it is
+- [ ] FE-6.4 `tools/e2e/record_flow.js` extended to assert each new surface
+- **Review** `[ ]`
+
+---
+
+# FLAG — Shipping a half-finished phase safely
+
+Every phase lands behind a flag, default **off**, so the main branch is always deployable and a
+bad phase is one config change from gone.
+
+**Files**: `src/supervisorly/pipeline.py`, `firebase/_core.py`, `firebase/worker.py`
+
+- [ ] FLAG-1 `PHASES` env var, comma-separated (`"p0,p1"`), read once at worker start
+- [ ] FLAG-2 A phase not listed is skipped **and writes a ledger row saying so** — off must be
+      visible, never silent
+- [ ] FLAG-3 Flags are server config only, never a request parameter (the D-068 rule)
+- [ ] FLAG-4 Test: with every phase off, output is byte-identical to today's
+- **Why this exists**: the render rung shipped and did nothing for two deploys because a
+  separate change had quietly removed its input. A flag plus a ledger row makes that state
+  legible instead of requiring log archaeology.
+- **Review** `[ ]`
+
+---
+
+# OPS — Deploying a phase (learned the hard way, twice)
+
+`firebase deploy` **does not rebuild the worker.** The Functions tier and the Cloud Run Job are
+separate images, and the scan pipeline lives in the worker. Deploying one and testing the other
+has cost this project two full cycles.
+
+For any change under `src/supervisorly/**`:
+
+- [ ] OPS-1 Commit, then `git tag -a web-vN` and push the tag
+- [ ] OPS-2 Point `firebase/requirements.txt` at the new tag — the package installs **from the
+      tag**, never from disk
+- [ ] OPS-3 Deploy Functions: `firebase deploy --only functions`
+- [ ] OPS-4 Deploy the worker: stage `Dockerfile.worker`, `requirements.txt`, `main.py`,
+      `_core.py`, `worker.py` into a scratch dir, then `gcloud run jobs deploy` with
+      `--memory 4Gi --cpu 2`
+- [ ] OPS-5 **Verify both**: `python tools/verify_deploy.py` for the page, and confirm the
+      worker image **digest changed** — an unchanged sha256 means the scanner did not change
+- [ ] OPS-6 Run one real scan; check `python tools/logs.py job <id>` and the new ledger rows
+- [ ] OPS-7 Any new runtime data file (`*.js`, `*.sql`, …) must be added to `pyproject.toml`
+      `package-data`. A file present in the repo and absent from the wheel fails **only in
+      production** — exactly how `page_extract.js` went missing
+
+---
+
+# SIZE — rough effort, for sequencing
+
+| task | size | risk | notes |
+|---|---|---|---|
+| CC-1 ledger | S | low | additive |
+| CC-2 budgets | S | low | |
+| CC-3 domain pool | **M** | **med** | async rewrite of the render path |
+| CC-4 sessions | S | low | localStorage only |
+| CC-5 PDF | S | low | `pypdf` plus a size cap |
+| P0 ORCID employments | S | low | mirrors the shipped researcher-urls work |
+| P1 admissions | **L** | **high** | new scope model, crawl, extraction |
+| P4 triage | S | med | recall tuning is the risk |
+| P5 model extraction | M | med | contract already written and tested |
+| P2 directory rung | **L** | **high** | crawl traps plus identity matching |
+| P6 archive | S | low | isolated |
+| P7 BYO key | S | low | CORS already verified |
+| T-1 translation | S | low | display only |
+| FE-1…6 | M | low | spread across the above |
+
+Two tasks carry most of the risk — **P1 and P2** — which is why both are gated by spikes.
+
+---
+
+# What is deliberately NOT in this plan
+
+- **No cross-session caching** of page or institution data (Ahmed, 2026-07-29)
+- **No installed coding agent** on the student's machine
+- **No path or institution dictionaries** — `tests/test_no_seed_urls.py` enforces it
+- **No translated quotes** — translation is display-only (T-1)
+- **No Stage 4** (`recent_collaborators`) — still open as BLOCKERS B-002 and needs a decision
+  before any code is written
