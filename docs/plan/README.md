@@ -8,6 +8,7 @@ Written 2026-07-29 to be executed by another engineer or model.
 
 | file | what it is |
 |---|---|
+| [`GOALS.md`](GOALS.md) | **paste-ready `/goal` strings**, one per shippable slice |
 | [`00-invariants.md`](00-invariants.md) | the seven checks every task must pass before it is `[R]` |
 | [`01-spikes.md`](01-spikes.md) | measure before building — thresholds per phase |
 | [`../PLAN_HARVEST.md`](../PLAN_HARVEST.md) | **why** the plan is shaped this way |
