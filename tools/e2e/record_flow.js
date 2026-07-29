@@ -241,7 +241,7 @@ async function shot(name) {
   await shot("07-dashboard");
 
   // ── MI-4/MI-5: the supervision-level filter ─────────────────────────────
-  const chips = await evalJs(`(()=>{
+  const lvlChips = await evalJs(`(()=>{
     const bs=[...document.querySelectorAll("#levels [data-level]")];
     return JSON.stringify({
       keys: bs.map(b=>b.getAttribute("data-level")),
@@ -249,7 +249,7 @@ async function shot(name) {
       counted: bs.filter(b=>/\\d/.test(b.innerText)).length,
       intents: (typeof DATA!=="undefined" && DATA.run && DATA.run.intents) || [],
       note: (document.getElementById("levels")||{}).innerText || ""});})()`);
-  const cv = JSON.parse(chips || "{}");
+  const cv = JSON.parse(lvlChips || "{}");
   check("the level filter renders chips", (cv.keys || []).length > 0, (cv.keys || []).join(","));
   check("every chip carries a count", cv.counted === (cv.keys || []).length,
     cv.counted + "/" + (cv.keys || []).length);
@@ -263,12 +263,12 @@ async function shot(name) {
 
   // The load-bearing honesty rule: unticking a level must not be able to hide a professor we
   // have no statement about, and unticking `unknown` must be the ONLY way they disappear.
-  const before = await evalJs(`document.querySelectorAll("tr.row").length`);
+  const lvlBefore = await evalJs(`document.querySelectorAll("tr.row").length`);
   await realClick('#levels [data-level="unknown"]');
   await sleep(700);
   const afterUnknownOff = await evalJs(`document.querySelectorAll("tr.row").length`);
   check("unknown professors are hidden ONLY when unknown is explicitly unticked",
-    afterUnknownOff < before, before + " -> " + afterUnknownOff);
+    afterUnknownOff < lvlBefore, lvlBefore + " -> " + afterUnknownOff);
   const emptyMsg = await evalJs(`(document.querySelector("#grid .empty")||{}).innerText||""`);
   if (!afterUnknownOff) {
     check("the empty state says WHICH empty it is — MI-5.3",
@@ -278,8 +278,8 @@ async function shot(name) {
   await realClick('#levels [data-level="unknown"]');     // put them back
   await sleep(700);
   const restored = await evalJs(`document.querySelectorAll("tr.row").length`);
-  check("the filter can always be cleared back to everything", restored === before,
-    restored + " vs " + before);
+  check("the filter can always be cleared back to everything", restored === lvlBefore,
+    restored + " vs " + lvlBefore);
 
   // ── the professor modal (the "side menu") ───────────────────────────────
   await realClick("tr.row");

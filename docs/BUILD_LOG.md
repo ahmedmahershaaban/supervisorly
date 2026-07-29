@@ -1303,3 +1303,28 @@ directions in `docs/plan/20-p0-orcid.md`.
 - Two false alarms from the new checker, both worth writing down: the dashboard's `DATA` is
   a top-level `const` and never lands on `window`; and `innerText` falls back to
   `textContent` for unrendered elements, so it can never prove visibility — ask the layout.
+
+## round X — multiple intents and the supervision-level filter (web-v20)
+
+**Built:** MI-1 (step-1 intent cards become checkboxes; at least one required, never a silent
+default), MI-2 (`intent_kinds` is the truth, `intent_kind` derived — `cli.normalize_plan_intents`
+re-derives it on both entry paths, and in `webapi.scan_start` *before* the job key so a stale
+scalar cannot split idempotency), MI-4 (level chips with counts, composing with the text
+filter) and MI-5 (the honesty rules). MI-3 is `[!]` blocked on P5.
+
+**Ran:** `python -m pytest` → **962 passed** (`TMPDIR` outside the repo). Both tiers deployed at
+`web-v20`; worker digest `4499515b…` → `6dd13cdd…`. Real scan `88ff75e9a5eb…` (428 professors)
+verified headful: `record_flow.js` **44/44**, extended to tick two intents and drive the filter.
+
+**The thing worth remembering:** `supervises` is not a declared export field yet — it arrives
+with P5 — so today **every** professor is `unknown`. Unticking `unknown` on the live dashboard
+takes 428 rows to 0. A filter that hid unknowns by default would therefore have shipped an
+empty dashboard for a scan that found 428 people, and it would have looked like a data bug
+rather than a design one. The chips say "No professor has stated a level yet" and the empty
+state names the count and the way back.
+
+**Caught during the round:** two `const` collisions in `record_flow.js` (`chips`, `before`)
+that only `node --check` surfaced — worth running before a 10-minute live pass. The
+click-through harness modelled intents as radios with exactly one winner; it now models a
+checkbox group and records request *bodies*, so "two ticked reach the plan" is asserted on
+what the page actually sent rather than on what its source contains.

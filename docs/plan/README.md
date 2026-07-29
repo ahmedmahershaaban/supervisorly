@@ -56,21 +56,31 @@ in [`00-invariants.md`](00-invariants.md) have been re-checked.
 Update this line as phases land, so anyone opening the folder sees the state in one glance.
 
 ```
-CC ■▢▢▢▢+FLAG■   P0 ✗   P1 ▢   P4 ▢   P5 ▢   P2 ▢   P6 ▢   P7 ▢   FE ▢   T ▢   MI ▢
+CC ■▢▢▢▢+FLAG■   P0 ✗   P1 ▢   P4 ▢   P5 ▢   P2 ▢   P6 ▢   P7 ▢   FE ▢   T ▢   MI ■■!■■
 ```
 
-`■` done · `▢` todo · `✗` **spike missed, not built**
+`■` done · `▢` todo · `!` blocked on another phase · `✗` **spike missed, not built**
 
 | | state | as of |
 |---|---|---|
-| CC-1 phase ledger | `[R]` shipped | 2026-07-29 |
-| FLAG phase flags | `[R]` shipped | 2026-07-29 |
+| CC-1 phase ledger | `[R]` shipped, live | 2026-07-29 |
+| FLAG phase flags | `[R]` shipped, live | 2026-07-29 |
+| MI-1, MI-2, MI-4, MI-5 | `[R]` shipped, live | 2026-07-29 |
+| MI-3 | `[!]` blocked on P5 — no extraction call to aim yet | |
 | CC-2 / CC-3 / CC-4 / CC-5 | todo | |
 | **P0 ORCID employments** | **`[!]` SPIKE-0 = 22%, gate is 30% — not built** | 2026-07-29 |
+
+Deployed at tag `web-v20`; last verified by `tools/e2e/record_flow.js` **44/44** against a
+real scan of 428 professors.
 
 **Read [`20-p0-orcid.md`](20-p0-orcid.md) before touching P0.** The binding constraint turned
 out not to be employments at all: 55% of shortlisted professors carry no ORCID on their
 OpenAlex record. Nothing in the P0 tasks as written can move that.
+
+**The level filter currently has nothing to filter on.** `supervises` is only populated once
+P5 ships, so every professor is `unknown` and the chips say so out loud rather than looking
+broken. That is designed behaviour — but it does mean MI-4's real value arrives with P5, and
+the two are worth demoing together.
 
 ## Where the numbers went
 
