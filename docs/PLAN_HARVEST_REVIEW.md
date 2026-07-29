@@ -114,12 +114,67 @@ That is not a hope — it requires five specific things.
 
 | edge case | handling |
 |---|---|
-| **Browser → Gemini may be blocked by CORS** | **Unverified — spike this before designing around it.** If the browser cannot call it directly, the "we never hold the key" property is lost, and the design must change rather than quietly proxying the key through us |
+| ~~Browser → Gemini may be blocked by CORS~~ — **VERIFIED FINE, 2026-07-29** | Tested against the real endpoint rather than assumed. The preflight returns **200** with `access-control-allow-origin` echoing our origin, `allow-methods` including POST, and `allow-headers: content-type, x-goog-api-key`; even a 400 carries the CORS header. **The browser can call Gemini directly**, so the key never reaches our server and the P7 design holds unchanged |
 | Invalid or revoked key | Fail closed to the student's own words with a clear message. Never a broken scan |
 | Quota exhausted mid-scan | Partial results, honestly labelled; the deterministic layer completes regardless |
 | Key leaking into logs or errors | Never logged, echoed, or placed in a `note`. The existing D-068 rule, applied to a key we do **not** own — which raises the stakes rather than lowering them |
 
 ---
+
+## C2. Ahmed's answers to three of the edge cases (2026-07-29)
+
+### PDFs — extract with code, read with the model
+
+Admissions information is often PDF-only and the engine cannot see PDFs at all today. The fix
+follows the same split as everywhere else: **`pypdf`/`pdfminer` extracts the text** —
+deterministic, exact, free — and only then does triage run and, if it survives, the model
+read it. A model is not needed to *extract* text from a PDF, only to understand it.
+
+Edge case inside the edge case: a **scanned PDF has no text layer**. Those get OCR or go to the
+human rung with the reason stated. What they must never do is disappear silently, which is the
+current behaviour.
+
+### Identity — let the student confirm, and record that they did
+
+Ahmed's answer, and it is better than trying to solve name-matching automatically: show the
+candidate with a **link to the page and ask the student to confirm**. Automated matching cannot
+reliably distinguish "M. A. Hassan" from "Mohamed A. Hassan"; a person looking at the page can,
+in two seconds.
+
+The machinery exists — `resolution: verified / unverified / unchecked`. Two rules go with it:
+
+- the confirmation is **recorded as evidence** (a human check is provenance, dated like any
+  other observation), and
+- an unconfirmed match is **never presented as a finding** — it appears as a candidate awaiting
+  confirmation, which is a different thing on the page and in the export.
+
+### Non-English pages — do NOT translate before extracting
+
+Ahmed proposed forcing pages through a translation extension so everything is harvested in
+English. Right instinct — a country's professors must not vanish because the site is in Arabic
+— but applied at a layer that would break the product's core guarantee.
+
+**The quote must be verbatim in the stored snapshot** (D-010). Translate the page, store an
+English quote, and we have manufactured a sentence the page never contained. That is
+fabricating evidence, with good intentions.
+
+So the layering:
+
+| | |
+|---|---|
+| **snapshot** | the original language, always |
+| **quote** | original language, verbatim — the gate verifies against the original |
+| **value** | may be normalised English (`open for PhD 2027`); values already are normalised |
+| **translation** | display only, and labelled as a translation |
+
+And the simplification: **no translation step is needed for extraction at all.** Modern models
+read Arabic (and the rest) natively. Translation was only ever required for our *English regex
+triage*, and the rule already adopted covers it — a page triage cannot confidently classify
+**escalates to the model rather than being binned**. The model reads it in Arabic, quotes it in
+Arabic, and the gate verifies in Arabic.
+
+That removes a fragile dependency (headless Chrome's translate is unreliable; an extension is
+worse) and removes the fabrication risk in the same move.
 
 ## D. Risks that can only be bounded, not removed
 
