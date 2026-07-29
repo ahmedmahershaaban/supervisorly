@@ -244,3 +244,62 @@ stay human-paced.
 
 Phases 2 and 5 are the ones most likely to be over-promised. Both should report what they
 could NOT reach, per institution, so coverage stays honest rather than implied.
+
+---
+
+# End-to-end walkthrough — every step, and who does it
+
+`[shipped]` works today. `[planned]` is this document's proposal.
+
+| # | What the student sees / what happens | Who does it | What comes back |
+|---|---|---|---|
+| 1 | Types **email, country, intent** on step 1 | page JS | nothing sent yet — the email is a contact address for the OpenAlex polite pool, never a login `[shipped]` |
+| 2 | Adds **fields** (no limit) and sets the **1–50 slider** | page JS | chips + a depth `[shipped]` |
+| 3 | Clicks **Understand** | JS → `POST /api/expand` per field → Python → **LLM** | phrasings per field. The LLM's ONLY job in the whole product: search strings, never facts (D-068). No key or an error → the student's own words `[shipped]` |
+| 4 | Reads the **search plan** — one collapsible row per field, phrasing counts, editable | page JS | nothing sent; this is the review moment `[shipped]` |
+| 5 | Clicks **Map these meanings** | JS → `POST /api/map` with EVERY phrasing → Python → OpenAlex | one merged topic tree + `failed_queries`. One request, one throttle unit (B-001) `[shipped]` |
+| 6 | Ticks **topics**, optionally names professors directly | page JS | the topic id list `[shipped]` |
+| 7 | Sets **scope** (institutions, shortlist size), clicks **Start scan** | JS → `POST /api/scan` → Python | `job_id` — unguessable, and the only key to the result `[shipped]` |
+| 8 | Watches **step 5 progress**, polling every 4 s | JS ← `GET /api/scan/<id>` | live phase, partial warnings, cancel/resume `[shipped]` |
+| 9 | *(server)* ROR queried **by country** → institutions; OpenAlex → authors by institution + topic | Python | N professors — names, ORCIDs, works counts, **almost never a URL** `[shipped]` |
+| 10 | *(server)* Shortlist gate ranks by topic overlap | Python | the K to deep-dive; the rest stay listed as `not checked yet` `[shipped]` |
+| 11 | *(server)* **ORCID `/employments`** per shortlisted professor | Python | role, department, organisation, dates — deterministic, no model `[planned P0]` |
+| 12 | *(server)* **Institution admissions pages** — browser pool opens here | Python + Chromium | deadlines, eligibility, funding, language bands, attached to the INSTITUTION and inherited by every professor there `[planned P1]` |
+| 13 | *(server)* **Professor page discovery** — fetch institution site, extract links, visit, judge by text | Python + Chromium | a real page URL per professor, where one exists `[planned P2]` |
+| 14 | *(server)* Page → **text only** (no DOM, no images, 60 KiB cap) | `page_extract.js` **in the page** | a snapshot byte-compatible with a fetched one `[shipped]` |
+| 15 | *(server)* **Deterministic triage** — recruiting cue? date near an application word? supervision term? | Python regex | no → `searched_absent`, **zero tokens**. yes → candidate `[planned P4]` |
+| 16 | *(server)* **Model reads candidates**, batched, isolated context per batch | Python → LLM | proposals `(field, value, quote)` — never a fact, only a proposal `[planned P5]` |
+| 17 | *(server)* **Quote gate** — is that quote verbatim in the stored snapshot? | Python | no → dropped before it can become a claim. yes → a Claim with provenance `[shipped]` |
+| 18 | *(server)* Score → export → build dashboard | Python | JSON + the one-page dashboard `[shipped]` |
+| 19 | Clicks **Open dashboard** | browser → signed URL | professors, four honest states, the profile modal `[shipped]` |
+| 20 | For a **blocked** professor: *Open the page* / *Search* / *Copy research prompt* | the student's OWN browser | the human rung — walled pages, human-paced (D-043) `[shipped]` |
+
+## The browser pool (steps 12–13) — how the tabs actually work
+
+**Yes to ~10–20 concurrent tabs. No to threads, and no to 20 tabs on one university.**
+
+- **One Chromium process, many pages.** A "tab" is a Playwright page. Twenty pages cost roughly
+  1–2 GB; the worker runs on 4 GiB, so start at **8–10 concurrent and measure** before raising it.
+- **Async, not threads.** Playwright's sync API is bound to the thread that created it, so
+  threads buy contention rather than speed. The concurrency comes from an async event loop with
+  N pages in flight — the same shape, without the locking.
+- **The unit of parallelism is the INSTITUTION, not the page.** 20 concurrent tabs means up to
+  20 different universities at once, and **never two concurrent requests to the same host**.
+  Twenty tabs against one university is a small denial-of-service; across twenty it is polite
+  and roughly twenty times faster. Per-host serialisation and robots stay exactly where they
+  are today (`HostRateLimiter`, the robots gate).
+- **Each page is disposable.** Navigate → extract text → close. A leaked page per professor
+  exhausts the container, which is why the renderer closes in a `finally`.
+
+## Who is responsible for what — the short version
+
+- **Page JS**: collecting input, showing the plan, polling, rendering. Never searches.
+- **Python (the worker)**: all fetching, all crawling, all classification, all storage, the
+  quote gate, scoring, export. This is where the product lives.
+- **Chromium (server-side)**: only for pages that need JavaScript to exist. Robots-gated,
+  walled hosts refused by name before a request is made.
+- **The LLM**: today, one job — turning your words into search phrasings. Tomorrow (P5), a
+  second — reading a page that survived triage and proposing quote-backed claims. It never
+  decides which URL to visit, never stores anything, and nothing it says becomes a fact
+  without a verbatim quote found in the snapshot.
+- **The student's browser**: the wizard, the dashboard, and the human rung for walled pages.
