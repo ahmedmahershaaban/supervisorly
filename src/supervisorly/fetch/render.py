@@ -36,6 +36,7 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import pool as pool_mod
 from . import walls
 from .robots import USER_AGENT
 
@@ -159,6 +160,34 @@ class ChromiumRenderer:
         self.close()
         return False
 
+    # ── the refusal gate, shared by the sync and async paths ─────────────────
+
+    def _refusal(self, url: str) -> str | None:
+        """Why this URL must not be rendered, or None if it may be. Bumps the counters.
+
+        Extracted so the batch renderer below asks the SAME question rather than keeping its
+        own opinion — the identical reasoning that made ``Fetcher.robots_allows`` public.
+        Two robots gates on one host is two chances to disagree, and the permissive one wins.
+        """
+        if not url:
+            return "no url"
+        if walls.is_walled(url):
+            # Checked BEFORE anything else, because the status-code guard cannot see this
+            # class of wall at all: ResearchGate answers 403 to a plain client and 200 to
+            # Chromium (measured). A browser is not shown the wall, so refusing on the
+            # response is refusing on evidence we will never receive. Refusal has to be a
+            # property of the host, decided before the request (D-039/D-043/D-044).
+            self.refused_walled += 1
+            return "walled host"
+        try:
+            if not self._robots_check(url):
+                self.refused_by_robots += 1
+                return "disallowed by robots.txt"
+        except Exception:                             # noqa: BLE001 — unknown robots = no
+            self.refused_by_robots += 1
+            return "robots unavailable"
+        return None
+
     # ── the one operation ────────────────────────────────────────────────────
 
     def render(self, url: str) -> RenderedPage | None:
@@ -168,22 +197,7 @@ class ChromiumRenderer:
         host answered non-2xx, navigation failed, the page yielded no text. The caller records
         an honest ``blocked`` either way, and no failure here can propagate into the scan.
         """
-        if not url:
-            return None
-        if walls.is_walled(url):
-            # Checked BEFORE anything else, because the status-code guard below cannot see
-            # this class of wall at all: ResearchGate answers 403 to a plain client and 200
-            # to Chromium (measured). A browser is not shown the wall, so refusing on the
-            # response is refusing on evidence we will never receive. Refusal has to be a
-            # property of the host, decided before the request (D-039/D-043/D-044).
-            self.refused_walled += 1
-            return None
-        try:
-            if not self._robots_check(url):
-                self.refused_by_robots += 1
-                return None
-        except Exception:                             # noqa: BLE001 — unknown robots = no
-            self.refused_by_robots += 1
+        if self._refusal(url) is not None:
             return None
 
         browser = self._ensure_browser()
@@ -228,3 +242,107 @@ class ChromiumRenderer:
                     page.close()
             except Exception:                         # noqa: BLE001
                 pass
+
+
+class BatchRenderer(ChromiumRenderer):
+    """Render MANY urls: concurrent across hosts, strictly serial within each (CC-3.3/CC-3.4).
+
+    **Async pages, not threads.** Playwright's sync API is bound to its creating thread, so
+    wrapping ``ChromiumRenderer`` in a thread pool marshals every call back to one thread and
+    buys contention instead of speed. This class therefore uses ``playwright.async_api`` and
+    the asyncio ``HostPool``; the two APIs cannot share a browser, so a batch launches its own
+    and closes it — which is why this is a separate entry point rather than a method that
+    quietly changes what ``render()`` does.
+
+    **It inherits the refusal gate rather than restating it.** Walls and robots are decided by
+    ``ChromiumRenderer._refusal``, the same code the single-page path uses.
+
+    Everything still fails closed: no Playwright, a browser that will not launch, a host that
+    times out — each is ``None`` for that URL and never an exception for the batch.
+
+    **There is no production caller yet.** P1's admissions crawl and P2's directory walk are
+    the phases that fetch many pages at once; today's pipeline deep-dives one target at a
+    time, so wiring this into it would add concurrency with nothing to be concurrent about.
+    CC-3 is listed as a prerequisite for exactly that reason — this is the primitive those
+    phases are meant to build on, and it is tested as one.
+    """
+
+    def __init__(self, robots_check, *, max_concurrent: int = pool_mod.DEFAULT_MAX_CONCURRENT,
+                 **kw) -> None:
+        super().__init__(robots_check, **kw)
+        self.max_concurrent = max_concurrent
+
+    async def render_many_async(self, urls) -> dict[str, RenderedPage | None]:
+        """Render every URL, keyed by URL. Refused and failed pages map to ``None``."""
+        urls = list(dict.fromkeys(u for u in urls if u))       # dedupe, order preserved
+        out: dict[str, RenderedPage | None] = {u: None for u in urls}
+        todo = [u for u in urls if self._refusal(u) is None]
+        if not todo:
+            return out
+        try:
+            from playwright.async_api import async_playwright  # noqa: PLC0415 — optional dep
+        except ImportError:
+            return out                                         # inert, exactly like render()
+
+        if self._js is None:
+            try:
+                self._js = _load_extractor_js()
+            except OSError as exc:
+                # The page_extract.js packaging bug, caught loudly rather than as 40 blanks.
+                log.warning("render batch disabled — extractor js unreadable: %s", exc)
+                return out
+
+        hp = pool_mod.HostPool(self.max_concurrent)
+        try:
+            async with async_playwright() as pw:
+                browser = await pw.chromium.launch(args=["--no-sandbox"])
+                try:
+                    async def one(url: str):
+                        page = await browser.new_page(user_agent=self._user_agent)
+                        try:
+                            page.set_default_timeout(self._timeout_ms)
+                            resp = await page.goto(url, wait_until="domcontentloaded",
+                                                   timeout=self._timeout_ms)
+                            status = resp.status if resp is not None else 0
+                            if not (200 <= status < 300):
+                                self.failed += 1
+                                return None
+                            try:
+                                await page.wait_for_load_state("networkidle", timeout=SETTLE_MS)
+                            except Exception:         # noqa: BLE001 — see SETTLE_MS
+                                pass
+                            result = await page.evaluate(self._js, {})
+                            text = (result or {}).get("text") or ""
+                            if not text.strip():
+                                self.failed += 1
+                                return None
+                            self.rendered += 1
+                            return RenderedPage(
+                                final_url=(result or {}).get("finalUrl") or page.url or url,
+                                title=(result or {}).get("title"), text=text, status=status)
+                        finally:
+                            # Released here, not at the end of the batch: a page held open per
+                            # URL would make peak memory scale with the QUEUE rather than with
+                            # the concurrency limit, which is the whole point of the cap.
+                            try:
+                                await page.close()
+                            except Exception:         # noqa: BLE001
+                                pass
+
+                    for url, res in zip(todo, await hp.map(todo, one)):
+                        if isinstance(res, BaseException):
+                            log.info("render failed for %s: %s", url, res)
+                            self.failed += 1
+                            continue
+                        out[url] = res
+                finally:
+                    await browser.close()
+        except Exception as exc:                      # noqa: BLE001 — fail-closed, whole batch
+            log.info("render batch unavailable: %s", exc)
+        self.peak_per_host = hp.peak_per_host
+        self.peak_in_flight = hp.peak_in_flight
+        return out
+
+    def render_many(self, urls) -> dict[str, RenderedPage | None]:
+        """Synchronous entry point, for the synchronous pipeline above it."""
+        return pool_mod.run_sync(self.render_many_async(urls))

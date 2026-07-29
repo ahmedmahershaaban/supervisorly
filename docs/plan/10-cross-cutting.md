@@ -64,7 +64,7 @@ outside the repo.
 
 ---
 
-## CC-3 · Per-host concurrency, across **domains** `[ ]`
+## CC-3 · Per-host concurrency, across **domains** `[x]`
 
 The unit is the **host/domain**, not the institution *(Ahmed's correction, 2026-07-29)*. One
 university spans a main site, a scholar subdomain and faculty subdomains; sources span domains
@@ -77,17 +77,47 @@ belonging to no institution at all. Twenty concurrent means twenty **distinct ho
 - `tests/test_pool.py` *(new)*
 
 **Subtasks**
-- [ ] CC-3.1 `HostPool(max_concurrent=10)` — N workers, **at most one in-flight request per host**
-- [ ] CC-3.2 Queue keyed by registrable domain; a host already in flight is **deferred, not dropped**
-- [ ] CC-3.3 `ChromiumRenderer` acquires and releases pages through the pool
-- [ ] CC-3.4 **Async page pool, not threads** — Playwright's sync API is bound to its creating
+- [x] CC-3.1 `HostPool(max_concurrent=10)` — N workers, **at most one in-flight request per host**
+- [x] CC-3.2 Queue keyed by registrable domain; a host already in flight is **deferred, not dropped**
+      — *keyed by **host**, see below; the key is injectable so this can be revisited*
+- [x] CC-3.3 `ChromiumRenderer` acquires and releases pages through the pool
+- [x] CC-3.4 **Async page pool, not threads** — Playwright's sync API is bound to its creating
       thread, so threads buy contention rather than speed
-- [ ] CC-3.5 Tests: 20 URLs across 3 hosts never issue two concurrent requests to one host
+- [x] CC-3.5 Tests: 20 URLs across 3 hosts never issue two concurrent requests to one host
 
 **Acceptance** — a 20-URL burst against one host serialises; across 20 hosts it parallelises.
 Start at 8–10 concurrent pages (~1–2 GB against the worker's 4 GiB) and measure before raising.
 
-**Review** `[ ]`
+**Done, 2026-07-29.** `fetch/pool.py` + `render.BatchRenderer`.
+
+- **The lock order IS the design.** Each task takes its *host* lock first and the *global*
+  semaphore second. The obvious order — semaphore first — deadlocks the fleet under exactly
+  the load a scan produces: twenty URLs for one university each grab a global slot, then all
+  queue on that host's lock, holding every slot while doing nothing. A test pins it, and it
+  really does catch it: inverting the two lines makes the lone other-host request finish 9th
+  instead of within the first 4.
+- **Keyed by host, not registrable domain.** CC-3's own body says a main site, a scholar
+  subdomain and faculty subdomains are *distinct hosts* and twenty concurrent means twenty of
+  them, so `cs.uni.edu` and `www.uni.edu` run in parallel. Collapsing to `uni.edu` would
+  serialise a whole university. `HostPool(key=…)` takes a different key if that is ever
+  revisited.
+- **The port is stripped**, so two services on one machine are one host. Found while writing
+  the tests — the first fixture used one address and several ports and every "parallel" test
+  serialised, correctly. The fixture changed, not the product, and the behaviour now has its
+  own test.
+- **`BatchRenderer` inherits the refusal gate** (`_refusal`) rather than restating walls and
+  robots. Two robots gates on one host is two chances to disagree, and the permissive one
+  wins — the same reasoning that made `Fetcher.robots_allows` public.
+- Pages are closed per URL, not per batch, so peak memory tracks the concurrency limit rather
+  than the queue length.
+- **No production caller yet, deliberately.** P1's admissions crawl and P2's directory walk
+  are the phases that fetch many pages at once; today's pipeline deep-dives one target at a
+  time, so wiring this in now would add concurrency with nothing to be concurrent about. CC-3
+  is listed as a prerequisite for precisely that reason. It is tested as a primitive —
+  against real loopback servers and a real Chromium, because a renderer that acquires pages
+  *outside* the pool passes every unit test and only fails as an OOM-killed worker.
+
+**Review** `[R]`
 
 ---
 
