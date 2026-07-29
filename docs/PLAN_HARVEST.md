@@ -23,8 +23,16 @@ the wrong unit for most of what a student needs. **Application deadlines, eligib
 requirements and funding rules are institutional or departmental** — one graduate-admissions
 page governs every professor in that faculty.
 
-Confirmed on the hosts already measured: `aun.edu.eg/academic/admission.htm`,
-`aun.edu.eg/agriculture/about/apply`, `alexu.edu.eg/…/Institute of Graduate`.
+Confirmed against the hosts already measured — a live archive query returned admissions and
+graduate-application pages for them, under paths of the shape `/…/admission`, `/…/apply` and
+`/…/graduate`.
+
+**No URL is written down here on purpose.** Every path above was *discovered* by a query at
+the time of writing, and it stays discovered: this project authors no institution URL, no
+university list and no path dictionary ([D-038](DECISIONS.md#d-038--generate-dont-look-up)).
+A plan document is one copy-paste away from becoming a seed list, so the shape is described
+and the addresses are not. `tests/test_no_seed_urls.py` enforces this in the engine so it
+cannot drift back in.
 
 The consequence is large. Reading 25 professor pages to find a deadline is 25 fetches for a
 fact that is not on any of them. Reading **one admissions page per institution** yields it for
@@ -94,8 +102,35 @@ Institution → faculty/staff directory → the individual's page. `roster.class
 `roster.route_directory` exist and **nothing calls them**. This is the bottleneck behind the
 3-of-24 number.
 
-Honest scope, unchanged from B-003: per-institution work, and it will never cover Cairo
-University, whose TLS chain is broken at their server and whose scholar subdomain 403s bots.
+**Paths are extracted, never predicted.** This is the correction Ahmed made to the first draft
+of this plan, and it is the difference between a ladder that works anywhere and one that works
+where its author happened to look. There is no unified layout: an Egyptian, Japanese or
+Brazilian university does not arrange itself like the ones whose conventions someone encoded,
+and an Arabic-language site may share no path vocabulary at all. A guessed `/staff` or
+`/faculty` succeeds on the sites the author thought of and fails silently everywhere else —
+and a silent failure here reads as *"that country has no professors"*, not as a bug.
+
+So the mechanism is:
+
+1. fetch what the ladder already discovered (the institution's own URL, from ROR)
+2. **extract its links** — the site's own navigation, in whatever language and shape it uses
+3. **classify the fetched page, after fetching it** (`roster.classify_directory`) — decide
+   "this is a directory of people" from the page's content, not from its address
+4. follow the frontier under a budget: bounded depth, a page cap per institution, robots
+   obeyed, and **serial per host** even while many institutions run in parallel
+
+No step needs a path dictionary, and every step works in a language nobody anticipated.
+
+Where a model earns its place here — and it does — is step 3 on a page whose links carry no
+cue we can match: choosing which of two hundred links on an unfamiliar site is the faculty
+directory is judgement, not lookup. It proposes *which URL to try next*, never a fact, which
+keeps it on the D-068 side of the line: queries, never claims.
+
+`tests/test_no_seed_urls.py` fails the build if a path dictionary starts to form.
+
+Honest scope, unchanged from B-003: this is per-institution work in the tail, and it will
+never cover Cairo University, whose TLS chain is broken at their server and whose scholar
+subdomain 403s bots.
 
 ### Phase 3 — Capture text, not DOM *(shipped, reused)*
 
@@ -128,7 +163,9 @@ Enhancements over the current contract:
 ### Phase 6 — Historical cycles *(what the deadline was last year)*
 
 Ahmed asked for "the old versions of the acceptance". The Wayback CDX API answers it and is
-free and open — verified: `aun.edu.eg` admissions pages archived from **2003** to 2023.
+free and open — verified against an institution discovered by the live ladder, whose
+admissions pages are archived from **2003** to 2023. The URL queried is whatever Phase 1
+found; nothing is looked up from a list.
 
 Reading the same admissions URL across past years gives the *pattern* — "applications have
 opened in May for the last four cycles" — which is exactly the `watch · projected` confidence
