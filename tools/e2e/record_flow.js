@@ -98,6 +98,26 @@ async function shot(name) {
   await typeInto("#country", "Egypt");               // country lives on STEP 1
   const country = await evalJs(`document.getElementById("country").value`);
   check("country accepted on step 1", country === "Egypt", country);
+
+  // MI-1: tick a SECOND supervision level. A student open to both a PhD and a master's had to
+  // pick one before; the plan must now carry both, and the dashboard must offer both chips.
+  //
+  // Setting `.checked` rather than clicking is deliberate here and NOT the mistake the README
+  // warns about: the intent inputs carry no change listener, and `gatherYou()` reads the DOM
+  // with `querySelectorAll(':checked')` at submit time — so this leaves the page in exactly
+  // the state a click would. The buttons that DO run handlers are still really clicked.
+  const intents = await evalJs(`(()=>{
+    const boxes = Array.from(document.querySelectorAll('input[name="intent"]'));
+    const types = boxes.map(b=>b.type);
+    const want = ["phd","master"];
+    boxes.forEach(b=>{ b.checked = want.indexOf(b.value)>=0; });
+    return JSON.stringify({types: Array.from(new Set(types)),
+                           checked: boxes.filter(b=>b.checked).map(b=>b.value)});})()`);
+  const iv = JSON.parse(intents || "{}");
+  check("intent cards are checkboxes, not radios",
+    (iv.types || []).length === 1 && iv.types[0] === "checkbox", (iv.types || []).join(","));
+  check("two levels can be ticked at once", (iv.checked || []).length === 2,
+    (iv.checked || []).join(","));
   await sleep(900); await shot("01-step1");
   await realClick("#toStep2");
   await waitFor(`!document.getElementById("s2").classList.contains("hidden")`, "step 2");
@@ -219,6 +239,47 @@ async function shot(name) {
   check("dashboard distinguishes the honest-emptiness states", distinct >= 2,
         JSON.stringify(states));
   await shot("07-dashboard");
+
+  // ── MI-4/MI-5: the supervision-level filter ─────────────────────────────
+  const chips = await evalJs(`(()=>{
+    const bs=[...document.querySelectorAll("#levels [data-level]")];
+    return JSON.stringify({
+      keys: bs.map(b=>b.getAttribute("data-level")),
+      on: bs.filter(b=>b.classList.contains("on")).map(b=>b.getAttribute("data-level")),
+      counted: bs.filter(b=>/\\d/.test(b.innerText)).length,
+      intents: (typeof DATA!=="undefined" && DATA.run && DATA.run.intents) || [],
+      note: (document.getElementById("levels")||{}).innerText || ""});})()`);
+  const cv = JSON.parse(chips || "{}");
+  check("the level filter renders chips", (cv.keys || []).length > 0, (cv.keys || []).join(","));
+  check("every chip carries a count", cv.counted === (cv.keys || []).length,
+    cv.counted + "/" + (cv.keys || []).length);
+  check("the plan carried BOTH ticked intents through to the dashboard",
+    (cv.intents || []).length === 2, JSON.stringify(cv.intents));
+  check("both of the student's levels are offered as chips",
+    (cv.intents || []).every(i => (cv.keys || []).indexOf(i) >= 0), (cv.keys || []).join(","));
+  check("unknown is always offered", (cv.keys || []).indexOf("unknown") >= 0);
+  check("unknown is ticked by default — MI-5.2",
+    (cv.on || []).indexOf("unknown") >= 0, "on=" + (cv.on || []).join(","));
+
+  // The load-bearing honesty rule: unticking a level must not be able to hide a professor we
+  // have no statement about, and unticking `unknown` must be the ONLY way they disappear.
+  const before = await evalJs(`document.querySelectorAll("tr.row").length`);
+  await realClick('#levels [data-level="unknown"]');
+  await sleep(700);
+  const afterUnknownOff = await evalJs(`document.querySelectorAll("tr.row").length`);
+  check("unknown professors are hidden ONLY when unknown is explicitly unticked",
+    afterUnknownOff < before, before + " -> " + afterUnknownOff);
+  const emptyMsg = await evalJs(`(document.querySelector("#grid .empty")||{}).innerText||""`);
+  if (!afterUnknownOff) {
+    check("the empty state says WHICH empty it is — MI-5.3",
+      /no statement either way/i.test(emptyMsg), emptyMsg.slice(0, 120));
+  }
+  await shot("07b-level-filter");
+  await realClick('#levels [data-level="unknown"]');     // put them back
+  await sleep(700);
+  const restored = await evalJs(`document.querySelectorAll("tr.row").length`);
+  check("the filter can always be cleared back to everything", restored === before,
+    restored + " vs " + before);
 
   // ── the professor modal (the "side menu") ───────────────────────────────
   await realClick("tr.row");
