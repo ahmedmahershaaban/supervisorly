@@ -1370,3 +1370,9 @@ OpenAlex output in the student's field?) before any institution-dependent spike 
 refinement — "the cohort a real scan produces" is only the right sample if the scan is itself
 sampling the right things. When a spike scores zero, say whether the *phase* is unviable or
 the *input* is wrong. A bare number would have killed a phase that was never actually tested.
+
+**Deployed web-v21** (CC-3 + CC-5). Worker digest `6dd13cdd…` → `764f672d…`, page verified
+identical. Real scan `7a3df6065a07…` (394 professors): `record_flow.js` **44/44**,
+`check_ledger.js` **7/7**, `logs.py errors` clean. The check that mattered: CC-5 rewrote the
+live transport to stream every response, so *every* production fetch changed — the deep-dive
+ledger row is unchanged at 40 attempted / 10 reached / 30 skipped, so nothing regressed.
