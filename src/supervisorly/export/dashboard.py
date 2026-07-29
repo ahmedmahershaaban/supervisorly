@@ -146,6 +146,10 @@ ol.works .yr{font-family:var(--mono);font-size:11px;color:var(--faint);margin-ri
   padding:7px 13px;cursor:pointer;text-decoration:none;line-height:1.2}
 .act:hover{background:var(--accent);color:#0a0d14}
 .acts .note{flex-basis:100%;margin-top:4px}
+/* only appears when the browser refused the clipboard — the text, one Ctrl+C away */
+.acts textarea.manualcopy{flex-basis:100%;min-height:120px;width:100%;resize:vertical;
+  font-family:var(--mono);font-size:11.5px;line-height:1.5;padding:9px 10px;
+  color:var(--ink);background:var(--chip);border:1px solid var(--line);border-radius:8px}
 .close{position:absolute;top:16px;right:18px;background:transparent;border:1px solid var(--line2);
   color:var(--muted);border-radius:8px;padding:5px 10px;cursor:pointer;font-family:var(--mono);font-size:11px}
 .close:hover{border-color:var(--accent);color:var(--accent)}
@@ -432,20 +436,48 @@ function copyPrompt(id){
   var p=DATA.professors.find(function(x){return x.id===id;});
   if(!p||!p.profile||!p.profile.human_prompt) return;
   var txt=p.profile.human_prompt;
-  var done=function(){ var el=document.querySelector('[data-prompt="'+id+'"]');
-    if(el){ var o=el.textContent; el.textContent="Copied ✓"; setTimeout(function(){el.textContent=o;},1600);} };
+  /* Only ever say "Copied" when the text really reached the clipboard. `writeText` is refused
+     when the document is not focused, and `execCommand("copy")` returns FALSE rather than
+     throwing — so the old code, which called done() down every path, told the student their
+     prompt was ready while their clipboard still held whatever was there before. The e2e run
+     on 2026-07-29 pasted the word "music". A false success is worse here than a plain failure:
+     the student pastes into their assistant and gets an answer about the wrong thing. */
+  var settle=function(ok){
+    var el=document.querySelector('[data-prompt="'+id+'"]');
+    if(!el) return;
+    var o=el.getAttribute("data-label")||el.textContent;
+    el.setAttribute("data-label",o);
+    if(ok){ el.textContent="Copied ✓"; setTimeout(function(){el.textContent=o;},1600); }
+    else { el.textContent="Copy blocked - the text is selected, press Ctrl+C";
+           offerManualCopy(el,txt); }
+  };
   if(navigator.clipboard&&navigator.clipboard.writeText){
-    navigator.clipboard.writeText(txt).then(done,function(){fallbackCopyText(txt);done();});
-  } else { fallbackCopyText(txt); done(); }
+    navigator.clipboard.writeText(txt).then(function(){settle(true);},
+                                            function(){settle(fallbackCopyText(txt));});
+  } else settle(fallbackCopyText(txt));
 }
 /* Clipboard API needs a secure context and a permission the file:// dashboard may not have —
-   a downloaded dashboard opened from disk is a normal way to read this, so it must still work. */
+   a downloaded dashboard opened from disk is a normal way to read this, so it must still work.
+   Returns whether the copy actually happened; execCommand reports failure by returning false. */
 function fallbackCopyText(txt){
   var ta=document.createElement("textarea");
   ta.value=txt; ta.setAttribute("readonly",""); ta.style.position="fixed"; ta.style.left="-9999px";
   document.body.appendChild(ta); ta.select();
-  try{ document.execCommand("copy"); }catch(e){}
+  var ok=false;
+  try{ ok=(document.execCommand("copy")===true); }catch(e){ ok=false; }
   document.body.removeChild(ta);
+  return ok;
+}
+/* When both paths are refused, hand the student the text rather than an apology: a visible,
+   pre-selected box one Ctrl+C away. A dead "Copy" button on a professor with no page is the
+   one action that row had left. */
+function offerManualCopy(btn,txt){
+  var host=btn.parentNode; if(!host) return;
+  var ta=host.querySelector("textarea.manualcopy");
+  if(!ta){ ta=document.createElement("textarea"); ta.className="manualcopy";
+           ta.setAttribute("readonly",""); ta.setAttribute("aria-label","research prompt");
+           host.insertBefore(ta,btn.nextSibling); }
+  ta.value=txt; ta.focus(); ta.select();
 }
 
 /* ── T-1: the translation marker ───────────────────────────────────────────────

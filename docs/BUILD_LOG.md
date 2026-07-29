@@ -1634,3 +1634,39 @@ no error text, the recovery, and that the student reaches the dashboard.
 **Still open:** a page that has settled on a terminal *failed* view stops polling, so a worker
 that recovers on its own is invisible until the student clicks something. The 409 path is the
 common way that happens and it is now covered; the general case is not.
+
+---
+
+## Round AI — "Copied ✓" when nothing was copied
+
+The `web-v25` end-to-end run scored **61/62**, and the one failure was real:
+
+```
+[PASS] Copy gives feedback that it worked — Copied ✓
+[FAIL] the copied text is the real D-043 prompt — music
+```
+
+The clipboard held **`music`** — whatever had been on it beforehand. `copyPrompt` called the
+same unconditional `done()` down every path, and neither path had actually worked:
+`navigator.clipboard.writeText` is **refused when the document is not focused**, and
+`document.execCommand("copy")` reports failure by **returning `false`, not by throwing**, so
+the `try/catch` around it caught nothing.
+
+A false success is worse here than a plain failure. This button belongs to a professor with no
+readable page — the D-043 human rung, the row's last remaining action. The student pastes into
+their assistant, gets a confident answer about something else entirely, and nothing on screen
+explains why.
+
+Now: `fallbackCopyText` returns whether the copy happened, "Copied ✓" is reachable only from
+the success branch, and a refusal says **"Copy blocked - the text is selected, press Ctrl+C"**
+and puts the prompt on screen in a focused, pre-selected box. A blocked copy hands over the
+text rather than an apology.
+
+The e2e check was wrong too — it asserted the *label* said "copied" and only then compared the
+clipboard, so the label alone could pass. It now accepts either honest outcome and fails only
+the dishonest one: a success message with the wrong clipboard behind it. It also calls
+`Page.bringToFront` first, since an unfocused window is precisely the condition that triggers
+the refusal.
+
+**Found only because the run pasted a word from my own clipboard.** A check that reads back
+what the product claims to have done is worth more than one that reads the claim.

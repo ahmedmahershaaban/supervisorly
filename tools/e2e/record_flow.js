@@ -461,15 +461,29 @@ async function shot(name) {
     // clicking Copy must actually put the D-043 prompt on the clipboard
     const copyBtn = await evalJs(`!!document.querySelector('[data-prompt]')`);
     if (copyBtn) {
+      await send("Page.bringToFront", {});   // writeText is refused on an unfocused document
       await realClick("[data-prompt]");
       await sleep(700);
       const label = await evalJs(`(document.querySelector('[data-prompt]')||{}).textContent||""`);
-      check("Copy gives feedback that it worked", /copied/i.test(label), label.trim());
       const clip = await evalJs(`navigator.clipboard && navigator.clipboard.readText
           ? navigator.clipboard.readText().catch(()=>"") : ""`);
-      if (clip) check("the copied text is the real D-043 prompt",
-                      /Quote verbatim/.test(clip) && /searched_absent/.test(clip),
-                      clip.slice(0, 60).replace(/\s+/g, " "));
+      const manual = await evalJs(`(()=>{const t=document.querySelector('.acts textarea.manualcopy');
+          return t ? t.value : "";})()`);
+      const isPrompt = s => /Quote verbatim/.test(s || "") && /searched_absent/.test(s || "");
+      // Two honest outcomes, one dishonest one. "Copied ✓" while the clipboard still holds
+      // whatever was there before is the failure that matters: the student pastes the wrong
+      // thing into their assistant and never learns why. (Seen 2026-07-29: it pasted "music".)
+      const claimed = /copied/i.test(label);
+      const blocked = /blocked/i.test(label);
+      check("Copy reports what actually happened, never a false success",
+            (claimed && isPrompt(clip)) || (blocked && !claimed),
+            "label=" + label.trim().slice(0, 48) + " | clip=" +
+            (clip || "").slice(0, 30).replace(/\s+/g, " "));
+      check("a refused clipboard still hands over the prompt",
+            !blocked || isPrompt(manual),
+            blocked ? manual.slice(0, 60).replace(/\s+/g, " ") : "not refused this run");
+      if (claimed) check("the copied text is the real D-043 prompt", isPrompt(clip),
+                         (clip || "").slice(0, 60).replace(/\s+/g, " "));
       await sleep(900); await shot("11-copied");
     }
     await realClick("#closeDetail");

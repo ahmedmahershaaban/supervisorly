@@ -101,6 +101,43 @@ def test_copying_works_without_the_clipboard_api():
     assert "execCommand" in html
 
 
+def test_a_failed_copy_is_never_reported_as_a_successful_one():
+    """Found by the e2e run on 2026-07-29, which clicked Copy, read "Copied ✓", and pasted the
+    word **music** — whatever had been on the clipboard before. `writeText` is refused on an
+    unfocused document and `execCommand("copy")` reports failure by RETURNING FALSE rather than
+    throwing, so every path reached the same unconditional success message.
+
+    A false success is worse than a plain failure here: the student pastes into their assistant
+    and gets a confident answer about the wrong thing, with nothing on screen to explain it."""
+    js = _js()
+    body = js.split("function fallbackCopyText(", 1)[1].split("\n}", 1)[0]
+    assert "return ok" in body, "the fallback still swallows its own failure"
+    assert 'document.execCommand("copy")===true' in body.replace(" ", ""), \
+        "execCommand's return value must be read — it reports failure without throwing"
+    copy = js.split("function copyPrompt(", 1)[1].split("\nfunction ", 1)[0]
+    assert "settle(fallbackCopyText(txt))" in copy, "the fallback's verdict must be used"
+    assert 'settle(true)' in copy
+    # the success message may only be assigned inside the success branch
+    said = 'el.textContent="Copied'
+    ok_branch = copy.split("if(ok){", 1)[1].split("else", 1)[0]
+    assert said in ok_branch
+    assert copy.count(said) == 1, "the success message is reachable from more than one path"
+
+
+def test_a_refused_clipboard_hands_the_student_the_text():
+    """The recovery has to be a real one. A blocked copy on a professor with no page removes
+    the only action that row had left, so the prompt itself appears, selected, one Ctrl+C
+    away — not an apology."""
+    js = _js()
+    assert "function offerManualCopy(" in js
+    copy = js.split("function copyPrompt(", 1)[1].split("\nfunction ", 1)[0]
+    assert "offerManualCopy(el,txt)" in copy.replace(" ", "")
+    manual = js.split("function offerManualCopy(", 1)[1].split("\n}", 1)[0]
+    assert ".select()" in manual and "textarea" in manual
+    assert "press Ctrl+C" in copy, "the student must be told what to do"
+    assert "textarea.manualcopy" in js, "the box has no styling, so it appears unreadable"
+
+
 def test_the_search_action_is_a_search_not_a_scrape():
     """It opens a SEARCH in the student's own browser. The tool is not fetching anything, and
     must not start: this is the human rung (D-043/D-044), where a person reads pages they can
