@@ -27,6 +27,7 @@ Written 2026-07-29 to be executed by another engineer or model.
 | [`25-p6-archive.md`](25-p6-archive.md) | P6-1 | S | low |
 | [`26-p7-byo-key.md`](26-p7-byo-key.md) | P7-1 | S | low |
 | [`30-frontend.md`](30-frontend.md) | FE-1…FE-6, T-1 | M | low |
+| [`31-multi-intent.md`](31-multi-intent.md) | MI-1…MI-5 | M | low–med |
 | [`90-ops-deploy.md`](90-ops-deploy.md) | OPS-1…OPS-7 + what is out of scope | — | — |
 
 ## Order
@@ -38,8 +39,9 @@ Written 2026-07-29 to be executed by another engineer or model.
                   →  SPIKE-6 → 25 P6  →  26 P7
 ```
 
-[`30-frontend.md`](30-frontend.md) and [`26-p7-byo-key.md`](26-p7-byo-key.md) are independent
-of the harvest chain and can run in parallel if someone is on the front end.
+[`30-frontend.md`](30-frontend.md), [`31-multi-intent.md`](31-multi-intent.md) and
+[`26-p7-byo-key.md`](26-p7-byo-key.md) are independent of the harvest chain and can run in
+parallel if someone is on the front end. MI-3 alone waits on P5.
 
 ## Marks
 
@@ -53,7 +55,7 @@ in [`00-invariants.md`](00-invariants.md) have been re-checked.
 Update this line as phases land, so anyone opening the folder sees the state in one glance.
 
 ```
-CC ▢▢▢▢▢   P0 ▢   P1 ▢   P4 ▢   P5 ▢   P2 ▢   P6 ▢   P7 ▢   FE ▢   T ▢
+CC ▢▢▢▢▢   P0 ▢   P1 ▢   P4 ▢   P5 ▢   P2 ▢   P6 ▢   P7 ▢   FE ▢   T ▢   MI ▢
 ```
 
 ## Where the numbers went
