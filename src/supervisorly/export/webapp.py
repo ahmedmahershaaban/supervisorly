@@ -223,6 +223,24 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 .jobid{font-family:var(--mono);font-size:12px;color:var(--teal);word-break:break-all}
 .err{display:none;color:var(--coral);font-family:var(--mono);font-size:11.5px;margin-top:8px}
 .err.on{display:block}
+/* FE-2: the cost preview. A number the student can see, never a refusal (D-074). */
+.cost{margin:8px 0 2px;font-family:var(--mono);font-size:12px;color:var(--faint)}
+.cost-warn{margin-top:5px;color:var(--accent);font-family:var(--sans);font-size:12.5px}
+/* FE-5: the optional model key. Collapsed by default — it is genuinely optional. */
+.keybox{margin-top:16px;border:1px solid var(--line);border-radius:12px;padding:12px 14px;
+  background:var(--chip)}
+.keybox summary{cursor:pointer;font-family:var(--mono);font-size:12.5px;color:var(--ink2)}
+.keybox summary:focus-visible{outline:2px solid var(--focus);outline-offset:3px}
+.keynote{margin:9px 0 0;font-size:12.5px;color:var(--faint)}
+.keynote-strong{color:var(--ink2)}
+.klabel{display:block;margin:12px 0 5px;font-family:var(--mono);font-size:11px;
+  letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
+#modelKey{width:100%;background:var(--void);color:var(--ink);border:1px solid var(--line);
+  border-radius:9px;padding:9px 12px;font-family:var(--mono);font-size:13px}
+#modelKey:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.krow{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-top:10px}
+.kstatus{font-family:var(--mono);font-size:11.5px;color:var(--faint)}
+.kstatus.k-ok{color:var(--chartreuse)} .kstatus.k-bad{color:var(--coral)}
 /* CC-4 / FE-1: past searches. Absent entirely on a first visit — no empty box. */
 .past{border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:18px;
   background:var(--chip)}
@@ -417,6 +435,65 @@ function humanError(status, body, err){
 }
 
 /* ── wizard shell ── */
+/* ── FE-5: the optional model key (the UI half of P7) ─────────────────────────
+   THE ONE RULE: the key goes to Google and nowhere else.
+
+   It is never put in `state`, never added to a plan, never sent to /api/*, and never included
+   in an error report — the D-071 client beacon is a real leak path, so the key deliberately
+   lives only in `localStorage` and in the input element, and nothing that serialises state
+   can reach it. It is stored under its own key, separate from the past-searches list, so
+   "forget a search" and "clear my key" can never be confused for one another.
+
+   D-069's storage rule is about the PLAN and the EMAIL. An API key the student typed is their
+   own credential for their own quota; keeping it off our servers is the point, and storing it
+   locally is what makes that possible. */
+var KEY_STORE = "supervisorly.modelkey";
+var GEMINI_TEST_URL = "https://generativelanguage.googleapis.com/v1beta/models";
+
+function keyLoad(){
+  try { return window.localStorage.getItem(KEY_STORE) || ""; } catch(_){ return ""; }
+}
+function keySave(v){
+  try {
+    if(v) window.localStorage.setItem(KEY_STORE, v);
+    else window.localStorage.removeItem(KEY_STORE);
+  } catch(_){}
+}
+function keyStatus(msg, kind){
+  var el = document.getElementById("keyStatus");
+  if(!el) return;
+  el.textContent = msg || "";
+  el.className = "kstatus" + (kind ? " k-"+kind : "");
+}
+function keyClear(){
+  keySave("");
+  var input = document.getElementById("modelKey");
+  if(input) input.value = "";
+  keyStatus("Cleared. Nothing is stored.", "ok");   /* FE-5.4: one click, immediate */
+}
+function keyTest(){
+  var v = (document.getElementById("modelKey").value || "").trim();
+  if(!v){ keyStatus("Paste a key first.", "bad"); return; }
+  keySave(v);
+  keyStatus("Testing...");
+  /* One cheap call, straight to Google. Deliberately NOT through our API: routing it through
+     us would be exactly the thing the note above promises never happens. */
+  fetch(GEMINI_TEST_URL + "?key=" + encodeURIComponent(v))
+    .then(function(r){
+      if(r.ok) keyStatus("Key works. It stays in this browser.", "ok");
+      else if(r.status===400 || r.status===401 || r.status===403)
+        keyStatus("That key was refused by Google. Check it and try again.", "bad");
+      else keyStatus("Google answered " + r.status + ". The key may still be fine; "
+                     + "Supervisorly runs without it either way.", "bad");
+    })
+    .catch(function(){
+      /* Fail SOFT: a blocked request or an offline browser says nothing about the key, and
+         the product does not need one. Never a scary error for an optional feature. */
+      keyStatus("Could not reach Google from this browser. Supervisorly runs without a key.",
+                "bad");
+    });
+}
+
 /* ── CC-4 / FE-1: past searches ────────────────────────────────────────────────
    A finished result is kept and re-openable; starting a new search NEVER deletes an old one.
 
@@ -685,6 +762,27 @@ function mergeMaps(results){
    the word, add one the model missed. This is the last moment before the search is defined,
    and it is the student's to correct: the expansion is a guess about their words, and a
    guess they cannot see is one they cannot fix. */
+/* FE-2.1/FE-2.2: what this search will cost, in lookups the student can see.
+   Every phrasing is one topic lookup, and the /api/map call carries them all in ONE request
+   (B-001), so the honest unit is "lookups" rather than "requests".
+
+   It WARNS and never BLOCKS. The field cap was removed on purpose (D-074): someone working
+   across six areas is exactly who this tool is for, and "remove one to add another" makes
+   them hide part of their own research. A number they can see is the right lever; a refusal
+   is not. */
+var COST_WARN_AT = 60;
+
+function costPreview(fields, phrasings){
+  var line = fields + ' field' + (fields===1?"":"s") + ' x ' + phrasings + ' phrasing' +
+    (phrasings===1?"":"s") + ' = ' + phrasings + ' topic lookup' + (phrasings===1?"":"s") +
+    ', in one request.';
+  var warn = phrasings >= COST_WARN_AT
+    ? '<div class="cost-warn">That is a wide search. It will still run — it just takes '+
+      'longer and uses more of the hourly budget. Narrow it only if you want to.</div>'
+    : '';
+  return '<div class="cost" id="costPreview"><span class="cost-n">'+esc(line)+'</span>'+
+         warn+'</div>';
+}
 function renderFieldPlan(){
   var host = document.getElementById("fieldPlan");
   if(!state.plan || !state.plan.length){ host.classList.add("hidden"); host.innerHTML=""; return; }
@@ -693,6 +791,7 @@ function renderFieldPlan(){
     '<div class="fplan-h">We will search <b>'+total+'</b> phrasing'+(total===1?"":"s")+
     ' across <b>'+state.plan.length+'</b> field'+(state.plan.length===1?"":"s")+
     ' — open any field to change what it looks for.</div>'+
+    costPreview(state.plan.length, total)+
     state.plan.map(function(e,i){
       return '<details class="fp" data-fp="'+i+'"'+(e.open?" open":"")+'>'+
         '<summary><span class="fp-name">'+esc(e.field)+'</span>'+
@@ -1294,6 +1393,18 @@ document.addEventListener("DOMContentLoaded", function(){
   /* wire every control FIRST — a failing API call can then never take down the page */
   renderChips();
   renderPast();
+  /* FE-5: restore the key into the field only — never into `state`, so nothing that
+     serialises a plan or an error report can pick it up. */
+  var savedKey = keyLoad();
+  if(savedKey){
+    document.getElementById("modelKey").value = savedKey;
+    keyStatus("A key is saved in this browser.", "ok");
+  }
+  document.getElementById("keyTest").addEventListener("click", keyTest);
+  document.getElementById("keyClear").addEventListener("click", keyClear);
+  document.getElementById("modelKey").addEventListener("change", function(e){
+    keySave((e.target.value || "").trim());
+  });
   /* FE-1.2 / CC-4.5: delegated, because the rows are re-rendered whenever the list changes. */
   document.getElementById("past").addEventListener("click", function(e){
     var open = e.target.closest("[data-past-open]");
@@ -1467,6 +1578,25 @@ def build_webapp(*, api_base: str = "") -> str:
     <p class="why" style="margin-top:18px">Intent — it gates how candidates are scored.</p>
     <div class="rcards" role="group" aria-label="what you are looking for — tick every level you would consider">{intent_cards}</div>
     <div class="err hidden" id="err-intent"></div>
+    <details class="keybox" id="keyBox">
+      <summary>Use my own model key (optional)</summary>
+      <p class="keynote">
+        Supervisorly works without this. A key of your own lets the optional model steps run
+        on your quota instead of waiting for our shared budget.
+      </p>
+      <p class="keynote keynote-strong">
+        Your key stays in this browser and is sent only to Google. It never reaches our
+        servers, is never written to a scan, and never appears in an error report.
+      </p>
+      <label class="klabel" for="modelKey">Google AI Studio API key</label>
+      <input id="modelKey" type="password" autocomplete="off" spellcheck="false"
+             placeholder="paste your key here">
+      <div class="krow">
+        <button type="button" class="btn ghost" id="keyTest">Test key</button>
+        <button type="button" class="btn ghost" id="keyClear">Clear key</button>
+        <span class="kstatus" id="keyStatus" role="status" aria-live="polite"></span>
+      </div>
+    </details>
     <p class="why" style="margin-top:18px">Country (name or ISO code) — where the
       country-wide search runs.</p>
     <input type="text" id="country" placeholder="e.g. Canada or CA">

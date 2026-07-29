@@ -51,13 +51,72 @@ def test_api_base_injection_default_and_placeholder():
 def test_self_contained_except_api_fetches():
     html = build_webapp(api_base="<API_BASE_URL>")
     for bad in ("<link", "<script src", "@import", "url(", "<img", "<iframe",
-                "XMLHttpRequest", "googleapis", "cdn", "alert("):
+                "XMLHttpRequest", "cdn", "alert("):
         assert bad not in html, f"external-request vector present: {bad}"
+    # `googleapis` is no longer banned outright: FE-5/P7 test the student's OWN key by
+    # calling Google directly from their browser, which is the whole design — routing it
+    # through us is the thing the panel promises never happens. It must appear ONLY as that
+    # one endpoint constant, never as a loaded subresource, which the bans above still cover.
+    assert html.count("generativelanguage.googleapis.com") == 1
     # D-069: MAY fetch the API. Client-side persistence is limited to the CC-4 past-searches
     # list, which holds job ids and dates ONLY.
     assert "fetch(" in html
     assert "sessionStorage" not in html
     assert "document.cookie" not in html
+
+
+def test_the_model_key_is_sent_only_to_google_and_never_to_us():
+    """FE-5.2 / P7's hard rule, checked structurally rather than trusted.
+
+    The panel promises the key "stays in this browser and is sent only to Google". The leak
+    paths that would break that promise are: putting it in `state` (which gets serialised into
+    a plan), sending it to `/api/*`, or letting the D-071 client beacon carry it. So the key is
+    read straight from the input element at the moment of use and never stored anywhere a
+    serialiser can reach.
+    """
+    js = _js(build_webapp())
+    # It never enters the shared state object — that is what gets built into a plan.
+    assert "state.modelKey" not in js and "state.key" not in js
+    # The only fetch that ever sees it is the Google one.
+    key_lines = [ln for ln in js.splitlines() if "modelKey" in ln or "KEY_STORE" in ln]
+    for ln in key_lines:
+        assert "api(" not in ln, f"the model key must never go to our API: {ln.strip()!r}"
+        assert "/api/" not in ln, f"the model key must never go to our API: {ln.strip()!r}"
+    # …and the plan the page POSTs carries no key field of any kind.
+    plan_block = js.split("var plan = {", 1)[1].split("};", 1)[0]
+    for banned in ("key", "apiKey", "api_key", "token"):
+        assert banned not in plan_block, f"{banned!r} must not travel in the plan"
+
+
+def test_the_error_beacon_cannot_carry_the_model_key():
+    """D-071's beacon reports errors to us. If a key ever reached an error message it would be
+    posted to our servers, which is precisely the promise being made. The beacon sends a fixed
+    shape, so assert the key is not among the things it can pick up."""
+    js = _js(build_webapp())
+    beacon = js.split("function report(", 1)[1].split("\n}", 1)[0]
+    for banned in ("modelKey", "KEY_STORE", "keyLoad"):
+        assert banned not in beacon, f"the D-071 beacon must not be able to carry {banned}"
+
+
+def test_clearing_the_key_is_one_click_and_removes_it():
+    """FE-5.4 — and the input is cleared too, so it is gone from the DOM as well as storage."""
+    js = _js(build_webapp())
+    body = js.split("function keyClear(", 1)[1].split("\n}", 1)[0]
+    assert "keySave(\"\")" in body
+    assert "input.value = \"\"" in body
+
+
+def test_the_key_panel_states_where_the_key_goes():
+    """FE-5.2. The claim has to be on the page, not only in the code.
+
+    Whitespace-normalised: the promise is prose that the source wraps across lines, and a
+    literal substring check would pass or fail on where the line happens to break.
+    """
+    prose = re.sub(r"\s+", " ", build_webapp())
+    assert "stays in this browser" in prose
+    assert "sent only to Google" in prose
+    assert "never reaches our servers" in prose
+    assert "never appears in an error report" in prose
 
 
 def test_nothing_but_job_ids_is_persisted_client_side():
@@ -87,7 +146,10 @@ def test_only_fetch_targets_are_the_endpoint_paths():
     #   report()         — the D-071 beacon, fetch(api("/api/clientlog")…). It bypasses
     #     fetchJson on purpose: fetchJson rejects on failure, which would fire another
     #     report and risk a loop, and the beacon needs keepalive to survive page unload.
-    assert sorted(re.findall(r"fetch\((\w+)", js)) == ["api", "url"]
+    #   fetch(GEMINI_TEST_URL…) — FE-5's "Test key", the ONE call that deliberately does not
+    #     go to our API. It uses a named constant, not a literal, so this test still proves
+    #     no ad-hoc URL is fetched anywhere.
+    assert sorted(re.findall(r"fetch\((\w+)", js)) == ["GEMINI_TEST_URL", "api", "url"]
     assert 'fetch("' not in js and "fetch('" not in js, "a literal URL is being fetched"
     paths = set(re.findall(r'api\("([^"]+)"', js))
     assert paths == {"/api/expand", "/api/map", "/api/scan", "/api/scan/", "/api/result/",

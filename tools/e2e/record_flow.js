@@ -94,6 +94,15 @@ async function shot(name) {
   const entry = await evalJs(`["s1","s2","s3","s4","s5"].filter(s=>{
     const e=document.getElementById(s); return e&&!e.classList.contains("hidden");}).join(",")`);
   check("starts a fresh visitor at step 1", entry === "s1", "entry=" + entry);
+
+  // FE-1.4: a first visitor sees NO past-searches box at all — not an empty one. The driver
+  // clears storage before loading, so this really is a first visit.
+  const pastAtStart = await evalJs(`(()=>{const p=document.getElementById("past");
+    return JSON.stringify({exists:!!p, hidden:!!p&&p.classList.contains("hidden"),
+                           text:(p&&p.innerText||"").trim().length});})()`);
+  const pa = JSON.parse(pastAtStart || "{}");
+  check("a first visitor sees no empty past-searches box",
+    pa.exists === true && pa.hidden === true && pa.text === 0, pastAtStart);
   await typeInto("#email", EMAIL);
   await typeInto("#country", "Egypt");               // country lives on STEP 1
   const country = await evalJs(`document.getElementById("country").value`);
@@ -118,6 +127,26 @@ async function shot(name) {
     (iv.types || []).length === 1 && iv.types[0] === "checkbox", (iv.types || []).join(","));
   check("two levels can be ticked at once", (iv.checked || []).length === 2,
     (iv.checked || []).join(","));
+  // FE-5: the optional model-key panel. Asserted as SHAPE and PROMISE, never with a real
+  // key — a test that pasted one would be putting a credential in a screencast.
+  const keyPanel = await evalJs(`(()=>{
+    const b=document.getElementById("keyBox");
+    if(!b) return JSON.stringify({present:false});
+    b.open = true;
+    const t=(b.innerText||"").replace(/\\s+/g," ");
+    const input=document.getElementById("modelKey");
+    return JSON.stringify({present:true, collapsedByDefault:!b.hasAttribute("data-was-open"),
+      type: input && input.type, promise: /sent only to Google/i.test(t),
+      never: /never reaches our servers/i.test(t),
+      hasTest: !!document.getElementById("keyTest"),
+      hasClear: !!document.getElementById("keyClear")});})()`);
+  const kp = JSON.parse(keyPanel || "{}");
+  check("the optional model-key panel exists", kp.present === true);
+  check("the key field is a password input, not plain text", kp.type === "password", kp.type);
+  check("the panel says the key goes only to Google and never to us",
+    kp.promise === true && kp.never === true, JSON.stringify({p: kp.promise, n: kp.never}));
+  check("the panel offers Test and Clear", kp.hasTest && kp.hasClear);
+
   await sleep(900); await shot("01-step1");
   await realClick("#toStep2");
   await waitFor(`!document.getElementById("s2").classList.contains("hidden")`, "step 2");
@@ -159,6 +188,14 @@ async function shot(name) {
              header: (document.querySelector(".fplan-h")||{}).textContent||"" };})()`);
   check("a plan row per field, with counts", plan.rows === parts.length,
         plan.rows + " rows · " + plan.counts.join(" / "));
+  // FE-2.1/2.2: the cost preview warns, and never blocks.
+  const cost = await evalJs(`(()=>{const c=document.getElementById("costPreview");
+    return c ? (c.innerText||"").replace(/\\s+/g," ") : "";})()`);
+  check("step 2 shows a live cost preview", /topic lookup/i.test(cost || ""),
+    (cost || "").slice(0, 90));
+  check("the cost preview never blocks the search",
+    !/cannot|too many|remove one|not allowed/i.test(cost || ""), (cost || "").slice(0, 90));
+
   check("the plan states the total before searching", /We will search/.test(plan.header),
         plan.header.replace(/\s+/g, " ").slice(0, 90));
   await sleep(700); await shot("02c-plan");
@@ -220,6 +257,21 @@ async function shot(name) {
   check("job id shown to the student", /^[a-f0-9]{32}$/.test(jobId), jobId);
   const errProg = await evalJs(`(document.getElementById("err-progress")||{}).textContent||""`);
   check("no stale error alongside Done", !errProg.trim(), errProg.trim().slice(0, 90));
+  // CC-4/FE-1: the finished job is now remembered, and what is stored is ONLY the id and the
+  // date — D-069 keeps the plan and the email out of browser storage (see B-008).
+  const stored = await evalJs(`(()=>{
+    let raw=null; try{ raw=window.localStorage.getItem("supervisorly.past"); }catch(_){}
+    const list = raw ? JSON.parse(raw) : [];
+    return JSON.stringify({n:list.length, keys:Object.keys(list[0]||{}).sort(),
+                           hasThisJob:list.some(e=>e.id===${JSON.stringify(jobId)}),
+                           raw:(raw||"").slice(0,200)});})()`);
+  const st = JSON.parse(stored || "{}");
+  check("the finished scan is remembered for later", st.hasThisJob === true, stored);
+  check("only the job id and date are stored — never the plan or email",
+    JSON.stringify(st.keys) === JSON.stringify(["at", "id"]), JSON.stringify(st.keys));
+  check("no email or field name reached browser storage",
+    !/@/.test(st.raw || "") && !new RegExp(FIELD.split("|")[0].trim(), "i").test(st.raw || ""),
+    (st.raw || "").slice(0, 90));
   await sleep(1500); await shot("06-done");
 
   // ── dashboard ───────────────────────────────────────────────────────────
