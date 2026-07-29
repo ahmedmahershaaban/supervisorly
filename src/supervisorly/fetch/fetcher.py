@@ -14,11 +14,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
-from . import robots
+from . import pdf, robots
 from .backoff import RETRY_STATUSES, RetryPolicy
 from .ratelimit import HostRateLimiter
 from .snapshot import SnapshotStore
-from .transport import Response, Transport, TransportError
+from .transport import MAX_RESPONSE_BYTES, Response, Transport, TransportError
 
 
 @dataclass
@@ -111,6 +111,13 @@ class Fetcher:
                 self._sleep(self._retry.delay(attempt, self._jitter))
                 attempt += 1
                 continue
+            if resp.oversize:
+                # CC-5.4. Refused, not downloaded — and SAID SO, because a silently skipped
+                # 200 MB prospectus is indistinguishable from a page that had nothing on it.
+                return FetchResult(
+                    url=url, allowed=True, status=resp.status, attempts=attempt + 1,
+                    error=f"response larger than {MAX_RESPONSE_BYTES // (1024 * 1024)} MB "
+                          "— not downloaded")
             if resp.status != 200:
                 return FetchResult(url=url, allowed=True, status=resp.status,
                                    error=f"http {resp.status}", attempts=attempt + 1)
@@ -123,7 +130,17 @@ class Fetcher:
                     return FetchResult(url=url, allowed=False, status=200,
                                        error="redirect target disallowed by robots.txt",
                                        attempts=attempt + 1, final_url=resp.url)
-            h = self._snap.store(resp.text)
+            body = resp.text
+            if pdf.looks_like_pdf(resp.content_type(), resp.content):
+                # CC-5. `resp.text` for a PDF is binary decoded as text — noise that would
+                # snapshot happily and then match no quote ever. Extract, or say why not.
+                extracted = pdf.extract_pdf_text(resp.content)
+                if extracted is None:
+                    return FetchResult(url=url, allowed=True, status=200,
+                                       attempts=attempt + 1, error=pdf.SCANNED_REASON,
+                                       final_url=resp.url if resp.url != url else None)
+                body = pdf.as_snapshot(extracted)
+            h = self._snap.store(body)
             return FetchResult(url=url, allowed=True, status=200, snapshot_hash=h,
                                attempts=attempt + 1,
                                final_url=resp.url if resp.url != url else None)

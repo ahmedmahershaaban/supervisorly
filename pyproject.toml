@@ -12,12 +12,19 @@ license = { text = "MIT" }
 authors = [{ name = "Ahmed Maher Ali Shaaban" }]
 # The deterministic layer is intentionally light on dependencies. httpx is the
 # HTTP client (behind a transport seam so cassette tests need no network);
-# selectolax + lxml parse HTML fast. Everything else — SQLite, robots parsing,
-# hashing — is standard library.
+# selectolax + lxml parse HTML fast; pypdf reads the text layer out of admissions
+# PDFs (CC-5) — CODE extracts the text, a model only ever reads it. Everything
+# else — SQLite, robots parsing, hashing — is standard library.
+#
+# pypdf is declared here rather than only in firebase/requirements.txt so the
+# WORKER gets it: the worker installs supervisorly from the release tarball, so a
+# dependency missing from this list is missing in production while every local
+# test passes — the same shape as the page_extract.js packaging bug.
 dependencies = [
   "httpx>=0.27",
   "selectolax>=0.3.21",
   "lxml>=5.0",
+  "pypdf>=4.0",
 ]
 
 [project.optional-dependencies]

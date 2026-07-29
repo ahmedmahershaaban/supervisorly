@@ -115,7 +115,7 @@ server-side, and jobs stay unlistable.
 
 ---
 
-## CC-5 · PDF text extraction `[ ]`
+## CC-5 · PDF text extraction `[x]`
 
 Verified gap: the engine cannot see PDFs **at all**, and admissions information is frequently
 PDF-only. Today such a page contributes nothing and says nothing about why.
@@ -127,17 +127,42 @@ PDF-only. Today such a page contributes nothing and says nothing about why.
 - `tests/test_pdf.py` *(new)*
 
 **Subtasks**
-- [ ] CC-5.1 `extract_pdf_text(data) -> str | None` via `pypdf`, wrapped as a snapshot exactly
+- [x] CC-5.1 `extract_pdf_text(data) -> str | None` via `pypdf`, wrapped as a snapshot exactly
       like HTML so the quote gate is unchanged
-- [ ] CC-5.2 Detect `application/pdf` by **content-type and magic bytes**
-- [ ] CC-5.3 No text layer (scanned) → `blocked`, reason `"scanned PDF — no text layer"`
-- [ ] CC-5.4 Size cap — a 200 MB PDF must not be downloaded
-- [ ] CC-5.5 Tests: a text PDF extracts; a scanned PDF blocks with the reason; oversize refused
+- [x] CC-5.2 Detect `application/pdf` by **content-type and magic bytes**
+- [x] CC-5.3 No text layer (scanned) → `blocked`, reason `"scanned PDF — no text layer"`
+- [x] CC-5.4 Size cap — a 200 MB PDF must not be downloaded
+- [x] CC-5.5 Tests: a text PDF extracts; a scanned PDF blocks with the reason; oversize refused
 
 **Note** — code extracts the text; a model only *reads* it. Do not ask a model to do the
 extraction.
 
-**Review** `[ ]`
+**Done, 2026-07-29.** It needed a **transport change**, which the task did not anticipate:
+`Response` carried only `text`, so a PDF body could not be recovered at all (binary decoded
+as UTF-8 is destroyed) and the magic-byte sniff had nothing to look at. `Response` now also
+carries `content: bytes`.
+
+- **CC-5.4 required streaming.** `client.get()` downloads the whole body before returning, so
+  a cap checked afterwards has already paid the cost. The live transport uses
+  `client.stream()` with *two* guards: `Content-Length` up front for the honest case, and a
+  running byte count for a chunked response that never declared its size. Either alone has a
+  hole. Refusal is a state (`Response.oversize`), never an exception.
+- **The `<pre>` envelope is load-bearing, not cosmetic.** `normalize.main_text` runs an HTML
+  parser, so raw PDF prose containing `<` or `&` would be silently eaten — and a quote taken
+  from that page would then fail against its own snapshot, so the gate would discard a *true*
+  claim. Extracted text is escaped into `<pre>…</pre>` and stored like any other snapshot;
+  the D-010 gate is untouched.
+- `None` from `extract_pdf_text` means "nothing to read"; it must never become `""`, which
+  reads as "we read it and it said nothing".
+- `pypdf` is declared in **`pyproject.toml`**, not only in `firebase/requirements.txt`: the
+  worker installs the package from the release tarball, so a dependency missing from that
+  list is missing in production while every local test passes — the `page_extract.js` shape.
+- Verified live as well as on cassettes: a real PDF over the network extracted, and a 500-byte
+  cap refused a real response at 0 bytes downloaded. Cassettes cannot exercise the streaming
+  path at all, which is exactly how a production-only break would have hidden.
+
+**Review** `[R]` — invariants re-checked; `python -m pytest` green (982) with `TMPDIR`
+outside the repo.
 
 ---
 
