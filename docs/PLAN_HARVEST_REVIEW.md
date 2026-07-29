@@ -134,18 +134,67 @@ That is not a hope — it requires five specific things.
 
 ## E. Two enhancements this review adds to the plan
 
-### E1 — Institution-level caching, ahead of P2
+### E1 — Institution-level caching — ~~proposed~~ **REJECTED** (Ahmed, 2026-07-29)
 
-Institutions are shared between students; professors are not. A hundred students searching one
-country hit the same few dozen admissions pages and directories. Fetching those independently
-per student is the actual load problem — and it is the problem that gets an IP blocked.
+I proposed caching the institution layer (admissions pages, directory structure, discovered
+professor URLs) so a hundred students searching one country would cost a few dozen fetches
+instead of a few thousand. Ahmed rejected it, and the reason is better than my proposal.
 
-Cache the **institution layer** (admissions pages, directory structure, discovered professor
-URLs) with a per-cycle TTL: the second student searching that country pays no fetches at all.
-Fewer requests than any distributed design, faster results, lower cost. It is also the only
-option that requires a server, since distributed clients cannot share a cache.
+**A cached deadline is worse than no deadline.** Institution pages change on their own
+schedule — an hour, a day, a week — and *there is no way to know a page changed without
+fetching it again*. So a cache cannot be invalidated correctly, only hopefully. For a product
+whose entire promise is verifiable, current facts, serving a stale application deadline can
+cost a student an admissions cycle. That harm is unrecoverable; the load saving is not worth
+it.
 
-The per-student part — which professors match *their* topics — stays per-run.
+The decision, in full:
+
+- **No cross-session cache of institution or page data.** Ever.
+- **No local cache on the student's machine either.** A new session or a new search starts
+  from nothing and re-fetches everything, exactly as it would for a student who had never used
+  the tool before.
+- **Within one run, reuse is expected** — if twenty professors share an institution, its
+  admissions page is fetched once for that scan, not twenty times. Ahmed's "we might use the
+  response for this session" is precisely this, and it is not a cache in the sense rejected
+  above: nothing survives the run.
+- The **student's own finished result** may be kept; it is theirs, already dated, and already
+  governed by the 7-day delete (D-069).
+
+**Accepted cost, stated once so it is not rediscovered as a bug:** every scan pays full fetch
+time, and a student re-running the same search waits the same duration again. That is the
+price of never showing them something that quietly went out of date.
+
+**Open question, my reading noted:** the existing 30-day `expand_cache` (Firestore) stores
+*LLM phrasings per field*, not page data or facts about the world — "machine learning" expands
+the same way this week and next. I read the no-cache rule as scoped to page/institution data
+whose freshness matters, so the expansion cache stays. Easy to overrule.
+
+### E1b — Where collection runs, and what that makes non-negotiable
+
+Ahmed's decision (2026-07-29): **each student's own machine may do the fetching**, and the
+resulting volume — three thousand requests across three thousand students rather than thirty
+from one server — is accepted. His reasoning: a university already serves far more traffic
+than this from its own logged-in users, and one bounded scan per student, once, is a diligent
+applicant doing by tool what they would otherwise do by hand.
+
+I argued the other side (a blocked student loses access to a university they are applying to;
+a shared cache would make an order of magnitude fewer requests). That argument was heard and
+overruled, and the freshness reason above is why. Recorded, not re-litigated.
+
+What the decision does **not** change — and these become engineering requirements rather than
+preferences, because the polite behaviour no longer has a server to live on:
+
+1. **robots.txt is honoured wherever the fetching happens.** A client that skips it is a
+   crawler wearing a student's IP.
+2. **Per-host pacing travels with it** — the shipped `HostRateLimiter` interval and
+   `ethics/pacing.py` jitter, re-implemented correctly, not approximated.
+3. **Abort-on-challenge matters more, not less.** A captcha or soft-block means stop and route
+   to the human rung — never retry harder. On a student's own address, "retry harder" is how a
+   temporary throttle becomes a lasting block.
+4. **Parallelism stays across hosts, never within one.** Twenty tabs means twenty
+   institutions; two concurrent requests to one host is the thing that actually triggers a ban.
+5. **Provenance drops a tier.** Client-collected pages are `agent_browser` (rank 2), because we
+   observed the fetch second-hand. The dashboard should show that, not hide it.
 
 ### E2 — A phase ledger in the export
 
