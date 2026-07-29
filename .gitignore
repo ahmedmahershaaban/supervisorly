@@ -83,6 +83,17 @@ firebase-debug.*.log
 Thumbs.db
 desktop.ini
 
+# --- e2e screenshots and recordings ------------------------------------------
+# tools/e2e drives the REAL deployed product against REAL professors, so every shot and
+# frame is a picture of named academics' data (D-005/D-032: never commit personal data).
+# Unanchored and generous on the suffix, because the runbook invents a new output directory
+# per pass (`./shots`, `./shots-v19`, …) and the guarantee must not depend on remembering to
+# extend this line. The scripts themselves are committed — only their output is not.
+shots/
+shots-*/
+*-shots/
+e2e-out/
+
 # --- Local Claude Code state -------------------------------------------------
 # Shared skill/agent definitions ARE committed (that is the point of the repo);
 # only machine-local settings are ignored.

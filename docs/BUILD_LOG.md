@@ -1263,3 +1263,43 @@ Suite **571 → 702**.
 Still unproven by anything: the 6 h task timeout, the 7-day TTLs (they need seven days),
 throttles under real concurrency, and any scan large enough to meet the OpenAlex daily
 budget.
+
+## round W — CC-1 phase ledger, FLAG phase flags, and SPIKE-0 (web-v19)
+
+**Built:**
+- **CC-1 phase ledger.** Schema v4 adds `phase_ledger` (a new table — that *is* what additive
+  means, so `migrate` needed no rebuild path). `runs.record_phase` / `runs.phase_ledger`;
+  the rows travel in the export as `run.ledger` and render in the dashboard's "How it works"
+  view. A skip with no reason **raises**: a blank "Why" cell reads as "no reason" rather than
+  "nobody recorded one". Rows order by `rowid`, not `created_at` — `utcnow()` is
+  second-resolution and a ledger that reshuffles between reads is one nobody trusts.
+- **FLAG.** `src/supervisorly/phases.py`. `PHASES` env var, read once, server-side only
+  (D-068). Off by default. Every off phase writes a ledger row naming the variable, so
+  "off" is visible rather than silent — the render rung once did nothing for two deploys
+  and nothing said so. Typos and not-yet-built names are reported, not dropped.
+- `tools/spikes/spike_orcid_employments.py`, `tools/e2e/check_ledger.js`.
+
+**Ran:** `python -m pytest` → **926 passed** (`TMPDIR` outside the repo). Both tiers deployed
+at tag `web-v19`; worker image digest `8c360618…` → `4499515b…`. One real scan
+(`176837fed485…`, Egypt · cardiovascular disease, 428 professors) verified with headful
+Chrome: `record_flow.js` **33/33**, `check_ledger.js` **7/7**.
+
+**SPIKE-0 = 22%, gate is 30% → P0 NOT built.** Three cohorts: EG/cardiovascular 28%,
+CA/machine-learning 28%, DE/water-treatment 7%. The binding constraint is not employments:
+55% of shortlisted professors carry **no ORCID at all**. Full write-up and three re-plan
+directions in `docs/plan/20-p0-orcid.md`.
+
+**Caught during the round:**
+- The sampling error `01-spikes.md` warns about reproduced itself on the first run:
+  `--field cardiology` resolves to **zero** OpenAlex topics, the enumeration fell back to
+  unfiltered, and the flattered cohort scored 68% against the filtered 28%. The spike now
+  prints `topics N` and the doc says to check it before believing any number.
+- Deploying with `--set-secrets SUPERVISORLY_OPENALEX_KEY` broke the worker
+  (`Ready = False`): that secret **has never existed** in this project. It is documented as
+  optional; the job now binds only `SUPERVISORLY_CONTACT_EMAIL`.
+- `.gitignore` did not cover e2e screenshots. Every run leaves a directory of named
+  academics one `git add -A` from a commit (D-005/D-032). Now ignored, unanchored, because
+  the runbook invents a new output directory per pass.
+- Two false alarms from the new checker, both worth writing down: the dashboard's `DATA` is
+  a top-level `const` and never lands on `window`; and `innerText` falls back to
+  `textContent` for unrendered elements, so it can never prove visibility — ask the layout.
