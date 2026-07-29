@@ -30,8 +30,19 @@ function check(name, ok, detail = "") {
 }
 
 async function connect() {
-  const list = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/list`)).json();
+  /* This attaches to a Chrome you started yourself; it does not launch one. Without that,
+     the only symptom is "DRIVER ERROR: fetch failed", which names the wrong problem. */
+  let list;
+  try {
+    list = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/list`)).json();
+  } catch (e) {
+    console.error(`No Chrome is listening on 127.0.0.1:${CDP_PORT}. Start one first:`);
+    console.error('  & "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" ' +
+                  `--remote-debugging-port=${CDP_PORT} --user-data-dir=<a scratch dir> about:blank`);
+    process.exit(2);
+  }
   const page = list.find(t => t.type === "page");
+  if (!page) { console.error("Chrome is running but has no open tab to drive."); process.exit(2); }
   ws = new WebSocket(page.webSocketDebuggerUrl, { maxPayload: 512 * 1024 * 1024 });
   await new Promise(r => ws.on("open", r));
   ws.on("message", m => {
