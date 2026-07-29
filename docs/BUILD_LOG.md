@@ -1328,3 +1328,45 @@ that only `node --check` surfaced — worth running before a 10-minute live pass
 click-through harness modelled intents as radios with exactly one winner; it now models a
 checkbox group and records request *bodies*, so "two ticked reach the plan" is asserted on
 what the page actually sent rather than on what its source contains.
+
+## round Y — CC-3, CC-5, and a SPIKE-1 that found something bigger than P1
+
+**Built:** CC-5 (PDF text extraction) and CC-3 (host pool + batch renderer). Both needed more
+than their task descriptions implied:
+
+- **CC-5 needed a transport change.** `Response` carried only `text`, so a PDF body could not
+  be recovered at all and the magic-byte sniff had nothing to look at. It now carries
+  `content: bytes`. The 200 MB cap needed *streaming* — `client.get()` downloads the whole
+  body before returning, so a cap checked afterwards has already paid the cost. Two guards:
+  `Content-Length` up front, and a running byte count for chunked responses that never declare
+  a size. Extracted text is escaped into a `<pre>` envelope so the D-010 quote gate is
+  untouched — without it, PDF prose containing `<` or `&` is eaten by `main_text`'s HTML
+  parser and a quote fails against its own snapshot, discarding a *true* claim.
+- **CC-3's lock order is the design.** Host lock first, global semaphore second. The obvious
+  order starves the pool exactly when a scan walks one university: twenty URLs take twenty
+  global slots and then all queue on one host lock. Inverting the two lines makes the test's
+  lone other-host request finish 9th instead of within 4.
+
+**Ran:** `python -m pytest` → **1011 passed** (`TMPDIR` outside the repo). CC-5 also verified
+against the live network (a real PDF extracted; a 500-byte cap refused a real response at 0
+bytes downloaded) because cassettes cannot exercise the streaming path at all.
+
+**SPIKE-1 = 0% on the real cohort → P1 NOT built.** But the number is not about P1. Where a
+university exists and permits crawling, its postgraduate page was **one hop from the
+homepage** — `asu.edu.eg/postgraduate`, `must.edu.eg/.../graduate-studies`. The 0% is because
+the institutions a scan surfaces are not universities: for CA + machine learning the
+shortlist's institutions were Nexen, Purdue Pharma, Nutrition International and a military
+institute.
+
+**Root cause, measured and recorded as B-006:** `institutions_in_country` takes ROR's first
+100 per country in an order that is not relevance, and `select_institutions` filters nothing
+— despite the former's docstring claiming the caller filters to education types. Education-
+typed institutions in that slice: **41/97 Egypt, 5/100 Canada, 1/98 Germany.** A German
+student's scan enumerates professors at a clinical-drug-research company. This plausibly also
+limits P2 and P4/P5, and it needs a product decision (filter by type? raise the cap? order by
+OpenAlex output in the student's field?) before any institution-dependent spike is re-run.
+
+**Method note now in `01-spikes.md`:** the sampling rule got a third worked example, and a
+refinement — "the cohort a real scan produces" is only the right sample if the scan is itself
+sampling the right things. When a spike scores zero, say whether the *phase* is unviable or
+the *input* is wrong. A bare number would have killed a phase that was never actually tested.

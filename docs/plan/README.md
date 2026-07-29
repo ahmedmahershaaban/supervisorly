@@ -56,7 +56,7 @@ in [`00-invariants.md`](00-invariants.md) have been re-checked.
 Update this line as phases land, so anyone opening the folder sees the state in one glance.
 
 ```
-CC ■▢▢▢▢+FLAG■   P0 ✗   P1 ▢   P4 ▢   P5 ▢   P2 ▢   P6 ▢   P7 ▢   FE ▢   T ▢   MI ■■!■■
+CC ■▢■▢■+FLAG■   P0 ✗   P1 ✗   P4 ▢   P5 ▢   P2 ▢   P6 ▢   P7 ▢   FE ▢   T ▢   MI ■■!■■
 ```
 
 `■` done · `▢` todo · `!` blocked on another phase · `✗` **spike missed, not built**
@@ -64,11 +64,25 @@ CC ■▢▢▢▢+FLAG■   P0 ✗   P1 ▢   P4 ▢   P5 ▢   P2 ▢   P6 ▢
 | | state | as of |
 |---|---|---|
 | CC-1 phase ledger | `[R]` shipped, live | 2026-07-29 |
+| CC-3 host pool | `[R]` shipped (primitive; P1/P2 are its callers) | 2026-07-29 |
+| CC-5 PDF extraction | `[R]` shipped | 2026-07-29 |
 | FLAG phase flags | `[R]` shipped, live | 2026-07-29 |
 | MI-1, MI-2, MI-4, MI-5 | `[R]` shipped, live | 2026-07-29 |
 | MI-3 | `[!]` blocked on P5 — no extraction call to aim yet | |
-| CC-2 / CC-3 / CC-4 / CC-5 | todo | |
+| CC-2 / CC-4 | todo | |
 | **P0 ORCID employments** | **`[!]` SPIKE-0 = 22%, gate is 30% — not built** | 2026-07-29 |
+| **P1 admissions** | **`[!]` SPIKE-1 = 0% on the real cohort — not built** | 2026-07-29 |
+
+> ### ⚠ Read [B-006](../BLOCKERS.md) before planning anything else
+>
+> SPIKE-1 measured 0%, but **not because admissions pages are hard to find** — Ain Shams and
+> Misr University both expose a postgraduate page one hop from the homepage. It measured 0%
+> because the institutions a scan currently surfaces are not universities. Education-typed
+> institutions in the enumeration: **41/97 Egypt, 5/100 Canada, 1/98 Germany.** A German
+> student's scan enumerates professors at a clinical-drug-research company.
+>
+> This plausibly also limits P2 and P4/P5. It needs a product decision, and re-running any
+> institution-dependent spike before it is resolved measures the wrong cohort again.
 
 Deployed at tag `web-v20`; last verified by `tools/e2e/record_flow.js` **44/44** against a
 real scan of 428 professors.

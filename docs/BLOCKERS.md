@@ -10,6 +10,68 @@ it, not by deleting it.
 
 ---
 
+## B-006 — The institution enumeration returns almost no universities, and P1 cannot be measured until it does
+
+**Status:** OPEN. Found 2026-07-29 while running SPIKE-1; needs a decision before P1 or a
+re-run of that spike. No code changed — this is recorded, not silently worked around.
+
+### What was measured
+
+`ror.institutions_in_country` paginates ROR's country filter to **5 pages × 20 = 100**
+institutions and records an honest truncation marker when more exist. `select_institutions`
+then returns **all** of them for `university_mode="all"`. Counting how many of those 100 are
+ROR type `education`:
+
+| country | education-typed institutions in the enumeration |
+|---|---|
+| Egypt | **41 / 97** |
+| Canada | **5 / 100** |
+| Germany | **1 / 98** |
+
+Germany has hundreds of universities. The one educational institution in its first 98 rows is
+a clinical-drug-research organisation. Canada's five are massage, osteopathy and naturopathy
+colleges — Toronto, UBC and McGill are not in the set at all.
+
+This is not a ROR outage. ROR's country filter returns thousands per country in an order that
+is not relevance, and the first 100 are effectively an arbitrary slice.
+
+### Why it matters beyond P1
+
+The cohort a real scan produces inherits this directly. Running the **real ladder** for
+`CA` + "machine learning", the shortlisted professors' institutions were Nexen, Purdue Pharma
+(Canada), Nutrition International and the Royal Canadian Military Institute. For
+`EG` + "cardiovascular disease" they were Boehringer Ingelheim, the National Heart Institute
+and four university *hospitals*. Those are real organisations with real authors — but a
+student asking for a PhD supervisor is not being shown universities.
+
+It is also a plausible contributor to the thin dashboards this plan keeps diagnosing: an
+organisation that grants no degrees has no admissions page (P1), often no public staff
+directory (P2), and no reason to publish recruiting language (P4/P5).
+
+### Why SPIKE-1 cannot be read as a verdict on P1
+
+Restricted to education-typed institutions, Egypt scored **4/10** — Ain Shams University and
+Misr University for Science and Technology both exposed a postgraduate page **one hop from
+the homepage**. So admissions pages *are* findable where a university exists and permits
+crawling. On the cohort a real scan actually produces, the score is **0/14**, because none of
+those organisations has an admissions page to find. Those two numbers answer different
+questions, and only the first is about P1.
+
+### The decision needed from Ahmed
+
+1. **Should `select_institutions` filter to ROR type `education`?**
+   `institutions_in_country`'s own docstring already claims "The caller filters to education
+   types" — the caller does not. One of the two is wrong. Filtering would exclude research
+   institutes (Egypt's National Research Centre is `facility`) that legitimately supervise
+   students, so this is a product call, not a typo fix.
+2. **How should the 100-institution cap choose *which* 100?** Options: raise `max_pages`
+   (ROR is keyless, so cost is time); sort by ROR type before truncating; or drive the
+   institution list from OpenAlex by works-in-topic, which orders by actual research output
+   in the student's field rather than by ROR's arbitrary order.
+3. Until one of those lands, **re-running SPIKE-1 will keep measuring the wrong cohort.**
+
+---
+
 ## B-005 — Should the browser work move to the student's machine? (and is the LLM needed at all)
 
 **Status:** analysis for Ahmed, 2026-07-29. Recommendation below; no code written.

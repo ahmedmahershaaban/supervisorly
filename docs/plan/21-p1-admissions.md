@@ -18,7 +18,62 @@ read.
 
 ---
 
-## P1-1 · Institution-scoped claims `[ ]`
+# SPIKE-1 RESULT, 2026-07-29 — **MISS (0% on the real cohort)**. P1 is NOT built.
+
+`tools/spikes/spike_admissions.py`. Starts at the homepage ROR gave us and walks links that
+exist on pages it actually fetched — never a guessed `/admissions` (D-038). Depth ≤ 3, 20
+fetches per institution, robots-gated and rate-limited like any other visitor.
+
+**Two cohorts, because they answer different questions.**
+
+| cohort | found | share |
+|---|---|---|
+| **the cohort a real scan produces** (the sampling rule: ladder → shortlist → those professors' institutions) | | |
+| EG · cardiovascular disease | 0/10 | 0% |
+| CA · machine learning | 0/4 | 0% |
+| **pooled — the number that gates P1** | **0/14** | **0%** |
+| | | |
+| *education-typed institutions only* (a different question) | | |
+| EG | 4/10 | 40% |
+| DE | 0/1 | n=1, not meaningful |
+
+**The gate fails, but not because admissions pages are hard to find.** Where a university
+exists and permits crawling, its postgraduate page was **one hop from the homepage**:
+`asu.edu.eg/postgraduate` (Ain Shams) and `must.edu.eg/academic_programs/graduate-studies`
+(Misr University) were both found at depth 1, in HTML, in a handful of fetches. P1-2's premise
+is sound.
+
+**The gate fails because the institutions a scan currently surfaces are not universities.**
+Running the real ladder for CA + machine learning, the shortlisted professors' institutions
+were Nexen, Purdue Pharma (Canada), Nutrition International and the Royal Canadian Military
+Institute. For EG + cardiovascular disease they were Boehringer Ingelheim, the National Heart
+Institute and four university *hospitals*. None of those grants degrees, so none has an
+admissions page — 0% is the correct answer to the question as asked, and it says nothing
+about P1.
+
+Root cause measured and recorded as **[B-006](../BLOCKERS.md)**: `institutions_in_country`
+takes ROR's first 100 per country in an order that is not relevance, and
+`select_institutions` filters nothing. Education-typed institutions in that slice: **41/97
+for Egypt, 5/100 for Canada, 1/98 for Germany.**
+
+**Do not build P1 yet, and do not re-run this spike first.** Re-running it before B-006 is
+resolved measures the same wrong cohort again. The order is: decide B-006 → re-run SPIKE-1 on
+a cohort that contains universities → then this gate means something.
+
+**Two things worth keeping from the run:**
+- Robots refusal is common and legitimate: Cairo University, Port Said University and El
+  Shorouk Academy all answer `Disallow: /` to our agent. P1's ledger row must count those
+  separately from "no admissions page found" — they are different states and only one is a
+  coverage gap we could close.
+- Not one page found carried a *parseable* date (`has_date` 0/4). If P1 is eventually built,
+  the deadline yield may be well below the page-discovery yield, and that deserves its own
+  measurement rather than an assumption.
+
+Every task below stays `[!]`.
+
+---
+
+## P1-1 · Institution-scoped claims `[!]` blocked — SPIKE-1 = 0% on the real cohort; see B-006
 
 Claims are person-scoped today. This is the schema work that lets a fact belong to an
 institution, a faculty or a programme.
@@ -36,7 +91,7 @@ institution, a faculty or a programme.
 
 ---
 
-## P1-2 · Find the admissions pages `[ ]`
+## P1-2 · Find the admissions pages `[!]` blocked — see the SPIKE-1 result above
 
 **Files**: `src/supervisorly/discover/admissions.py` *(new)*, `tests/test_admissions.py` *(new)*
 
@@ -52,7 +107,7 @@ institution, a faculty or a programme.
 
 ---
 
-## P1-3 · Extract and scope the facts `[ ]`
+## P1-3 · Extract and scope the facts `[!]` blocked — see the SPIKE-1 result above
 
 **Files**: `src/supervisorly/pipeline.py`, `src/supervisorly/export/dashboard.py`,
 `src/supervisorly/export/json_export.py`

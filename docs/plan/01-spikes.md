@@ -30,6 +30,20 @@ scored **28%**. Same script, same day, 40 points of difference — entirely from
 topics means the filter did not apply and the result is about prominent people, not about
 the cohort a student's scan will actually produce.
 
+**And it happened a third time, on SPIKE-1 (2026-07-29), in a new way.** That spike's first
+run took ROR's first ten institutions for Egypt and crawled hospitals, a pharmaceutical
+company, the WHO regional office and an international K-12 school — one plausible university
+in ten. Applying the sampling rule properly (real ladder → shortlist → *those professors'*
+institutions) did not rescue it: the cohort became Boehringer Ingelheim and four university
+hospitals, and the honest score was 0%.
+
+The lesson is a refinement of the rule, not a repetition of it: **"the cohort a real scan
+produces" is only the right sample if the scan itself is sampling the right things.** When a
+spike scores zero, ask whether the phase is unviable or whether the *input* is wrong, and say
+which — SPIKE-1's zero turned out to be a measurement of [B-006](../BLOCKERS.md), not of
+admissions pages. A spike that reports a number without that distinction can kill a phase
+that was never tested.
+
 ## Sampling rule
 
 Take the targets **a real scan produces** — country → ROR → OpenAlex authors filtered by topic.
@@ -41,7 +55,7 @@ the ones with complete records, and it will flatter every estimate.
 | id | file | question | threshold |
 |---|---|---|---|
 | **SPIKE-0** ✗ | `tools/spikes/spike_orcid_employments.py` | Of shortlisted professors, how many have an ORCID with a **current** employment (no `end-date`)? | **≥ 30%** — measured **22%**, 2026-07-29. **MISSED**, P0 not built ([`20-p0-orcid.md`](20-p0-orcid.md)) |
-| **SPIKE-1** | `tools/spikes/spike_admissions.py` | For ~10 institutions, can an admissions/graduate page be found **by following the site's own links within 3 hops**, and is it HTML rather than PDF? Record: found, HTML vs PDF, language, whether a date is present | **≥ 40% found** |
+| **SPIKE-1** ✗ | `tools/spikes/spike_admissions.py` | For ~10 institutions, can an admissions/graduate page be found **by following the site's own links within 3 hops**, and is it HTML rather than PDF? Record: found, HTML vs PDF, language, whether a date is present | **≥ 40%** — measured **0%** on the real cohort, 2026-07-29. **MISSED**; the cause is upstream ([B-006](../BLOCKERS.md)), see [`21-p1-admissions.md`](21-p1-admissions.md) |
 | **SPIKE-4** | `tools/spikes/spike_triage.py` | On ~20 pages known to contain recruiting language, what share does triage keep (**recall**)? And on 20 known-irrelevant pages, what share does it drop? | **recall ≥ 90%** |
 | **SPIKE-5** | `tools/spikes/spike_llm_yield.py` | On 20 real pages, what share of model proposals survive the quote gate, and what does a batch cost? | **≥ 60% survive** |
 | **SPIKE-2** | `tools/spikes/spike_directory.py` | For ~10 institutions, is a people directory reachable within 3 hops by following links, and can a named professor be located in it? | **≥ 30%** |
