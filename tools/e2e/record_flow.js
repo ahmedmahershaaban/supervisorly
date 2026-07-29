@@ -11,6 +11,11 @@ const CDP_PORT = Number(process.env.CDP_PORT || 9222);
 const FIELD = process.argv[2] || "molecular biology";
 const OUT = process.argv[3] || ".";
 const EMAIL = process.env.SV_EMAIL;
+if (!EMAIL) {                        // else the first typeInto dies as "text is not iterable"
+  console.error("SV_EMAIL is not set — the wizard needs a contact email (OpenAlex polite pool).");
+  console.error('  PowerShell:  $env:SV_EMAIL = "you@example.com"');
+  process.exit(2);
+}
 const fs = require("fs");
 const path = require("path");
 const WebSocket = require("ws");

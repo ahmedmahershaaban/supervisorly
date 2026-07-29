@@ -16,12 +16,28 @@ For any change under `src/supervisorly/**`:
 - [ ] **OPS-2** Point `firebase/requirements.txt` at the new tag — the package installs **from
       the tag**, never from disk. A change on disk that is not in a pushed tag will not deploy
 - [ ] **OPS-3** Deploy Functions: `firebase deploy --only functions --project supervisorly`
-- [ ] **OPS-4** Deploy the worker: stage `Dockerfile.worker`, `requirements.txt`, `main.py`,
-      `_core.py`, `worker.py` into a scratch dir, then
-      `gcloud run jobs deploy supervisorly-scan-worker --source <dir> --region us-central1 --memory 4Gi --cpu 2`
+- [ ] **OPS-4** Deploy the worker: stage `requirements.txt`, `main.py`, `_core.py`, `worker.py`
+      and **`Dockerfile.worker` renamed to plain `Dockerfile`** into a scratch dir, then
+      `gcloud run jobs deploy supervisorly-scan-worker --source <dir> --region us-central1 --memory 4Gi --cpu 2 --task-timeout 21600 --set-env-vars "RESULTS_BUCKET=supervisorly-results" --set-secrets "SUPERVISORLY_CONTACT_EMAIL=SUPERVISORLY_CONTACT_EMAIL:latest"`
+
+      **The rename is load-bearing.** Cloud Build only recognises a file literally called
+      `Dockerfile`; staged under its own name it is ignored and the build silently falls back
+      to **buildpacks**, which produce a web server. The container then starts gunicorn, logs
+      `Failed to find attribute 'app' in 'main'` and `exit(4)`, every scan sits at *Queued*
+      forever, and the deploy reports success. Done exactly this way on 2026-07-29.
+
+      Pass the env and secrets explicitly: a `--source` deploy rewrites the container config,
+      and `SUPERVISORLY_OPENALEX_KEY` is **not** one of them — that secret has never existed
+      in this project and naming it leaves the job `Ready=False`.
 - [ ] **OPS-5** **Verify both.** `python tools/verify_deploy.py` compares the live page against
       what this tree builds; for the worker, confirm the image **sha256 digest changed**. An
-      unchanged digest means the scanner did not change, whatever the deploy said
+      unchanged digest means the scanner did not change, whatever the deploy said.
+
+      **A changed digest is necessary, not sufficient** — a buildpack image is also a new
+      digest. Confirm the container actually runs the worker:
+      `gcloud run jobs executions list --job supervisorly-scan-worker --region us-central1 --limit 3`
+      must show the next execution **succeeding**, and the log must contain the worker's own
+      output rather than gunicorn's. OPS-6 is what proves it; do not skip it.
 - [ ] **OPS-6** Run one real scan. Check `python tools/logs.py job <id>` and the new ledger rows
 - [ ] **OPS-7** **Any new runtime data file** (`*.js`, `*.sql`, …) must be added to
       `pyproject.toml` `[tool.setuptools.package-data]`. A file present in the repo and absent

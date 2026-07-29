@@ -1584,3 +1584,53 @@ it does, raising `TOPIC_FILTER_CHUNK` halves those requests and nothing else cha
 **Not touched:** `export/studio.py` also emits `resolved_topic_ids` and has no counter at all;
 its plans go to the CLI, which has no topic cap, so chunking makes wide Studio plans work
 rather than fail. A Studio plan of >50 topics uploaded to the *web* API would still 400.
+
+---
+
+## Round AH — I broke the worker, and the deploy said it worked
+
+Deploying round AG, I staged `Dockerfile.worker` into the build context **under its own name**,
+exactly as OPS-4 said to. Cloud Build only recognises a file literally called `Dockerfile`, so
+it ignored it, fell back to **buildpacks**, and shipped a web server:
+
+```
+[ERROR] Failed to find attribute 'app' in 'main'.
+Container called exit(4).
+```
+
+Every scan then sat at *Queued* forever. `gcloud run jobs deploy` reported success, the job read
+`Ready=True`, and **OPS-5 passed** — because the image digest really had changed
+(`6a2e908b… → e121cc34…`). A buildpack image is a new image. "The digest changed" proves the
+deploy did something, not that it built the right thing.
+
+Fixed by re-staging with the file renamed to `Dockerfile` (`10dad59d…`), and both OPS steps are
+rewritten in `docs/plan/90-ops-deploy.md`: the rename is called out as load-bearing, and the
+digest check is now labelled necessary-but-not-sufficient with an execution-succeeded check
+beside it.
+
+**Two things behaved well under a failure I caused.** The stranded job did not hang — it
+reported `failed / "worker stalled; safe to resume"` — and resume brought it back: the resumed
+scan finished at 09:37Z with 25 institutions, 131 targets, 40 deep-dived, on the fixed image.
+
+### The 409 that had no way out
+
+Ahmed's tab was still on the old step-5 view and clicked Resume:
+
+```
+POST /api/scan/c88eb35…/resume  409 (Conflict)
+only a failed or cancelled job can be resumed (current status: running)
+```
+
+The screen then said **"Stopped — worker stalled; safe to resume"** at the top and
+**"current status: running"** at the bottom, with the one button on offer unable to work.
+
+A 409 here means the job is queued, running or **done** — it is the *page* that is stale, and
+that is good news. It now re-syncs instead of reporting an error: Cancel returns, Resume goes
+away, and one poll repaints the truth, including "Done — your dashboard is ready."
+
+Three tests in `tests/test_webapp_clickthrough.py` drive the real page against a 409 and assert
+no error text, the recovery, and that the student reaches the dashboard.
+
+**Still open:** a page that has settled on a terminal *failed* view stops polling, so a worker
+that recovers on its own is invisible until the student clicks something. The 409 path is the
+common way that happens and it is now covered; the general case is not.

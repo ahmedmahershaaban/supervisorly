@@ -1444,6 +1444,23 @@ function resumeScan(){
         "Queued — resuming where the scan left off…";
       state.jobEnd = 0; state.phaseKey = ""; state.slowShown = false;
       beginPolling();
+    } else if(r.status===409){
+      /* 409 = the server will only resume a job that failed or was cancelled, so this one is
+         QUEUED, RUNNING or DONE. That is not a failed click: it is this page being out of
+         date, because it settled on a terminal view and stopped polling while the scan went
+         on elsewhere (another tab resumed it, or the worker recovered).
+
+         Reporting it as an error leaves a screen that contradicts itself — "Stopped — worker
+         stalled; safe to resume" above, "current status: running" below, and the only button
+         offered cannot work. Seen in production 2026-07-29. So re-sync instead: one poll
+         re-renders the truth, including "Done — your dashboard is ready." A 409 here is good
+         news, and the page should say so rather than show an error. */
+      clearErrs();
+      document.getElementById("resumeBtn").classList.add("hidden");
+      document.getElementById("cancelBtn").classList.remove("hidden");
+      document.getElementById("phaseLine").textContent = "Catching up with your scan…";
+      state.jobEnd = 0; state.phaseKey = ""; state.slowShown = false;
+      beginPolling();
     } else showErr("err-progress", humanError(r.status, r.body));
   }, function(e){ showErr("err-progress", humanError(0, null, e)); });
 }

@@ -384,6 +384,23 @@ def run(tmp_path_factory):
     return _run(tmp_path_factory.mktemp("clickthrough"), _scenario())
 
 
+@pytest.fixture(scope="module")
+def run_stale(tmp_path_factory):
+    """The same flow, but Resume answers **409** — the job was never actually stuck.
+
+    Seen in production 2026-07-29: the page had settled on "Stopped — worker stalled; safe to
+    resume" and stopped polling, while the scan itself went on and finished. Clicking the only
+    button on offer got `409 only a failed or cancelled job can be resumed (current status:
+    running)`, printed as an error under a banner still saying the job was stopped. The screen
+    contradicted itself and every route out of it was closed.
+    """
+    scen = _scenario()
+    scen["responses"][f"POST /api/scan/{JOB}/resume"] = [
+        {"status": 409, "body": {"error": "only a failed or cancelled job can be resumed "
+                                          "(current status: running)"}}]
+    return _run(tmp_path_factory.mktemp("clickthrough409"), scen, plant_error=False)
+
+
 def _at(rep, label):
     return next(s for s in rep["trace"] if s["label"] == label)
 
@@ -454,6 +471,31 @@ def test_cancel_then_resume_is_never_a_dead_end(run):
     # so assert on what the student saw, not only on the final state.
     assert any(p.startswith("Queued — resuming where the scan left off")
                for p in run["phaseLog"])
+
+
+def test_a_409_on_resume_is_treated_as_good_news_not_an_error(run_stale):
+    """409 means the job is queued, running or done — i.e. the PAGE is stale, not the job.
+    Showing it as an error is what produced a self-contradicting screen in production."""
+    resumed = _at(run_stale, "resumed")
+    assert not resumed["err"].strip(), resumed["err"]
+    assert "only a failed or cancelled job" not in resumed["err"]
+
+
+def test_a_409_on_resume_puts_the_page_back_in_touch_with_the_scan(run_stale):
+    """The recovery is to re-poll: Cancel returns, Resume goes away, and the next authoritative
+    status repaints the screen."""
+    resumed = _at(run_stale, "resumed")
+    assert resumed["cancel"] and not resumed["resume"]
+    assert any(p.startswith("Catching up with your scan") for p in run_stale["phaseLog"])
+
+
+def test_after_a_409_the_student_still_reaches_the_dashboard(run_stale):
+    """The end state that matters: the scan really had finished, so the dashboard must appear
+    rather than the student being stranded on a stale "Stopped" banner."""
+    done = _at(run_stale, "done")
+    assert done["openDash"], done
+    assert "Done" in done["phase"], done["phase"]
+    assert not done["err"].strip(), done["err"]
 
 
 def test_a_partial_warning_is_surfaced_not_swallowed(run):
