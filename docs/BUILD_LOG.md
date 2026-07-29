@@ -1431,3 +1431,34 @@ session started.
   no line touching it mentions `api(`, that the POSTed plan has no key-shaped field, and that
   the D-071 error beacon cannot reach it — that beacon posts error text to us and is the real
   leak path. `Test key` calls Google directly and fails soft.
+
+## round AB — SPIKE-2, and a wrong conclusion caught by a second cohort
+
+**SPIKE-2 = 29% pooled against a 30% gate. Undecided — P2 not built.**
+`tools/spikes/spike_directory.py` (ROR only, so the OpenAlex budget does not block it),
+education-typed institutions:
+
+| cohort | found | robots-refused | share |
+|---|---|---|---|
+| Egypt | 2/10 | **5/10** | 20% |
+| United Kingdom | 2/4 | **0/4** | 50% |
+| **pooled** | **4/14** | 5/14 | **29%** |
+
+**The methodological point of this round.** After the Egyptian cohort I had written, in
+`24-p2-directory.md` and in B-007, that "half the institutions forbid us outright" and drawn a
+product-shape conclusion from it: that the deterministic path cannot supply professor pages
+and the human rung is therefore the product's real centre. The UK cohort refuted the premise
+within the hour — **zero** robots refusals. Both documents were corrected and the claim
+withdrawn before either was committed.
+
+That is the same error the sampling rule already warns about, in a third costume: not a
+flattering sample this time, but a *discouraging* one generalised from a single country. The
+rule that would have caught it earlier is the one now written down — never conclude from one
+cohort, in either direction.
+
+**What survives:** robots refusal is real, legitimate and obeyed, but **country-specific**.
+Every directory found was at **depth 1**, so the 3-hop budget is not the constraint. And both
+cohorts are small *because of B-006* — the UK sample is 4 institutions, all the education-typed
+ones ROR's first 100 GB rows contain. Fixing B-006 widens every future cohort.
+
+**Next step, cheap and unblocked:** re-run on 2–3 more countries. It needs no OpenAlex.

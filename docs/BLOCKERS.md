@@ -103,11 +103,35 @@ lead to real faculty pages. The plan orders P4/P5 *before* P2
 ([`plan/README.md`](plan/README.md)), which now looks like the wrong order: it builds a token
 gate and an extractor for a page stream that P2 has not yet produced.
 
-1. **Should P2 move ahead of P4/P5?** On the evidence, yes — but P2 is the plan's other
-   `L`/high-risk phase and is itself gated by SPIKE-2.
-2. If P2 also disappoints, the honest conclusion is that the *deterministic* supply of
-   professor pages is thin everywhere, and the browser/human rung is the product's real
-   answer rather than a fallback. That is a product-shape decision, not an implementation one.
+1. **Should P2 move ahead of P4/P5?** Still the right order — P2 is the only phase that could
+   create a page supply — but SPIKE-2 did **not** settle whether P2 works. It scored
+   **4/14 = 29% pooled against a 30% gate**, and the two cohorts disagree sharply: Egypt
+   2/10 with **5 robots refusals**, the UK 2/4 with **none**. One more find would pass it.
+2. **Robots refusal is country-specific, not universal.** An earlier draft of this entry
+   generalised Egypt's 50% refusal rate into "half of institutions forbid crawling" and drew a
+   product-shape conclusion from it. The UK cohort refuted that within the hour. The claim is
+   withdrawn; what stands is that refusal is real, legitimate, obeyed — and varies by country.
+
+### What is actually decided, and what is not
+
+**Decided:** registries (ORCID/Publons) carry no recruiting statement, so P4 and P5 cannot be
+evaluated on today's page supply whatever happens with P2.
+
+**Not decided:** whether a directory crawl can supply professor pages at a useful rate. 14
+institutions across 2 countries is too thin for an `L`/high-risk phase, and the sample is thin
+*because of B-006* — the UK cohort was 4 institutions, all the education-typed ones ROR's
+first 100 GB rows contain.
+
+### The cheap next step, before any P2 decision
+
+Re-run `tools/spikes/spike_directory.py` on 2–3 more countries. It needs **no OpenAlex** (ROR
+is keyless), so it is not blocked by the daily budget, and it costs minutes. If B-006 is fixed
+first the cohorts get wider and the number gets trustworthy in the same run.
+
+Only then is the real question answerable: **is the human/browser rung the product's main path
+to a professor's own page, or its fallback?** The product already has that rung (D-043/D-064,
+and the dashboard already routes blocked rows to it with a generated prompt and a search
+link), so this is a question about emphasis and roadmap, not about missing machinery.
 
 ---
 

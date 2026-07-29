@@ -1,5 +1,48 @@
 # P2 — Directory rung *(find the professor's page at all)*
 
+# SPIKE-2 RESULT, 2026-07-29 — **29% pooled, gate is 30%. Too close to call at this sample size.** P2 is NOT built yet.
+
+`tools/spikes/spike_directory.py`, **education-typed** institutions only (restricted on
+purpose — B-006 means an unrestricted cohort would re-measure B-006 rather than P2). Starts at
+the ROR homepage and follows links the pages actually contain; never a guessed `/staff`.
+
+| cohort | directory found | refused by `robots.txt` | share |
+|---|---|---|---|
+| Egypt | 2 / 10 | **5 / 10** | 20% |
+| United Kingdom | 2 / 4 | **0 / 4** | 50% |
+| **pooled** | **4 / 14** | 5 / 14 | **29%** |
+
+**Do not read either country as the answer.** They disagree sharply and the pooled figure sits
+one result away from the gate — 5/14 would pass it. This is a genuinely undecided measurement,
+and calling it a MISS would be as wrong as calling it a PASS.
+
+**What IS solid, and is the useful finding:**
+
+- **Robots refusal is country-specific, not universal.** Egypt refused 5 of 10 (El Asher,
+  AlAlamein, the Egyptian Universities Network, Misr International, the Canadian International
+  College all answer `Disallow: /`); the UK refused none. An early draft of this note
+  generalised Egypt's rate into "half of all institutions forbid crawling" — that was wrong,
+  and the second cohort caught it. Where refusal happens it is legitimate and we obey it
+  (D-005/D-019); it is not an obstacle to engineer around.
+- **Where a directory exists at all, it is shallow.** All four finds were at **depth 1**:
+  `hu.edu.eg/about-us`, `en.fsci.bu.edu.eg`, `eso.ac.uk/about-us/our-people`,
+  `sspc.ac.uk/research`. A 3-hop budget is not the binding constraint.
+- **The samples are small because of B-006.** The UK cohort is *4 institutions* — that is all
+  the education-typed ones ROR's first 100 rows for GB contain. Fixing B-006 would widen every
+  cohort here and is a prerequisite to a trustworthy re-run.
+
+**Before building P2: re-run this on 2–3 more countries with a wider institution pool.** It is
+cheap (ROR is keyless, no OpenAlex needed) and the current number cannot carry an `L`/high-risk
+phase either way.
+
+**Not measured:** SPIKE-2's second half ("can a named professor be located in the directory?")
+needs a name from OpenAlex, whose free daily budget was exhausted during this session. Left
+explicitly unmeasured rather than estimated.
+
+P2-1, P2-2 and P2-3 stay `[!]`.
+
+---
+
 ← [`README.md`](README.md) · [`00-invariants.md`](00-invariants.md) · gate: **SPIKE-2** in [`01-spikes.md`](01-spikes.md)
 
 **Size: L · Risk: HIGH.** The expensive, unglamorous grind — and it contains the single most
@@ -26,7 +69,7 @@ is broken at the server and its scholar subdomain 403s bots. Say so rather than 
 
 ---
 
-## P2-1 · Bounded crawler `[ ]`
+## P2-1 · Bounded crawler `[!]` blocked — SPIKE-2 = 29% pooled, undecided at this sample size
 
 **Files**: `src/supervisorly/discover/crawl.py` *(new)*, `tests/test_crawl.py` *(new)*
 
@@ -48,7 +91,7 @@ is broken at the server and its scholar subdomain 403s bots. Say so rather than 
 
 ---
 
-## P2-2 · Page-kind classification `[ ]`
+## P2-2 · Page-kind classification `[!]` blocked — SPIKE-2 = 29% pooled, undecided at this sample size
 
 **Files**: `src/supervisorly/discover/roster.py`, `tests/test_roster_classify.py` *(new)*
 
@@ -65,7 +108,7 @@ classifier is new work.
 
 ---
 
-## P2-3 · Identity matching + student confirmation `[ ]`
+## P2-3 · Identity matching + student confirmation `[!]` blocked — SPIKE-2 = 29% pooled, undecided at this sample size
 
 **The most dangerous failure in the plan.** Attributing another person's page to a professor is
 worse than finding nothing — it is a confident wrong answer.

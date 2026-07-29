@@ -58,7 +58,8 @@ the ones with complete records, and it will flatter every estimate.
 | **SPIKE-1** ✗ | `tools/spikes/spike_admissions.py` | For ~10 institutions, can an admissions/graduate page be found **by following the site's own links within 3 hops**, and is it HTML rather than PDF? Record: found, HTML vs PDF, language, whether a date is present | **≥ 40%** — measured **0%** on the real cohort, 2026-07-29. **MISSED**; the cause is upstream ([B-006](../BLOCKERS.md)), see [`21-p1-admissions.md`](21-p1-admissions.md) |
 | **SPIKE-4** | `tools/spikes/spike_triage.py` | On ~20 pages known to contain recruiting language, what share does triage keep (**recall**)? And on 20 known-irrelevant pages, what share does it drop? | **recall ≥ 90%** |
 | **SPIKE-5** | `tools/spikes/spike_llm_yield.py` | On 20 real pages, what share of model proposals survive the quote gate, and what does a batch cost? | **≥ 60% survive** |
-| **SPIKE-2** | `tools/spikes/spike_directory.py` | For ~10 institutions, is a people directory reachable within 3 hops by following links, and can a named professor be located in it? | **≥ 30%** |
+| **SPIKE-2** ~ | `tools/spikes/spike_directory.py` | For ~10 institutions, is a people directory reachable within 3 hops by following links, and can a named professor be located in it? | **≥ 30%** — measured **29% pooled** (EG 2/10, GB 2/4), 2026-07-29. **Undecided**; re-run wider ([`24-p2-directory.md`](24-p2-directory.md)) |
+| **SPIKE-4** ~ | `tools/spikes/spike_triage.py` | *(see below)* | **INCONCLUSIVE** — no positive set exists to measure recall against ([`22-p4-triage.md`](22-p4-triage.md)) |
 | **SPIKE-6** | `tools/spikes/spike_wayback.py` | For admissions URLs P1 found, how many have **≥ 3** archived cycles? | **≥ 25%** |
 
 ## What a spike must output

@@ -56,10 +56,11 @@ in [`00-invariants.md`](00-invariants.md) have been re-checked.
 Update this line as phases land, so anyone opening the folder sees the state in one glance.
 
 ```
-CC ■▢■▢■+FLAG■   P0 ✗   P1 ✗   P4 ?   P5 ?   P2 ▢   P6 ▢   P7 ▢   FE ▢   T ▢   MI ■■!■■
+CC ■▢■■■+FLAG■   P0 ✗   P1 ✗   P4 ?   P5 ?   P2 ?   P6 ▢   P7 ◐   FE ■■~~■■   T ■   MI ■■!■■
 ```
 
-`?` = **spike could not be measured** — not a miss, and not a pass. See B-007.
+`?` = **spike could not be measured, or landed too close to its gate to call** — not a miss
+and not a pass. `◐` = UI half shipped, backend not. `~` = partly blocked on an unbuilt phase.
 
 `■` done · `▢` todo · `!` blocked on another phase · `✗` **spike missed, not built**
 
@@ -71,7 +72,12 @@ CC ■▢■▢■+FLAG■   P0 ✗   P1 ✗   P4 ?   P5 ?   P2 ▢   P6 ▢   P
 | FLAG phase flags | `[R]` shipped, live | 2026-07-29 |
 | MI-1, MI-2, MI-4, MI-5 | `[R]` shipped, live | 2026-07-29 |
 | MI-3 | `[!]` blocked on P5 — no extraction call to aim yet | |
-| CC-2 / CC-4 | todo | |
+| CC-4 sessions, FE-1 past searches | `[R]` shipped, live | 2026-07-29 |
+| T-1 translation display | `[R]` shipped | 2026-07-29 |
+| FE-2 cost preview, FE-5 key panel, FE-6 sweep | `[R]` shipped, live | 2026-07-29 |
+| FE-3 / FE-4 | `[~]` partly blocked — 7 subtasks need P0/P1/P2/P5 data | |
+| CC-2 budgets | todo | |
+| **P2 directory** | **`[!]` SPIKE-2 = 29% pooled — undecided, re-run wider** | 2026-07-29 |
 | **P0 ORCID employments** | **`[!]` SPIKE-0 = 22%, gate is 30% — not built** | 2026-07-29 |
 | **P1 admissions** | **`[!]` SPIKE-1 = 0% on the real cohort — not built** | 2026-07-29 |
 | **P4 triage** | **`[!]` SPIKE-4 INCONCLUSIVE — no positive set exists to measure recall against** | 2026-07-29 |
