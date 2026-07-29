@@ -1670,3 +1670,18 @@ the refusal.
 
 **Found only because the run pasted a word from my own clipboard.** A check that reads back
 what the product claims to have done is worth more than one that reads the claim.
+
+**Verified `web-v26`, 63/63.** Worker digest `595c921b… → 7f11e146…`; `verify_deploy.py` OK;
+real scan `9848b78e3c82…` driven headful, 165 professors. The two checks that mattered:
+
+```
+[PASS] Copy reports what actually happened, never a false success
+       — label=Copied ✓ | clip=You are helping gather PUBLIC
+[PASS] step 3 refuses to advance an over-cap plan
+       — "at most 50 topics can be scanned, and 161 are checked — uncheck 111 of them to go on."
+```
+
+Three rounds, three defects, all three found by a real run rather than by the suite: a cap the
+student only met on the last click, a 409 that turned a healthy job into a dead end, and a
+success message for a copy that never happened. The pattern is the same each time — **the
+product reported an outcome it had not checked.**
