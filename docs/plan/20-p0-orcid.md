@@ -19,7 +19,51 @@ employment. Below that, P0 is cosmetic — re-plan.
 
 ---
 
-## P0-1 · ORCID employments client `[ ]`
+# SPIKE-0 RESULT, 2026-07-29 — **MISS (22%)**. P0 is NOT built.
+
+`tools/spikes/spike_orcid_employments.py`, three cohorts, each the real shortlist a scan
+produces (country → ROR → OpenAlex authors **filtered by the plan's topics** → the same
+`_apply_shortlist` gate):
+
+| cohort | shortlisted | current | no ORCID at all | ORCID but no employment listed | past only | **share** |
+|---|---|---|---|---|---|---|
+| EG · cardiovascular disease | 40 | 11 | 21 | 7 | 1 | **28%** |
+| CA · machine learning | 40 | 11 | 15 | 14 | 0 | **28%** |
+| DE · water treatment | 27 | 2 | 23 | 2 | 0 | **7%** |
+| **pooled** | **107** | **24** | 59 | 23 | 1 | **22%** |
+
+Zero lookup failures in all three runs, so this is a measurement of the data, not of a bad
+network hour.
+
+**The binding constraint is not employments — it is ORCID presence.** 59 of 107 shortlisted
+professors (55%) carry **no ORCID at all** on their OpenAlex record. *Given* an ORCID, a
+current employment is there 44–58% of the time, which is a perfectly good hit rate; it is
+simply applied to half a cohort. Widening the employments parser cannot move this number.
+
+**A fourth run is recorded as a warning, not as evidence.** The first attempt used
+`--field cardiology`, which OpenAlex resolves to **zero** topics, so the enumeration was
+unfiltered and returned Egypt's most prominent physicists and oceanographers. That cohort
+scored **68%** — prominent people have complete records. It is the exact error
+[`01-spikes.md`](01-spikes.md) records twice already, reproduced here on the first try.
+Anyone re-running this must confirm the `topics N` line in the header is non-zero.
+
+**What P0 would actually have delivered**: role and department for roughly one shortlisted
+professor in five. Not nothing — but it is the cheapest phase precisely because it is the
+smallest, and 22% does not clear the bar this gate was written to enforce.
+
+**Re-plan directions**, none of them started:
+- The honest cheap win may be *institution* (already held from OpenAlex/ROR for everyone),
+  not *role/department* from ORCID.
+- ORCID's `search` endpoint can resolve a name + affiliation to an iD, which could lift the
+  55% who carry none — but that is identity matching, i.e. P2-3's dangerous work, and it
+  needs P2-3's `verified`/`unverified`/refuse discipline before it may be presented.
+- If P2 lands, re-run this spike: its cohort may carry ORCIDs at a different rate.
+
+Every task below stays `[!]`. Do not build them without a fresh spike that clears 30%.
+
+---
+
+## P0-1 · ORCID employments client `[!]` blocked — SPIKE-0 = 22%, gate is 30%
 
 **Files**: `src/supervisorly/discover/orcid.py`, `tests/test_orcid.py`
 
@@ -45,7 +89,7 @@ employment. Below that, P0 is cosmetic — re-plan.
 
 ---
 
-## P0-2 · Wire into the pipeline `[ ]`
+## P0-2 · Wire into the pipeline `[!]` blocked — SPIKE-0 = 22%, gate is 30%
 
 **Files**: `src/supervisorly/pipeline.py`, `tests/test_profile_export.py`
 
@@ -60,7 +104,7 @@ employment. Below that, P0 is cosmetic — re-plan.
 
 ---
 
-## P0-3 · Show it `[ ]`
+## P0-3 · Show it `[!]` blocked — SPIKE-0 = 22%, gate is 30%
 
 **Files**: `src/supervisorly/export/dashboard.py`, `src/supervisorly/export/json_export.py`,
 `tests/test_dashboard_actions.py`

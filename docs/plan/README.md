@@ -56,8 +56,21 @@ in [`00-invariants.md`](00-invariants.md) have been re-checked.
 Update this line as phases land, so anyone opening the folder sees the state in one glance.
 
 ```
-CC ▢▢▢▢▢   P0 ▢   P1 ▢   P4 ▢   P5 ▢   P2 ▢   P6 ▢   P7 ▢   FE ▢   T ▢   MI ▢
+CC ■▢▢▢▢+FLAG■   P0 ✗   P1 ▢   P4 ▢   P5 ▢   P2 ▢   P6 ▢   P7 ▢   FE ▢   T ▢   MI ▢
 ```
+
+`■` done · `▢` todo · `✗` **spike missed, not built**
+
+| | state | as of |
+|---|---|---|
+| CC-1 phase ledger | `[R]` shipped | 2026-07-29 |
+| FLAG phase flags | `[R]` shipped | 2026-07-29 |
+| CC-2 / CC-3 / CC-4 / CC-5 | todo | |
+| **P0 ORCID employments** | **`[!]` SPIKE-0 = 22%, gate is 30% — not built** | 2026-07-29 |
+
+**Read [`20-p0-orcid.md`](20-p0-orcid.md) before touching P0.** The binding constraint turned
+out not to be employments at all: 55% of shortlisted professors carry no ORCID on their
+OpenAlex record. Nothing in the P0 tasks as written can move that.
 
 ## Where the numbers went
 

@@ -20,6 +20,16 @@ This session produced three confident estimates in a row, each stated as fact:
 Each cost a build → deploy → measure cycle that a ten-minute script would have prevented.
 A phase whose spike disappoints is a phase that saved its own build cost.
 
+**It happened again on the very first run of SPIKE-0 (2026-07-29)**, which is why the
+sampling rule below is not advice. `--field cardiology` resolves to **zero** OpenAlex topics,
+so the enumeration silently fell back to unfiltered and returned the country's most prominent
+physicists and oceanographers: **68%**. The correctly filtered cohort for the same country
+scored **28%**. Same script, same day, 40 points of difference — entirely from the sample.
+
+**So: check the `topics N` line in a spike's header before you believe its number.** Zero
+topics means the filter did not apply and the result is about prominent people, not about
+the cohort a student's scan will actually produce.
+
 ## Sampling rule
 
 Take the targets **a real scan produces** — country → ROR → OpenAlex authors filtered by topic.
@@ -30,7 +40,7 @@ the ones with complete records, and it will flatter every estimate.
 
 | id | file | question | threshold |
 |---|---|---|---|
-| **SPIKE-0** | `tools/spikes/spike_orcid_employments.py` | Of shortlisted professors, how many have an ORCID with a **current** employment (no `end-date`)? | **≥ 30%** |
+| **SPIKE-0** ✗ | `tools/spikes/spike_orcid_employments.py` | Of shortlisted professors, how many have an ORCID with a **current** employment (no `end-date`)? | **≥ 30%** — measured **22%**, 2026-07-29. **MISSED**, P0 not built ([`20-p0-orcid.md`](20-p0-orcid.md)) |
 | **SPIKE-1** | `tools/spikes/spike_admissions.py` | For ~10 institutions, can an admissions/graduate page be found **by following the site's own links within 3 hops**, and is it HTML rather than PDF? Record: found, HTML vs PDF, language, whether a date is present | **≥ 40% found** |
 | **SPIKE-4** | `tools/spikes/spike_triage.py` | On ~20 pages known to contain recruiting language, what share does triage keep (**recall**)? And on 20 known-irrelevant pages, what share does it drop? | **recall ≥ 90%** |
 | **SPIKE-5** | `tools/spikes/spike_llm_yield.py` | On 20 real pages, what share of model proposals survive the quote gate, and what does a batch cost? | **≥ 60% survive** |

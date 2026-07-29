@@ -6,7 +6,7 @@ Later phases depend on these. CC-1 and CC-3 in particular are prerequisites, not
 
 ---
 
-## CC-1 · Phase ledger `[ ]`
+## CC-1 · Phase ledger `[x]`
 
 Every phase records attempted / reached / skipped-with-reason / cost, surfaced in the run
 summary and the dashboard. This turns *"the dashboard looks thin"* into an answerable question
@@ -20,16 +20,28 @@ summary and the dashboard. This turns *"the dashboard looks thin"* into an answe
 - `tests/test_phase_ledger.py` *(new)*
 
 **Subtasks**
-- [ ] CC-1.1 `runs.record_phase(conn, run_id, phase, attempted, reached, skipped, reason, seconds, tokens=0)`
-- [ ] CC-1.2 A `phase_ledger` table, or reuse the `run_counts` JSON — **additive migration only**
-- [ ] CC-1.3 `_build_result` includes `ledger` in the export
-- [ ] CC-1.4 The dashboard's "How it works" panel renders it
-- [ ] CC-1.5 Tests: a phase that reached nothing still appears, with its reason
+- [x] CC-1.1 `runs.record_phase(conn, run_id, phase, attempted, reached, skipped, reason, seconds, tokens=0)`
+- [x] CC-1.2 A `phase_ledger` table, or reuse the `run_counts` JSON — **additive migration only**
+      *(new table, schema v4; a new table IS additive, so `migrate` needed no rebuild path)*
+- [x] CC-1.3 `_build_result` includes `ledger` in the export
+- [x] CC-1.4 The dashboard's "How it works" panel renders it
+- [x] CC-1.5 Tests: a phase that reached nothing still appears, with its reason
 
 **Acceptance** — a run where P1 finds no admissions page shows
 `P1 attempted 10 · reached 0 · skipped 10 (no admissions page found)`. Never absence.
 
-**Review** `[ ]`
+**Done, 2026-07-29** (`176edf8`). Two decisions worth keeping:
+- A skip with **no reason RAISES**. A blank "Why" cell reads to a student as "no reason"
+  rather than "nobody recorded one" — which is the silence the table exists to remove.
+- Rows order by `rowid`, not `created_at`: `utcnow()` is second-resolution, so timestamp
+  ordering lets the ledger reshuffle between two reads of the same run.
+
+Live rows today: `discovery`, `shortlist`, `optout`, `recent_works`, `deep_dive`, plus one
+per flag-disabled phase. An opt-out is its own row, never folded into a skip count — D-023
+makes that a *filtered result*, not a coverage gap.
+
+**Review** `[R]` — invariants re-checked; `python -m pytest` green (907) with `TMPDIR`
+outside the repo.
 
 ---
 
@@ -129,7 +141,7 @@ extraction.
 
 ---
 
-## FLAG · Shipping a half-finished phase safely `[ ]`
+## FLAG · Shipping a half-finished phase safely `[x]`
 
 Every phase lands behind a flag, default **off**, so the branch is always deployable and a bad
 phase is one config change from gone.
@@ -140,14 +152,29 @@ phase is one config change from gone.
 - `tests/test_phase_flags.py` *(new)*
 
 **Subtasks**
-- [ ] FLAG-1 `PHASES` env var, comma-separated (`"p0,p1"`), read once at worker start
-- [ ] FLAG-2 A phase not listed is skipped **and writes a ledger row saying so** — off must be
+- [x] FLAG-1 `PHASES` env var, comma-separated (`"p0,p1"`), read once at worker start
+- [x] FLAG-2 A phase not listed is skipped **and writes a ledger row saying so** — off must be
       visible, never silent
-- [ ] FLAG-3 Flags are **server config only**, never a request parameter (the D-068 rule)
-- [ ] FLAG-4 Test: with every phase off, output is byte-identical to today's
+- [x] FLAG-3 Flags are **server config only**, never a request parameter (the D-068 rule)
+- [x] FLAG-4 Test: with every phase off, output is byte-identical to today's
 
 **Why** — the render rung shipped and did nothing for two deploys because a separate change had
 quietly removed its input. A flag plus a ledger row makes that state legible instead of
 requiring log archaeology.
 
-**Review** `[ ]`
+**Done, 2026-07-29** (`5838759`), `src/supervisorly/phases.py`. Notes for whoever adds the
+next phase:
+- **`OPTIONAL_PHASES` lists only a phase that has a skippable call site.** It is `("p0",)`
+  today and P0 is *not built* (SPIKE-0 missed), so nothing is gated yet in practice. Adding a
+  name early would let `PHASES=p2` read as accepted while changing nothing — the exact
+  failure this task exists to prevent. `PLANNED_PHASES` holds the rest and answers
+  "recognised, not built yet", which is a different thing from "not a phase".
+- **Off-rows are written in one place** in `run_live`, so each phase's call site is just
+  `if flags.is_on(...)` and cannot forget to explain itself.
+- **FLAG-4 read precisely**: the *evidence* output (professors, fields, envelopes, coverage)
+  is byte-identical with everything off. The ledger gains rows — that is FLAG-2's whole
+  point, and the two subtasks would otherwise contradict each other.
+- The volatile-field list both byte-comparison tests need lives in `tests/helpers_export.py`.
+
+**Review** `[R]` — invariants re-checked; `python -m pytest` green (926) with `TMPDIR`
+outside the repo.
