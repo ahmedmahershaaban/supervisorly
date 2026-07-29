@@ -54,6 +54,12 @@ def test_scan_live_runs_end_to_end_with_a_patched_transport(tmp_path, monkeypatc
     assert out.exists() and out.with_suffix(".json").exists()
     printed = capsys.readouterr().out
     assert "scanned 1 professors (live)" in printed and printed.isascii()
+    # This cassette deliberately records an UNFILTERED author query and no topics response,
+    # i.e. the field did not resolve. That must now be said out loud: an unfiltered scan
+    # returns the most prominent authors at the institution, not people in the field, and it
+    # used to be indistinguishable from a filtered one (found via a live OpenAlex 429).
+    assert "resolved to NO OpenAlex topics" in printed
+    assert "causal ml" in printed
     # the sparse-coverage preflight is surfaced on the console (D-060): 1 institution < 5
     assert "WARNING: ROR lists only 1 institution(s)" in printed
     export = json.loads(out.with_suffix(".json").read_text(encoding="utf-8"))
@@ -153,10 +159,13 @@ def test_scan_progress_flag_prints_one_ascii_line_per_event(tmp_path, monkeypatc
     assert lines == [
         "progress: enumerated 1 targets across 1 institutions",
         "progress: deep-dive 0/1",
-        # the cassette lacks ROR's number_of_results, so the ladder honestly records a
-        # truncation marker (D-037) — which rides the same stream as a partial_warning
-        "progress: PARTIAL - Coverage is PARTIAL - 1 source(s) had more results than "
-        "were enumerated (institutions@CA).",
+        # Two honest truncation markers (D-037), riding the same stream as a partial_warning:
+        # the cassette lacks ROR's number_of_results, AND it records no topics response, so
+        # the topic lookup FAILS. That second marker is the point — a failed topic lookup
+        # used to be indistinguishable from "OpenAlex has no such topic", and both silently
+        # produced an unfiltered scan of the wrong professors.
+        "progress: PARTIAL - Coverage is PARTIAL - 2 source(s) had more results than "
+        "were enumerated (institutions@CA, topics@causal ml).",
         "progress: deep-dive 1/1",
         "progress: scoring",
         "progress: exported",

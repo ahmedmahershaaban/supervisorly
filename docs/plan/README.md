@@ -56,8 +56,10 @@ in [`00-invariants.md`](00-invariants.md) have been re-checked.
 Update this line as phases land, so anyone opening the folder sees the state in one glance.
 
 ```
-CC ■▢■▢■+FLAG■   P0 ✗   P1 ✗   P4 ▢   P5 ▢   P2 ▢   P6 ▢   P7 ▢   FE ▢   T ▢   MI ■■!■■
+CC ■▢■▢■+FLAG■   P0 ✗   P1 ✗   P4 ?   P5 ?   P2 ▢   P6 ▢   P7 ▢   FE ▢   T ▢   MI ■■!■■
 ```
+
+`?` = **spike could not be measured** — not a miss, and not a pass. See B-007.
 
 `■` done · `▢` todo · `!` blocked on another phase · `✗` **spike missed, not built**
 
@@ -72,6 +74,8 @@ CC ■▢■▢■+FLAG■   P0 ✗   P1 ✗   P4 ▢   P5 ▢   P2 ▢   P6 ▢
 | CC-2 / CC-4 | todo | |
 | **P0 ORCID employments** | **`[!]` SPIKE-0 = 22%, gate is 30% — not built** | 2026-07-29 |
 | **P1 admissions** | **`[!]` SPIKE-1 = 0% on the real cohort — not built** | 2026-07-29 |
+| **P4 triage** | **`[!]` SPIKE-4 INCONCLUSIVE — no positive set exists to measure recall against** | 2026-07-29 |
+| **P5 model extraction** | **`[!]` SPIKE-5 not run — it would measure the model on registry profiles** | 2026-07-29 |
 
 > ### ⚠ Read [B-006](../BLOCKERS.md) before planning anything else
 >
@@ -83,6 +87,16 @@ CC ■▢■▢■+FLAG■   P0 ✗   P1 ✗   P4 ▢   P5 ▢   P2 ▢   P6 ▢
 >
 > This plausibly also limits P2 and P4/P5. It needs a product decision, and re-running any
 > institution-dependent spike before it is resolved measures the wrong cohort again.
+
+> ### ⚠ And read [B-007](../BLOCKERS.md) before building P4 or P5
+>
+> **0% of 49 shortlisted GB professors resolve to a page they control** — 88% to no page at
+> all, 12% to an ORCID/Publons profile. A recruiting sentence lives on a person's own page;
+> registries have no field for one. So P4 would gate a stream containing nothing to gate, and
+> P5 would extract from registry profiles.
+>
+> **P2 (the directory rung) is what creates that supply**, and the plan currently orders
+> P4/P5 before it. On this evidence that order is wrong.
 
 Deployed at tag `web-v20`; last verified by `tools/e2e/record_flow.js` **44/44** against a
 real scan of 428 professors.

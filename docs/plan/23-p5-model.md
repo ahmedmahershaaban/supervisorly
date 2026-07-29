@@ -1,5 +1,25 @@
 # P5 — Model extraction *(batched, quote-gated)*
 
+> ## SPIKE-5 NOT RUN, 2026-07-29 — blocked behind SPIKE-4, which is inconclusive.
+>
+> SPIKE-5 asks what share of **model proposals survive the quote gate** on 20 real pages. It
+> needs pages that could produce a proposal. [`22-p4-triage.md`](22-p4-triage.md) measured the
+> deep-dive's actual page supply for GB · machine learning: **0% of 49 shortlisted professors
+> resolve to a page they control** — 88% resolve to no page at all and 12% to an ORCID or
+> Publons profile, which has no field in which a person could say they take students.
+>
+> Running SPIKE-5 against that supply would measure the model on registry profiles and report
+> a number about nothing. P5-1 and P5-2 stay `[ ]` and unbuilt.
+>
+> **Prerequisite: P2 (the directory rung)**, which is what would create a supply of real
+> faculty pages — see [`24-p2-directory.md`](24-p2-directory.md) and B-003/B-006.
+>
+> *(Secondary, and temporary: OpenAlex's free daily budget was exhausted during this session
+> — `429 "Insufficient budget… Resets at midnight UTC"` — so no ladder-dependent spike could
+> be re-run afterwards. That is a scheduling constraint, not the reason SPIKE-5 is blocked.)*
+
+---
+
 ← [`README.md`](README.md) · [`00-invariants.md`](00-invariants.md) · gate: **SPIKE-5** in [`01-spikes.md`](01-spikes.md)
 
 **Size: M · Risk: med.** The contract is already written and tested — `extract/llm_claims.py`

@@ -10,6 +10,63 @@ it, not by deleting it.
 
 ---
 
+## B-007 — The deep-dive has no supply of pages that could contain a recruiting claim
+
+**Status:** OPEN. Measured 2026-07-29 while trying to run SPIKE-4. Needs a sequencing
+decision, not code. Closely related to B-003 and B-006 but distinct from both, and it is the
+reason **two** gated phases (P4, P5) cannot be evaluated at all.
+
+### What was measured
+
+`tools/spikes/spike_page_supply.py` takes the professors a real scan shortlists, resolves each
+to the URL `pipeline._page_url_for` would deep-dive, and classifies it. For
+**GB · machine learning, 49 shortlisted professors**:
+
+| what the deep-dive aims at | share |
+|---|---|
+| no page at all | **88%** |
+| registry profile (ORCID, Publons) | 12% |
+| **a page the professor controls** | **0%** |
+
+`tools/spikes/spike_triage.py` then read 16 pages from that cohort (15 needed the browser) and
+asked an independent model whether any stated something about recruiting or supervising.
+**Zero did.** Same for a 4-page Egyptian cohort.
+
+### Why this is a supply problem, not a triage or extraction problem
+
+"I am recruiting PhD students for 2027" is a sentence a person writes on **their own page**.
+ORCID has no field for it; Publons has no field for it. So:
+
+- **P4 (triage)** is a gate on a stream that contains nothing to gate. Its spike has no
+  positive set and therefore no recall to measure — reported as INCONCLUSIVE, deliberately
+  not as a MISS.
+- **P5 (model extraction)** would be asked to find claims on registry profiles. Its spike
+  would return a number about nothing.
+
+Neither phase can fix this, because neither chooses which page is read.
+
+### Why it is not simply B-003
+
+B-003 was "the ORCID profile is a JavaScript app we cannot read", and the render rung (D-073)
+solved that — the pages here **were** read, 15 of 16 via Chromium. The remaining problem is
+that having read them, there is nothing on them to find. B-003 was about access; this is about
+whether the accessible thing can answer the question.
+
+### The sequencing decision needed
+
+**P2, the directory rung, is the phase that would create this supply** — staff directories
+lead to real faculty pages. The plan orders P4/P5 *before* P2
+([`plan/README.md`](plan/README.md)), which now looks like the wrong order: it builds a token
+gate and an extractor for a page stream that P2 has not yet produced.
+
+1. **Should P2 move ahead of P4/P5?** On the evidence, yes — but P2 is the plan's other
+   `L`/high-risk phase and is itself gated by SPIKE-2.
+2. If P2 also disappoints, the honest conclusion is that the *deterministic* supply of
+   professor pages is thin everywhere, and the browser/human rung is the product's real
+   answer rather than a fallback. That is a product-shape decision, not an implementation one.
+
+---
+
 ## B-006 — The institution enumeration returns almost no universities, and P1 cannot be measured until it does
 
 **Status:** OPEN. Found 2026-07-29 while running SPIKE-1; needs a decision before P1 or a

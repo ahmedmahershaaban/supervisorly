@@ -17,7 +17,57 @@ This is what makes P5 affordable.
 
 ---
 
-## P4-1 · The triage module `[ ]`
+# SPIKE-4 RESULT, 2026-07-29 — **INCONCLUSIVE. Not a miss; not measurable.** P4 is NOT built.
+
+`tools/spikes/spike_triage.py` prototypes the triage rule from the shipped `pipeline.py`
+regexes (as P4-1.2 directs) and labels each page with **the model triage exists to feed** —
+not with the regexes under test, which would have measured them against themselves and
+returned 100%.
+
+**The judge found recruiting language on 0 pages, so recall has no denominator.** Reporting
+that as "0% — MISS" would kill a phase that was never tested; the script now says
+`NOT MEASURED` and exits distinctly.
+
+| cohort | pages read | judged "recruiting" |
+|---|---|---|
+| GB · machine learning (with the render rung) | 16 | **0** |
+| EG · cardiovascular disease | 4 | **0** |
+
+**Why zero — measured, not guessed.** `tools/spikes/spike_page_supply.py` resolves each
+shortlisted professor to the URL `pipeline._page_url_for` would deep-dive and classifies it.
+For **GB · machine learning, 49 shortlisted**:
+
+| | share |
+|---|---|
+| no page at all | **88%** |
+| registry profile (ORCID/Publons — cannot state recruiting) | 12% |
+| **a page the person controls** | **0%** |
+
+A professor's own page is where "I am recruiting PhD students" lives. ORCID has no field for
+it. So the deep-dive's page supply contains **nothing that could carry a recruiting claim**,
+and triage has nothing to triage.
+
+This is not a triage problem and P4 cannot fix it. It is the same supply problem as
+[B-003](../BLOCKERS.md) (ORCID profile pages are the only lead), compounded by
+[B-006](../BLOCKERS.md) (the institutions enumerated are often not universities). **P2 — the
+directory rung — is the phase that would actually create this supply**, by finding staff
+directory pages and, through them, real faculty pages.
+
+**Two method notes worth keeping:**
+- The first version of this spike skipped the render rung and reported 15 of 17 pages as
+  "under 200 chars (JS app?)" — a blocker that was really its own measurement gap, since the
+  deployed worker reaches 10 of 40 targets on the same cohort. **A spike that skips a rung the
+  product has measures a product nobody ships.** It now builds the same `ChromiumRenderer`.
+- The run also surfaced a real defect, now fixed: a rate-limited OpenAlex topic lookup
+  returned `[]` and was indistinguishable from "no such topic", which makes `build_targets`
+  enumerate *unfiltered* with no warning. See `tests/test_topic_resolution_honesty.py`.
+
+**Re-run when P2 has shipped, or on a cohort with real faculty pages.** Until then this gate
+cannot be evaluated and P4 must not be built on an assumption.
+
+---
+
+## P4-1 · The triage module `[!]` blocked — SPIKE-4 inconclusive: no page in the supply can carry a recruiting claim
 
 **Files**: `src/supervisorly/extract/triage.py` *(new)*, `tests/test_triage.py` *(new)*
 

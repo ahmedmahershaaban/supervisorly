@@ -1376,3 +1376,37 @@ identical. Real scan `7a3df6065a07…` (394 professors): `record_flow.js` **44/4
 `check_ledger.js` **7/7**, `logs.py errors` clean. The check that mattered: CC-5 rewrote the
 live transport to stream every response, so *every* production fetch changed — the deep-dive
 ledger row is unchanged at 40 attempted / 10 reached / 30 skipped, so nothing regressed.
+
+## round Z — SPIKE-4 could not be measured, and finding out why fixed a real defect
+
+**SPIKE-4 = INCONCLUSIVE, not a MISS. P4 and P5 are NOT built.** The independent judge (the
+model triage exists to feed, so the labels are not the regexes under test) found recruiting
+language on **0** pages across two cohorts. Recall has no denominator, and reporting "0% —
+MISS" would have killed a phase that was never tested; the spike now exits distinctly on that.
+
+**Why zero, measured rather than guessed** (`tools/spikes/spike_page_supply.py`): of 49
+shortlisted GB machine-learning professors, **0% resolve to a page they control** — 88% to no
+page at all, 12% to an ORCID/Publons profile. "I am recruiting PhD students" is a sentence a
+person writes on their own page; a registry has no field for one. Recorded as **B-007**, with
+the sequencing consequence: **P2 (the directory rung) is what creates this supply, and the
+plan orders P4/P5 before it.**
+
+**A real defect, found by the spike and fixed:** `OpenAlexClient.topic_ids` returned `[]` for
+both "no such topic" and "the lookup failed". An empty topic list makes `build_targets`
+enumerate **unfiltered**, so a rate-limited lookup silently turned "professors in my field"
+into "the most prominent professors at these institutions" — with the coverage line still
+claiming nothing was dropped. Found because OpenAlex's free daily budget ran out mid-session
+(`429 "Insufficient budget… Resets at midnight UTC"`), which is a state this tool will hit
+routinely. A failed lookup now records a `topics@<field>` truncation marker, and a field that
+resolves to nothing produces an explicit warning that the scan was NOT filtered by field.
+This is also the mechanism behind the "cardiology" trap already recorded in `01-spikes.md`.
+
+Two `test_cli_live.py` expectations changed with it: both had pinned the old silence. One
+also caught an em-dash in the new warning — CLI output asserts `printed.isascii()`.
+
+**Ran:** `python -m pytest` → **1019 passed** (`TMPDIR` outside the repo).
+
+**Method note:** the first version of `spike_triage.py` skipped the render rung and reported
+15 of 17 pages as unreadable JS apps — a blocker that was really its own measurement gap,
+since the deployed worker reaches 10 of 40 targets on the same cohort. A spike that skips a
+rung the product has measures a product nobody ships.

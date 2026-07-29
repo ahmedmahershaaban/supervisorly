@@ -273,6 +273,19 @@ def build_targets(plan: dict, ror, oa, *, max_institutions: int | None = None) -
         warnings.append(
             f"filtered to {len(topic_ids)} topic(s); authors with missing topic metadata "
             "are excluded by the API, not by us.")
+    elif plan_fields(plan):
+        # A field was asked for and resolved to NOTHING, so the enumeration below is
+        # unfiltered — it will return the most prominent authors at these institutions rather
+        # than people in the student's field. That has to be said out loud. Silence here is
+        # what made "cardiology" (which OpenAlex has no topic for) score 68% on a spike whose
+        # correctly-filtered cohort scored 28%, and what a rate-limited lookup would do to a
+        # real scan without anyone noticing.
+        # ASCII only: these warnings are printed to a console by the CLI, which asserts
+        # `printed.isascii()` for exactly this reason. An em-dash here failed that test.
+        warnings.append(
+            f"{', '.join(plan_fields(plan))!r} resolved to NO OpenAlex topics, so professors "
+            "were NOT filtered by field - these are the most prominent authors at these "
+            "institutions. Check the spelling, or try a broader term.")
     targets = enumerate_professors(institutions, oa, topic_ids=topic_ids or None)
     truncated = sorted(set(getattr(ror, "truncated_sources", []))
                        | set(getattr(oa, "truncated_sources", [])))

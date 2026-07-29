@@ -156,9 +156,23 @@ class OpenAlexClient:
         return _short_id(results[0].get("id")) if results else None
 
     def topic_ids(self, query: str) -> list[str]:
-        """Resolve a free-text field to OpenAlex topic IDs (for D-058 overlap), else []."""
+        """Resolve a free-text field to OpenAlex topic IDs (for D-058 overlap), else [].
+
+        A lookup FAILURE records a truncation marker; a 200 with no results does not. The two
+        used to be one empty list, and the consequence was not cosmetic: an empty topic list
+        makes ``build_targets`` enumerate **unfiltered**, so a rate-limited lookup silently
+        turned "professors in my field" into "the most prominent professors at these
+        institutions" — a full-looking dashboard of the wrong people, with the coverage line
+        still claiming nothing was dropped.
+
+        Measured 2026-07-29: OpenAlex answers ``429 {"error":"Rate limit exceeded",
+        "message":"Insufficient budget…"}`` once the day's free budget is spent, which is a
+        state this tool will hit routinely. Same distinction ``institution_by_ror`` already
+        makes, for the same reason (D-037).
+        """
         data = self._get_json(topics_url(query, self._email, self._key))
-        if not data:
+        if data is None:
+            self.truncated_sources.append(f"topics@{query}")
             return []
         return [_short_id(t.get("id")) for t in data.get("results", []) if t.get("id")]
 
