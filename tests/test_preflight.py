@@ -18,6 +18,30 @@ def test_missing_contact_email_fails_loud_with_the_exact_fix():
     assert "--demo" in msg                            # points at the credential-free path
 
 
+def test_the_error_says_how_to_set_it_not_only_what_to_set():
+    """A first-time user on Windows ran `setx`, got SUCCESS, and hit this error anyway.
+
+    `setx` writes the stored environment for FUTURE shells and never touches the running one,
+    so the message has to name that — it is the most likely single reason anyone reads this
+    text at all. Naming the variable was never the hard part.
+    """
+    with pytest.raises(preflight.MissingCredentials) as ei:
+        preflight.require_credentials({})
+    msg = str(ei.value)
+    assert "setx" in msg                                  # the trap, named
+    assert "NEW terminals" in msg                         # ...and why it looked like it worked
+    assert f'$env:{preflight.CONTACT_EMAIL_ENV}' in msg   # copy-pasteable, PowerShell
+    assert f"export {preflight.CONTACT_EMAIL_ENV}" in msg # ...and POSIX
+    assert "--email" in msg                               # the no-setup path
+
+
+def test_the_error_stays_ascii_for_an_unknown_console_encoding():
+    """This prints to a Windows console that may be cp437/cp1252 — a smart dash raises there."""
+    with pytest.raises(preflight.MissingCredentials) as ei:
+        preflight.require_credentials({})
+    str(ei.value).encode("ascii")          # raises UnicodeEncodeError if a dash sneaks back in
+
+
 def test_a_garbage_email_is_rejected():
     with pytest.raises(preflight.MissingCredentials):
         preflight.require_credentials({preflight.CONTACT_EMAIL_ENV: "not-an-email"})

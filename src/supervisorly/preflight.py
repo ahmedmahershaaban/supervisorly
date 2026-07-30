@@ -45,12 +45,23 @@ def require_credentials(env: Mapping[str, str]) -> None:
     """
     email = (env.get(CONTACT_EMAIL_ENV) or "").strip()
     if not email:
+        # The old message said WHAT to set and not HOW, which stranded a real first-time user
+        # on Windows: `setx` reported SUCCESS and this error still fired, because setx writes
+        # the stored environment for FUTURE shells and never touches the running one. Naming
+        # that explicitly costs three lines and is the single most likely reason someone sees
+        # this text at all. ASCII only — this goes to a console of unknown encoding.
         raise MissingCredentials(
             f"A live scan needs a contact email so we use the open APIs politely.\n"
             f"  - {CONTACT_EMAIL_ENV}: set this to YOUR email (any address you own). It joins the\n"
             f"    free OpenAlex 'polite pool' (https://openalex.org) and identifies us to servers.\n"
+            f"\nSet it for THIS terminal:\n"
+            f"  PowerShell   $env:{CONTACT_EMAIL_ENV} = \"you@example.com\"\n"
+            f"  macOS/Linux  export {CONTACT_EMAIL_ENV}=\"you@example.com\"\n"
+            f"\nAlready ran `setx`? That only applies to NEW terminals - it does not change the\n"
+            f"one you are in. Either open a new terminal, or run the PowerShell line above.\n"
+            f"\nOr pass it just for this run:  supervisorly scan --email you@example.com ...\n"
             f"\nNo keys are required: ROR's API is open (https://ror.org), and OpenAlex is free.\n"
-            f"(Optional: {OPENALEX_KEY_ENV} for a paid OpenAlex premium key — higher limits.)\n"
+            f"(Optional: {OPENALEX_KEY_ENV} for a paid OpenAlex premium key - higher limits.)\n"
             f"\nOr use `supervisorly scan --demo` for the offline synthetic demo (nothing needed)."
         )
     if not _EMAIL_RE.match(email):

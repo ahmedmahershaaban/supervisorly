@@ -66,14 +66,25 @@ Not optional for a live scan — OpenAlex's polite pool identifies callers by em
 without one is refused at preflight rather than sent anonymously.
 
 ```powershell
-# Windows — this session only, then permanently
-$env:SUPERVISORLY_CONTACT_EMAIL = "you@example.com"
-setx SUPERVISORLY_CONTACT_EMAIL "you@example.com"
+# Windows — you need BOTH lines. See the note below.
+$env:SUPERVISORLY_CONTACT_EMAIL = "you@example.com"   # this terminal, right now
+setx SUPERVISORLY_CONTACT_EMAIL "you@example.com"     # every terminal you open later
 ```
 
 ```bash
-# macOS / Linux — this session, then add the same line to ~/.zshrc or ~/.bashrc
+# macOS / Linux — this shell, then add the same line to ~/.zshrc or ~/.bashrc
 export SUPERVISORLY_CONTACT_EMAIL="you@example.com"
+```
+
+> **Why both, on Windows.** `setx` prints `SUCCESS` and writes the *stored* environment, which
+> only new terminals read. It does not change the terminal you are in — so running `setx` and
+> then immediately scanning still fails the preflight check. Either open a new terminal after
+> `setx`, or set `$env:…` as well.
+
+Or skip the environment entirely and pass it per run:
+
+```bash
+supervisorly scan --email you@example.com --country GB --field "machine learning"
 ```
 
 ---
