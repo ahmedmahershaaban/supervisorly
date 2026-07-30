@@ -9,7 +9,8 @@ Nothing below depends on where you put the project — clone it anywhere.
 
 ## 0. Install
 
-Needs **Python 3.10+** and **git**. The repository is public.
+Needs [**Python 3.10+**](#prerequisites--installing-python-and-git) and [**git**](#prerequisites--installing-python-and-git) — see the appendix if you do not
+have them. The repository is public.
 
 ```bash
 git clone https://github.com/ahmedmahershaaban/supervisorly.git
@@ -333,3 +334,77 @@ pytest -q
 export TMPDIR=/tmp/sv-pytest
 pytest -q                    # 1,164 passed
 ```
+
+---
+
+## Appendix — prerequisites: installing Python and git
+
+Only needed for the CLI. The web app needs none of this.
+
+### Python 3.10+
+
+```powershell
+# Windows
+winget install Python.Python.3.12
+```
+
+```bash
+# macOS  (leave the system python alone; the command is python3)
+brew install python@3.12
+
+# Debian / Ubuntu   — python3-venv is a SEPARATE package and `python3 -m venv`
+#                     fails without it, with an ensurepip error that never says so
+sudo apt update && sudo apt install python3 python3-venv python3-pip
+
+# Fedora / RHEL
+sudo dnf install python3 python3-pip
+```
+
+Or the installers at <https://www.python.org/downloads/>.
+
+> **Windows, the one box people miss.** The python.org installer leaves
+> **"Add python.exe to PATH"** unticked, at the bottom of the first screen. Without it your
+> terminal says `python: command not found` even though the install succeeded. If typing
+> `python` opens the Microsoft Store, that is Windows' placeholder stub — *Settings → Apps →
+> Advanced app settings → App execution aliases*, turn off both Python entries.
+
+### git
+
+```powershell
+# Windows
+winget install Git.Git
+```
+
+```bash
+# macOS — ships git with Apple's command line tools
+xcode-select --install
+
+# Linux
+sudo apt install git        # Debian / Ubuntu
+sudo dnf install git        # Fedora / RHEL
+```
+
+Or <https://git-scm.com/downloads>.
+
+### Check both
+
+```bash
+python --version     # or python3 --version -> 3.10 or higher
+git --version
+```
+
+Two version numbers and you are ready for step 0.
+
+**No git and would rather not install it?** Download the ZIP from the repository's green
+*Code* button and unpack it anywhere. Everything works; you just update by downloading again
+instead of `git pull`.
+
+### What you do *not* need
+
+| Not required | Why people assume otherwise |
+|---|---|
+| Node.js | Only the deploy-verification script uses it, never a scan |
+| Docker | Only for building the hosted worker image |
+| A Google Cloud account | Only to deploy the web app |
+| Chromium / Playwright | Optional — `--render-all` only. A scan without it still finishes |
+| Any API key | A scan needs only a contact email |
