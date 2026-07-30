@@ -45,8 +45,8 @@ rather not activate the venv, `python -m supervisorly …` does exactly the same
 <summary>Optional extras</summary>
 
 ```bash
-pip install -e ".[dev]"              # pytest, for running the suite
-python -m playwright install chromium # only for --render-all
+pip install -e ".[dev]"           # pytest, for running the suite
+pip install -e ".[browser]"       # playwright, for --render-all  (then see below)
 ```
 
 Playwright is deliberately **not** a required dependency — a scan without it falls back to the
@@ -152,10 +152,19 @@ supervisorly scan --country GB --field "machine learning" \
 - `--concurrency 8` — pages rendered in parallel. One host is always read strictly serially
   however high you set this, so you never hammer a single university.
 
-Needs Playwright's Chromium — a one-time ~400 MB download:
+This needs Playwright, which is **two** steps — the Python package, then the browser it
+drives. The second command downloads ~400 MB and presupposes the first:
 
 ```bash
+pip install -e ".[browser]"            # the package
+python -m playwright install chromium  # the browser itself
+```
+
+Skipping the first is the easy mistake, because the second reads like the whole job:
+
+```
 python -m playwright install chromium
+-> No module named playwright
 ```
 
 Without it nothing breaks — every page falls back to the fetched text and the scan finishes.

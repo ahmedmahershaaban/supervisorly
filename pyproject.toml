@@ -29,6 +29,13 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
+# The render rung (D-073). Optional on purpose: `render.py` imports playwright lazily and
+# reports itself unavailable when it is absent, so a scan without this still finishes on the
+# fetched text. It is an EXTRA rather than a plain instruction in the docs because
+# `python -m playwright install chromium` downloads the *browser* and presupposes the
+# *package* — a fresh clone that followed the old wording got "No module named playwright".
+# Floor matches the version the worker image pins (firebase/Dockerfile.worker).
+browser = ["playwright>=1.49"]
 
 [project.scripts]
 supervisorly = "supervisorly.cli:main"
