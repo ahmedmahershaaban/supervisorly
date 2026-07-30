@@ -1620,6 +1620,20 @@ def _human_prompt_for(t: dict, blocked_fields: list[str]) -> str | None:
         return None
 
 
+#: Counters that answer "which rungs actually ran", surfaced on the export's ``run.rungs``.
+#: Every one is about the tool, not about a person — how many pages we rendered, how many
+#: links we followed, how many searches resolved. A student reading a thin dashboard and an
+#: operator debugging a scan need the same answer, and it must survive in the artifact rather
+#: than only in a console that has already scrolled away.
+_RUNG_COUNTERS = (
+    "rendered", "render_batched", "render_fallback", "render_still_walled", "render_batch_size",
+    "crawl_pages", "crawl_claims", "crawl_truncated",
+    "search_resolved", "orcid_resolved",
+    "model_proposals", "model_claims", "model_rejected", "model_unavailable",
+    "extractions", "cache_hits", "resumed_skipped",
+)
+
+
 def _build_result(conn, run_id, status, targets, *, stats, gaps,
                   plan_topic_ids=(), plan_intents=()) -> dict:
     """Assemble the export + dashboard from the persisted claims (no fetching here)."""
@@ -1684,6 +1698,14 @@ def _build_result(conn, run_id, status, targets, *, stats, gaps,
         run_summary={"run_id": run_id, "status": status,
                      "counts": {"enumerated": enumerated}, "coverage": coverage,
                      "ledger": ledger,
+                     # WHICH RUNGS ACTUALLY FIRED. `--progress` prints phases, so a run that
+                     # rendered every page and one that rendered none look identical, and the
+                     # artifact carried no way to tell them apart either — a real scan had to
+                     # be diagnosed by noticing every source host was orcid.org. These are
+                     # counters about OUR OWN machinery, never about a person, so they carry
+                     # no personal data and export freely (D-024 is about judgements).
+                     "rungs": {k: v for k, v in (stats or {}).items()
+                               if k in _RUNG_COUNTERS and v},
                      # MI-4.2: which supervision levels the student said they were open to,
                      # so the dashboard can pre-tick those filter chips. A preference, not a
                      # claim about anyone — it never gates what is recorded or exported.

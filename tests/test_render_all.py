@@ -243,3 +243,32 @@ def test_the_scan_command_exposes_both_flags_and_defaults_to_todays_behaviour():
     assert a.concurrency == pool_mod.DEFAULT_MAX_CONCURRENT
     b = build_parser().parse_args(["scan", "--demo", "--render-all", "--concurrency", "3"])
     assert b.render_all is True and b.concurrency == 3
+
+
+# ── the artifact must say which rungs ran ────────────────────────────────────
+def test_the_export_records_which_rungs_actually_fired(tmp_path):
+    """A real scan had to be diagnosed by noticing every source host was orcid.org.
+
+    `--progress` prints phase names, so a run that rendered every page and one that rendered
+    none are indistinguishable in the console — and the artifact carried no counter either.
+    These are facts about the tool, never about a person, so they export freely.
+    """
+    from supervisorly import pipeline as P
+    for key in ("rendered", "crawl_pages", "search_resolved", "model_claims"):
+        assert key in P._RUNG_COUNTERS, f"{key} must be visible in the artifact"
+
+
+def test_a_rung_that_never_ran_is_absent_rather_than_zero(tmp_path):
+    """Absent means 'did not run'; 0 would read as 'ran and found nothing'. Different facts."""
+    from supervisorly import pipeline as P
+    from supervisorly.model.db import open_db
+    conn = open_db(tmp_path / "t.sqlite")
+    try:
+        res = P._build_result(conn, P.runs.create_run(conn), "finalized", [],
+                              stats={"extractions": 3, "rendered": 0}, gaps=0)
+        rungs = res["export"]["run"]["rungs"]
+        assert rungs.get("extractions") == 3
+        assert "rendered" not in rungs          # zero is not evidence the browser ran
+        assert "crawl_pages" not in rungs       # never touched at all
+    finally:
+        conn.close()

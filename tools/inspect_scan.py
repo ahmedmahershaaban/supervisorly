@@ -32,14 +32,14 @@ def main(argv: list[str]) -> int:
     run = data.get("run", {}) or {}
     print(BAR)
     print(f"{path.name}  ·  {len(profs)} professors  ·  generated {data.get('generated_at','?')}")
-    if run:
-        keep = {k: v for k, v in run.items()
-                if k in ("status", "gaps", "shortlisted", "unchecked", "discovered",
-                         "institutions", "rendered", "render_fallback", "render_batched",
-                         "crawl_pages", "crawl_claims", "search_resolved", "orcid_resolved",
-                         "model_claims", "model_rejected", "extractions", "cache_hits")}
-        for k, v in keep.items():
-            print(f"  {k:<18} {v}")
+    print(f"  status             {run.get('status', '?')}")
+    rungs = run.get("rungs") or {}
+    if rungs:
+        print("  rungs that fired:")
+        for k, v in sorted(rungs.items()):
+            print(f"    {k:<20} {v}")
+    else:
+        print("  rungs             (not recorded — scan predates the run.rungs field)")
     print(BAR)
 
     # ---- per-field state counts -------------------------------------------------
