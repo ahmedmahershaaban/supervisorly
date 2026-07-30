@@ -3,31 +3,84 @@
 Everything here runs **on your machine**. This is the same engine the web app runs; the CLI is
 just the other surface over it.
 
+Nothing below depends on where you put the project — clone it anywhere.
+
 ---
 
-## 0. One-time setup
+## 0. Install
 
-```powershell
-cd D:\AndroidStudioProjects\how_to_get_proffessor
-.venv\Scripts\activate                 # or prefix every command with .venv\Scripts\python.exe
-python -m supervisorly version          # sanity check
+Needs **Python 3.10+** and **git**. The repository is public.
+
+```bash
+git clone https://github.com/ahmedmahershaaban/supervisorly.git
+cd supervisorly
 ```
 
-**Set your contact email.** Not optional for a live scan — OpenAlex's polite pool identifies
-callers by email, and a scan without one is refused at preflight rather than sent anonymously.
+Then a virtual environment, so the dependencies stay out of your system Python:
 
 ```powershell
-$env:SUPERVISORLY_CONTACT_EMAIL = "you@example.com"        # this session only
-# permanent:
+# Windows — PowerShell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+```
+
+```bash
+# macOS / Linux
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+Install the package itself. `-e` means editable: `git pull` picks up new code with no reinstall.
+
+```bash
+pip install -e .
+supervisorly version          # -> Supervisorly 0.1.0
+```
+
+That registers a `supervisorly` command on your PATH. Every example below uses it. If you would
+rather not activate the venv, `python -m supervisorly …` does exactly the same thing.
+
+<details>
+<summary>Optional extras</summary>
+
+```bash
+pip install -e ".[dev]"              # pytest, for running the suite
+python -m playwright install chromium # only for --render-all
+```
+
+Playwright is deliberately **not** a required dependency — a scan without it falls back to the
+fetched text and still finishes.
+</details>
+
+### Staying current
+
+```bash
+git pull                # you are on main, which is where the CLI work lands
+pip install -e .        # only needed if dependencies changed
+```
+
+### Set your contact email
+
+Not optional for a live scan — OpenAlex's polite pool identifies callers by email, and a scan
+without one is refused at preflight rather than sent anonymously.
+
+```powershell
+# Windows — this session only, then permanently
+$env:SUPERVISORLY_CONTACT_EMAIL = "you@example.com"
 setx SUPERVISORLY_CONTACT_EMAIL "you@example.com"
+```
+
+```bash
+# macOS / Linux — this session, then add the same line to ~/.zshrc or ~/.bashrc
+export SUPERVISORLY_CONTACT_EMAIL="you@example.com"
 ```
 
 ---
 
 ## 1. Prove it works with no keys and no network
 
-```powershell
-python -m supervisorly scan --demo
+```bash
+supervisorly scan --demo
 ```
 
 Five synthetic professors on RFC-2606 `.example` hosts. Touches no real institution, needs no
@@ -37,12 +90,12 @@ credentials. If this opens a dashboard, the install is good.
 
 ## 2. Your first real scan
 
-```powershell
-python -m supervisorly scan `
-  --country GB `
-  --field "machine learning" `
-  --intent phd `
-  --shortlist 25 `
+```bash
+supervisorly scan \
+  --country GB \
+  --field "machine learning" \
+  --intent phd \
+  --shortlist 25 \
   --progress
 ```
 
@@ -72,8 +125,8 @@ output/
 commit real academics' names and emails. **That guard is the only constraint** — within it,
 name things however you like:
 
-```powershell
-python -m supervisorly scan --country GB --field "machine learning" `
+```bash
+supervisorly scan --country GB --field "machine learning" \
   --out output/gb-ml.html          # -> output/gb-ml.json, output/.cache/snaps/
 ```
 
@@ -88,8 +141,8 @@ and 0% had a page they control. Steps 3 and 4 are what fix that.
 
 ## 3. Read pages properly — the local browser
 
-```powershell
-python -m supervisorly scan --country GB --field "machine learning" `
+```bash
+supervisorly scan --country GB --field "machine learning" \
   --render-all --concurrency 8 --progress
 ```
 
@@ -98,9 +151,9 @@ python -m supervisorly scan --country GB --field "machine learning" `
 - `--concurrency 8` — pages rendered in parallel. One host is always read strictly serially
   however high you set this, so you never hammer a single university.
 
-Needs Playwright's Chromium. It is installed here already; if you ever wipe it:
+Needs Playwright's Chromium — a one-time ~400 MB download:
 
-```powershell
+```bash
 python -m playwright install chromium
 ```
 
@@ -117,8 +170,15 @@ Two optional keys. Both fail closed: without them the scan runs exactly as in st
 This is the fix for the 88%. One generated query per shortlisted professor.
 
 ```powershell
+# Windows
 $env:SUPERVISORLY_SEARCH_KEY = "<brave-or-tavily-key>"
 $env:SUPERVISORLY_SEARCH_PROVIDER = "brave"      # or "tavily"
+```
+
+```bash
+# macOS / Linux
+export SUPERVISORLY_SEARCH_KEY="<brave-or-tavily-key>"
+export SUPERVISORLY_SEARCH_PROVIDER=brave        # or tavily
 ```
 
 | Provider | Free tier | Sign-up |
@@ -132,19 +192,27 @@ The regexes only match shapes someone anticipated. *"I will be reviewing applica
 2027 intake"* means recruiting and matches no cue word.
 
 ```powershell
+# Windows
 $env:SUPERVISORLY_EXTRACT_KEY = "<any-openai-compatible-key>"
 # optional, for a non-default provider:
 $env:SUPERVISORLY_EXTRACT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
 $env:SUPERVISORLY_EXTRACT_MODEL    = "gemini-2.0-flash"
 ```
 
+```bash
+# macOS / Linux
+export SUPERVISORLY_EXTRACT_KEY="<any-openai-compatible-key>"
+```
+
+Keys live in your shell, never in the repo. `.env` is gitignored if you prefer a file.
+
 The model may only propose `(field, value, quote)`. Any quote not found verbatim in the stored
 snapshot is dropped in code, twice. It cannot invent a professor or a deadline.
 
 ### 4c. Follow the link the recruiting sentence lives behind
 
-```powershell
-python -m supervisorly scan --country GB --field "machine learning" `
+```bash
+supervisorly scan --country GB --field "machine learning" \
   --render-all --crawl --progress
 ```
 
@@ -154,10 +222,10 @@ every field has an answer.
 
 ### The full stack
 
-```powershell
-python -m supervisorly scan `
-  --country GB --field "machine learning" --intent phd `
-  --render-all --concurrency 8 --crawl `
+```bash
+supervisorly scan \
+  --country GB --field "machine learning" --intent phd \
+  --render-all --concurrency 8 --crawl \
   --shortlist 25 --progress
 ```
 
@@ -165,8 +233,8 @@ python -m supervisorly scan `
 
 ## 5. Cheap re-scans
 
-```powershell
-python -m supervisorly scan --country GB --field "machine learning" --resume
+```bash
+supervisorly scan --country GB --field "machine learning" --resume
 ```
 
 Skips targets already deep-dived in the store next to `--out`. Use it after a cancelled run or
@@ -180,15 +248,15 @@ Professors whose page is behind a login or bot-wall are **not** scraped. The das
 each one a search link and a copy-ready prompt. You open the page yourself, then hand the text
 back:
 
-```powershell
-python -m supervisorly ingest-page `
-  --url "https://the-final-url-after-redirects" `
-  --file C:\Temp\page.txt `
-  --db output/supervisorly.sqlite `
-  --entity person:<id-from-the-dashboard> `
+```bash
+supervisorly ingest-page \
+  --url "https://the-final-url-after-redirects" \
+  --file ./page.txt \
+  --db output/supervisorly.sqlite \
+  --entity person:<id-from-the-dashboard> \
   --run <run-id>
 
-python -m supervisorly reexport
+supervisorly reexport
 ```
 
 `reexport` rebuilds the dashboard from the store with no fetching at all.
@@ -197,17 +265,17 @@ python -m supervisorly reexport
 
 ## 7. The other subcommands
 
-```powershell
-python -m supervisorly map-field --field "causal inference"
-python -m supervisorly studio    --map output/subject_map.json
+```bash
+supervisorly map-field --field "causal inference"
+supervisorly studio    --map output/subject_map.json
 ```
 
 `map-field` turns free text into a hierarchical OpenAlex subject map; `studio` renders it as a
 self-contained plan wizard that emits a plan JSON you can feed back with `--plan`.
 
-```powershell
-python -m supervisorly init-db --db output/supervisorly.sqlite   # create/migrate a store
-python -m supervisorly pace --host x.com                             # exit 0 allow, 3 deny
+```bash
+supervisorly init-db --db output/supervisorly.sqlite   # create/migrate a store
+supervisorly pace --host x.com                             # exit 0 allow, 3 deny
 ```
 
 ---
@@ -216,8 +284,8 @@ python -m supervisorly pace --host x.com                             # exit 0 al
 
 Off by default. It prints a banner before the first request and names whose IP pays.
 
-```powershell
-python -m supervisorly scan ... --ignore-robots
+```bash
+supervisorly scan ... --ignore-robots
 ```
 
 robots.txt is still read and the **real verdict is stored per source**, so an export never
@@ -255,6 +323,13 @@ A path anywhere else in the tree is **not** covered, and scan results are person
 on pytest's `tmp_path`:
 
 ```powershell
-$env:TMPDIR = "C:\Temp\sv-pytest"
-python -m pytest -q          # 1164 passed
+# Windows
+$env:TMPDIR = "$env:LOCALAPPDATA\Temp\sv-pytest"
+pytest -q
+```
+
+```bash
+# macOS / Linux
+export TMPDIR=/tmp/sv-pytest
+pytest -q                    # 1,164 passed
 ```
