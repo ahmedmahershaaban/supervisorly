@@ -38,6 +38,7 @@ from .extract import chrome_prompt
 from .extract import llm_claims
 from .extract import llm_client
 from .export import dashboard as dash
+from .export import delta as delta_mod
 from .export import json_export as jx
 from .fetch import browser_rung
 from .fetch import pool as pool_mod
@@ -48,8 +49,9 @@ from .fetch.normalize import content_hash, main_text
 from .fetch.ratelimit import HostRateLimiter
 from .fetch.snapshot import SnapshotStore
 from .fetch.transport import Transport
-from .model import claims, extraction_cache as xcache, runs
+from .model import claims, conflicts as conflicts_mod, extraction_cache as xcache, runs
 from .model.db import open_db, utcnow
+from .score import ranking as ranking_mod
 from .score import scorer
 
 # ExtractionCache key parts for the deterministic signal tier (cost §3b-i). The "prompt"
@@ -1127,7 +1129,8 @@ def _deep_dive_one(conn, run_id, t, fetcher, snaps, *, stats, resume,
 
 
 def run_offline(plan: dict, targets: list[dict], transport: Transport, snap_root,
-                *, db_path=None, optout_path=None, resume=False) -> dict:
+                *, db_path=None, optout_path=None, resume=False,
+                previous_export: dict | None = None) -> dict:
     """Run a deterministic scan over ``targets`` (each {id, name, url}) using cassettes.
 
     Returns {run_id, export, html}. The run always finalises with a dashboard — it never
@@ -1168,7 +1171,8 @@ def run_offline(plan: dict, targets: list[dict], transport: Transport, snap_root
     status = "finalized_with_open_gaps" if gaps else "finalized"
     runs.set_run_status(conn, run_id, status)
     return _build_result(conn, run_id, status, targets, stats=stats, gaps=gaps,
-                         plan_intents=_ladder.plan_intents(plan))
+                         plan_intents=_ladder.plan_intents(plan),
+                         previous_export=previous_export)
 
 
 def run_live(plan: dict, transport: Transport, snap_root, *, email: str,
@@ -1182,7 +1186,8 @@ def run_live(plan: dict, transport: Transport, snap_root, *, email: str,
              phase_flags: "phases_mod.PhaseFlags | None" = None,
              render_all: bool = False,
              concurrency: int = pool_mod.DEFAULT_MAX_CONCURRENT,
-             obey_robots: bool = True, crawl: bool = False) -> dict:
+             obey_robots: bool = True, crawl: bool = False,
+             previous_export: dict | None = None) -> dict:
     """A **live** scan: preflight → discovery ladder (ROR + OpenAlex) → the *same* fetch → extract
     → claim → score → export → dashboard pipeline as ``run_offline`` (D-028), now from **discovered**
     targets rather than hand-fed ones.
@@ -1450,7 +1455,8 @@ def run_live(plan: dict, transport: Transport, snap_root, *, email: str,
     # model: untouched targets are never_attempted, never silently "checked").
     result = _build_result(conn, run_id, status, targets, stats=stats, gaps=gaps,
                            plan_topic_ids=plan.get("resolved_topic_ids") or (),
-                           plan_intents=_ladder.plan_intents(plan))
+                           plan_intents=_ladder.plan_intents(plan),
+                           previous_export=previous_export)
     _emit_progress(progress, ("exported",))
     return result
 
@@ -1635,6 +1641,27 @@ _RUNG_COUNTERS = (
 )
 
 
+def _scorer_input(t: dict, claims_for_target) -> dict:
+    """The scorer's inputs for one professor, from registry facts + recorded claims.
+
+    Built once and used twice — the per-professor rating and the university roll-up — so a
+    university can never be ranked on a different reading of the same person than the row
+    directly above it.
+    """
+    return {
+        "id": t.get("id") or "?",
+        "topic_ids": list(t.get("topic_ids") or []),
+        "works_count": int(t.get("works_count") or 0),
+        "recruiting": 1.0 if any(c.get("field") == "recruiting_signal"
+                                 and c.get("state") == "value"
+                                 for c in claims_for_target) else 0.0,
+        "funding": 1.0 if any(c.get("field") == "industry_signal"
+                              and c.get("state") == "value"
+                              for c in claims_for_target) else 0.0,
+        "evidence_count": sum(1 for c in claims_for_target if c.get("state") == "value"),
+    }
+
+
 def _match_rating(t: dict, plan_topic_ids, claims_for_target) -> dict:
     """A 0–100 match rating for one professor, with its components shown.
 
@@ -1654,16 +1681,8 @@ def _match_rating(t: dict, plan_topic_ids, claims_for_target) -> dict:
       — and this is not one: it says how well their published topics overlap the ones the
       student ticked, and shows the components so the number can be argued with.
     """
-    recruiting = 1.0 if any(c.get("field") == "recruiting_signal" and c.get("state") == "value"
-                            for c in claims_for_target) else 0.0
-    funding = 1.0 if any(c.get("field") == "industry_signal" and c.get("state") == "value"
-                         for c in claims_for_target) else 0.0
-    fit = scorer.score_professor(
-        {"topic_ids": list(t.get("topic_ids") or []),
-         "works_count": int(t.get("works_count") or 0),
-         "recruiting": recruiting, "funding": funding,
-         "evidence_count": sum(1 for c in claims_for_target if c.get("state") == "value")},
-        {"resolved_topic_ids": list(plan_topic_ids or [])})
+    fit = scorer.score_professor(_scorer_input(t, claims_for_target),
+                                 {"resolved_topic_ids": list(plan_topic_ids or [])})
     return {
         "percent": round(fit.score_total * 100),
         "tier": fit.tier,
@@ -1672,8 +1691,32 @@ def _match_rating(t: dict, plan_topic_ids, claims_for_target) -> dict:
     }
 
 
+def _universities(professors, by_target, claims_by_entity, plan_topic_ids) -> list[dict]:
+    """Roll the rated professors up to their institutions, best university first.
+
+    ``score/ranking.py`` was the third module in this repo built, tested and called by nothing.
+    It answers a question the per-professor list cannot: *which university should I apply to* —
+    a student applies to a department, not to a row. It rolls up from the independent axes
+    (fit / recruiting / activity), so a university with one strong supervisor does not outrank
+    one with five, and it carries an honest ``confidence`` that falls when the evidence is thin
+    rather than a score that pretends it isn't.
+
+    A professor with no institution name is not dropped; ROR/OpenAlex simply had no affiliation
+    for them, and ``rank_universities`` groups them under "Unknown" — a visible bucket, which is
+    the honest-emptiness rule applied to the roll-up (D-022).
+    """
+    rows = []
+    for p in professors:
+        t = by_target[p["id"]]
+        names = [n for n in (t.get("institution_names") or []) if n]
+        rows.append(dict(_scorer_input(t, claims_by_entity.get(p["id"], [])),
+                         institution=names[0] if names else "Unknown"))
+    return ranking_mod.rank_universities(
+        rows, {"resolved_topic_ids": list(plan_topic_ids or ())})
+
+
 def _build_result(conn, run_id, status, targets, *, stats, gaps,
-                  plan_topic_ids=(), plan_intents=()) -> dict:
+                  plan_topic_ids=(), plan_intents=(), previous_export=None) -> dict:
     """Assemble the export + dashboard from the persisted claims (no fetching here)."""
     professors = []
     for t in targets:
@@ -1704,6 +1747,20 @@ def _build_result(conn, run_id, status, targets, *, stats, gaps,
         if prompt:
             p["profile"]["blocked_fields"] = blocked
             p["profile"]["human_prompt"] = prompt
+    # CONTESTED FIELDS. `conflicts.detect_for_claim` has been writing rows for every source
+    # disagreement, and nothing ever read them back — so a field two sources disagreed about
+    # displayed exactly like a field they agreed on. The module's own docstring draws the line:
+    # "a contested field is allowed, a hidden one is not". This is the half that stops hiding it.
+    # Only `open` conflicts surface: a conflict the policy resolved by provenance has an answer,
+    # an unresolved one needs the reader to know there are two.
+    contested: dict[str, list[str]] = {}
+    for row in conflicts_mod.open_conflicts(conn, "person"):
+        fields_seen = contested.setdefault(row["entity_id"], [])
+        if row["field"] not in fields_seen:
+            fields_seen.append(row["field"])
+    for p in professors:
+        if p["id"] in contested:
+            p["profile"]["contested_fields"] = sorted(contested[p["id"]])
     enumerated = len(targets)
     # Honest coverage line so the empty-state can tell "sources returned nothing" apart
     # from "found people, none matched" (edge-case matrix / D-046). The deterministic
@@ -1732,6 +1789,11 @@ def _build_result(conn, run_id, status, targets, *, stats, gaps,
         # never claim completeness while a source hit its page cap (D-037)
         coverage += (f" Coverage is PARTIAL — {len(truncated)} source(s) had more results than "
                      f"were enumerated ({', '.join(truncated)}).")
+    if contested:
+        n = sum(len(v) for v in contested.values())
+        coverage += (f" {n} field(s) across {len(contested)} professor(s) are CONTESTED - two "
+                     f"sources disagreed and neither provenance nor recency could order them; "
+                     f"the newer value leads and both claims are kept (D-010).")
     for w in (stats or {}).get("warnings", []):
         # sparse-coverage preflight + discovery-scope warnings (D-060) reach the dashboard too
         coverage += f" Warning: {w}"
@@ -1755,11 +1817,22 @@ def _build_result(conn, run_id, status, targets, *, stats, gaps,
                      # MI-4.2: which supervision levels the student said they were open to,
                      # so the dashboard can pre-tick those filter chips. A preference, not a
                      # claim about anyone — it never gates what is recorded or exported.
-                     "intents": list(plan_intents or ())},
+                     "intents": list(plan_intents or ()),
+                     # The institution roll-up (D-031). Arithmetic on our own inputs, like
+                     # `match` — never a claim about a university, and it carries the member
+                     # ids so any row can be traced back to the people it came from.
+                     "universities": _universities(professors, by_target, claims_by_entity,
+                                                   plan_topic_ids)},
         field_descriptors=FIELD_DESCRIPTORS,
         professors=professors,
         claims_by_entity=claims_by_entity,
         generated_at=utcnow(),
     )
+    if previous_export is not None:
+        # WHAT CHANGED since the run the caller pointed at. `export/delta.py` was written for
+        # exactly this and wired to nothing, so a re-scan asked the student to re-read 200 rows
+        # to find the one deadline that moved. Computed AFTER build_export so it diffs the
+        # artifact that actually ships, redactions and all — not an intermediate.
+        export["run"]["delta"] = delta_mod.compute_delta(previous_export, export)
     return {"run_id": run_id, "export": export, "html": dash.build_dashboard(export),
             "stats": stats}

@@ -422,8 +422,12 @@ def _run_studio_js(tmp_path, html, scenario):
     (tmp_path / "page.html").write_text(html, encoding="utf-8")
     (tmp_path / "scenario.json").write_text(json.dumps(scenario), encoding="utf-8")
     (tmp_path / "harness.js").write_text(_NODE_HARNESS, encoding="utf-8")
+    # UTF-8, not the ANSI code page — the harness echoes page HTML back and cp1252 cannot
+    # decode a typographic quote, which kills the reader thread and nulls stdout (see the
+    # same note in test_multi_intent.py).
     r = subprocess.run([node, "harness.js", "page.html", "scenario.json"],
-                       cwd=tmp_path, capture_output=True, text=True)
+                       cwd=tmp_path, capture_output=True,
+                       encoding="utf-8", errors="replace")
     assert r.returncode == 0, r.stderr
     return json.loads(r.stdout.strip().splitlines()[-1])
 

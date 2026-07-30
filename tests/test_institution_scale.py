@@ -72,7 +72,9 @@ def test_only_education_typed_organisations_are_scanned():
     assert [i["name"] for i in kept] == ["Uni", "College"]
 
 
-def test_the_filter_says_how_many_it_dropped():
+def test_the_filter_says_how_many_it_dropped_and_names_the_pool_it_left():
+    """The census is the point: a student who can't see that 54 hospitals exist can't decide
+    whether to scan them."""
     warnings = []
     ladder.select_institutions(
         {"country": "CA"},
@@ -80,7 +82,8 @@ def test_the_filter_says_how_many_it_dropped():
             {"name": "Uni", "types": ["education"]},
             {"name": "Hospital", "types": ["healthcare"]}]})(),
         warnings=warnings)
-    assert any("kept 1 education-typed institution(s) of 2" in w for w in warnings)
+    assert any("kept 1 of 2 ROR institutions for CA" in w for w in warnings)
+    assert any("Not scanned: healthcare 1" in w for w in warnings)
 
 
 def test_a_country_with_no_typed_records_fails_open_rather_than_reporting_none():

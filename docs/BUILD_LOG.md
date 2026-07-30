@@ -1753,3 +1753,63 @@ always-block behaviour fails two tests, so the guard is real.
 `test_no_seed_urls.py` correctly flagged the two search endpoints; they are allowlisted as
 infrastructure alongside the LLM endpoints, with the reasoning written down — they are asked
 "where is THIS person's page", from a name discovery already found, and narrow nothing.
+
+## Round AK — the wiring audit
+
+**Why.** Three rounds in a row ended with "this module was built, tested and called by
+nothing" (`llm_claims`, `BatchRenderer`, `scorer`). A green suite proves a module is correct;
+it never proves anything calls it. So this round looked for the shape systematically instead
+of stumbling on it: an AST walk over all 62 src modules and 361 public symbols, asking which
+ones no *other* module ever names, cross-referenced against the 72 test files. Findings and
+method in `docs/WIRING_AUDIT.md`.
+
+**Six real ones.** Four wired here, two deferred with reasons.
+
+**The one that mattered.** `extract/chrome_prompt.py` generates the prompt the dashboard hands
+the student for a blocked field, and embeds its output contract by calling `md_grammar.emit()`.
+So the student is asked, by name, for `## field:` Markdown — and no command parsed it back.
+`ingest-page` takes raw page *text* through the deterministic extractors, a different rung.
+`ingest.ingest_md` was written for exactly this, tested in `test_resume.py`, and called by
+nothing. The emitting half shipped and the receiving half did not; because the seam is a
+generated prompt, nothing failed and no test went red. A blocked field that offers a prompt
+and accepts no answer is the dead end D-070 forbids. Now `supervisorly ingest-md`.
+
+**Also wired.** `score/ranking.rank_universities` → `run.universities`, so a scan answers
+"which university", not only "which person" — rolled up from the independent axes and sharing
+one `_scorer_input` with the per-professor rating, so a university can never be scored on a
+different reading of the same person than the row above it. `export/delta.compute_delta` →
+`scan --compare-to <prev.json>`, so a re-scan says what moved instead of asking for a re-read
+of 200 rows. `model/conflicts.open_conflicts` → `profile.contested_fields` plus a `CONTESTED`
+coverage line: detection had been writing rows since it shipped and nothing read them, so a
+field two sources disagreed about displayed exactly like one they agreed on.
+
+**Deferred, with the reason.** `discover/archive.py` (Wayback cycle projection) is the
+highest-value item left — `deadline` is the most common `NOT_FOUND` — but it needs a new
+external endpoint allowlisted and, more importantly, a recorded decision that a projection is
+**not a claim**: no snapshot of a future deadline exists for a quote to be verified against,
+so it belongs beside `match`, never in `fields`. `score/programs.group_by_program` is blocked
+upstream: nothing sets a `program` on a professor, so wiring it today emits N singleton groups
+announcing "One application" — noise dressed as insight.
+
+**Institution pools are now selectable.** `--all-institution-types` was a boolean, which
+framed the question as "universities, or everything". That is the wrong axis: a Max Planck
+institute is ROR-typed `facility`, a teaching hospital `healthcare`, and in several countries
+most doctoral supervision sits there. `--institution-types education,facility,healthcare`
+takes any subset of ROR's own published vocabulary (an enum from the registry, not a
+dictionary of ours — D-038), and the warning is now a **census**: it names the pools it did
+not scan, with counts, because a student who cannot see that 54 hospitals exist cannot decide
+whether to scan them. The old flag still works as a synonym for `all`.
+
+**28 new tests** in `tests/test_wiring_round.py`. Each pins a *connection*, not a module: it
+goes red if the call is deleted even though the code underneath stays correct and tested —
+which is precisely the failure this audit existed to catch. Suite green.
+
+**A Windows bug the audit shook loose.** Four `test_multi_intent.py` tests failed with
+`'NoneType' object has no attribute 'strip'` — but only in a plain shell, never in a UTF-8-mode
+one, which is why they had looked green. `subprocess.run(..., text=True)` decodes the child's
+output with the **ANSI code page**; on a stock Windows install that is cp1252, the node harness
+echoes dashboard HTML back with typographic quotes in it, and cp1252 has no 0x9D. The reader
+thread dies, `r.stdout` comes back `None`, and four tests fail for a reason with nothing to do
+with what they test. Anyone cloning the repo and running `python -m pytest` in PowerShell saw
+red. Fixed by decoding explicitly as UTF-8 in both node harnesses (`test_multi_intent.py`,
+`test_studio.py`) — the same family as the ASCII-only console rule the CLI already follows.

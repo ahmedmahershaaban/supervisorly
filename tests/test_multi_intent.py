@@ -270,8 +270,14 @@ def _filter(tmp_path, export, *, toggle=(), query=None):
     if query is not None:
         scen["query"] = query
     (tmp_path / "scen.json").write_text(json.dumps(scen), encoding="utf-8")
+    # `text=True` alone decodes the child's output with the ANSI code page, which on a stock
+    # Windows shell is cp1252 — and the harness echoes dashboard HTML back, typographic quotes
+    # and all. cp1252 has no 0x9D, so the reader thread dies, `r.stdout` comes back None, and
+    # four tests fail with `'NoneType' has no attribute 'strip'` for a reason that has nothing
+    # to do with what they test. node writes UTF-8; say so.
     r = subprocess.run([node, "harness.js", "page.html", "scen.json"],
-                       cwd=tmp_path, capture_output=True, text=True, timeout=60)
+                       cwd=tmp_path, capture_output=True, timeout=60,
+                       encoding="utf-8", errors="replace")
     assert r.returncode == 0, r.stderr
     return json.loads(r.stdout.strip().splitlines()[-1])
 

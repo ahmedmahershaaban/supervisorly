@@ -35,15 +35,45 @@ PAGE_SIZE = 20
 #: shortlist. 200 is a starting point the caller can raise.
 DEFAULT_WANT = 200
 
-#: ROR's own organisation types. Only ``education`` is a university or college; the rest are
-#: hospitals, companies, government labs, archives. This is ROR's vocabulary, not ours — an
-#: enum published by the registry, never a list of institutions (D-038).
+#: ROR's own organisation-type vocabulary. This is an **enum published by the registry**, not
+#: a dictionary of ours (D-038): it spells the CLI's choices and lets a bad ``--institution-types``
+#: fail loudly. Filtering matches on the *record's* own value, so a type ROR adds tomorrow still
+#: works — this list only stops being able to name it in ``--help``.
+KNOWN_TYPES = (
+    "education",    # universities, colleges, schools — the default pool
+    "facility",     # research institutes and national labs (Max Planck, CNRS, INRIA, RIKEN)
+    "healthcare",   # teaching hospitals — where most clinical supervision actually sits
+    "government",   # government research agencies (NRC, NIH, CSIRO)
+    "nonprofit",    # independent research institutes (Sanger, Broad)
+    "company",      # industrial research labs — industrial PhDs are rare but real
+    "archive",
+    "funder",
+    "other",
+)
+
+#: Only ``education`` is a university or college, so it is what a supervisor search means by
+#: "institution" when nobody says otherwise. Kept as a name because callers and tests read it.
 EDUCATION_TYPES = ("education",)
+
+#: What ``select_institutions`` filters to when the plan does not choose.
+DEFAULT_TYPES = EDUCATION_TYPES
+
+
+def types_of(inst: dict) -> set[str]:
+    """The organisation types ROR records for ``inst``, lowercased (empty set if untyped)."""
+    return {str(t).strip().lower() for t in (inst.get("types") or []) if str(t).strip()}
+
+
+def has_type(inst: dict, types) -> bool:
+    """Whether ``inst`` carries any of ``types``. An organisation may carry several — a
+    university hospital is typed both ``education`` and ``healthcare`` — so this is an
+    intersection, not an equality: asking for either pool finds it."""
+    return bool(types_of(inst) & {str(t).strip().lower() for t in types})
 
 
 def is_education(inst: dict) -> bool:
     """Whether ROR types this organisation as education (a university, college, school)."""
-    return any(str(t).strip().lower() in EDUCATION_TYPES for t in (inst.get("types") or []))
+    return has_type(inst, EDUCATION_TYPES)
 
 
 def country_url(country_code: str, page: int = 1) -> str:

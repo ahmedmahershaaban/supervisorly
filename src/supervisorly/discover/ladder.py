@@ -109,6 +109,44 @@ def _matches(inst: dict, w: str) -> bool:
     return bool(rid_seg) and rid_seg == w
 
 
+def requested_types(plan: dict) -> set[str] | None:
+    """Which ROR organisation types this plan wants to scan; ``None`` means every type.
+
+    Three ways to say it, and they compose: ``institution_types`` (a list of ROR types, or the
+    string ``"all"``), the older boolean ``all_institution_types``, or silence — which means
+    ``education`` only, because that is what "university" means and it is the only pool that
+    always supplies supervisors.
+    """
+    raw = plan.get("institution_types")
+    if raw is None:
+        return None if plan.get("all_institution_types") else set(_ror.DEFAULT_TYPES)
+    if isinstance(raw, str):
+        raw = [raw]
+    wanted = {str(t).strip().lower() for t in raw if str(t).strip()}
+    if not wanted or "all" in wanted:
+        return None
+    return wanted
+
+
+def _census(insts: list[dict]) -> dict[str, int]:
+    """How many institutions carry each ROR type (an untyped record counts as ``untyped``).
+
+    An organisation can carry several types, so the counts intentionally sum to more than
+    ``len(insts)`` — a university hospital belongs to both pools and is reported in both.
+    """
+    counts: dict[str, int] = {}
+    for i in insts:
+        for t in (_ror.types_of(i) or {"untyped"}):
+            counts[t] = counts.get(t, 0) + 1
+    return counts
+
+
+def _census_line(counts: dict[str, int], only: set[str] | None = None) -> str:
+    items = [(t, n) for t, n in counts.items() if only is None or t in only]
+    items.sort(key=lambda kv: (-kv[1], kv[0]))
+    return ", ".join(f"{t} {n}" for t, n in items)
+
+
 def select_institutions(plan: dict, ror, *, warnings=None, want: int | None = None) -> list[dict]:
     """Institutions for the plan's country, honouring ``university_mode`` (all/prioritise/only, D-045).
 
@@ -124,28 +162,42 @@ def select_institutions(plan: dict, ror, *, warnings=None, want: int | None = No
     # silently receiving ROR's first 100 rows is the bug this replaced.
     want = want if want is not None else plan.get("max_institutions")
     insts = ror.institutions_in_country(country, want=want) if country else []
-    # ROR lists every kind of research organisation for a country — hospitals, companies,
-    # government labs, museums. Only `education` is a university or college, and a scan looking
-    # for a PhD supervisor has no business enumerating a hospital's authors. This filter did
-    # not exist: `ror.py` documented the caller as doing it and no caller did, so every scan so
-    # far spent its institution budget on organisations that could never supply a supervisor.
+    # ROR lists every kind of research organisation for a country. `education` is the default
+    # pool because it is the only one that is always a university — but it is NOT the only place
+    # supervision happens: a Max Planck institute is `facility`, a teaching hospital is
+    # `healthcare`, and in some countries most doctoral supervision sits there. So the pool is
+    # SELECTABLE rather than a boolean on/off, and the warning below is a census of what the
+    # country actually offers, so the student can see the pools they are not scanning.
     #
-    # Fail-OPEN, and say so. If a country's records carry no usable types, keeping nothing
-    # would report "this country has no universities", which is a far worse lie than scanning
-    # a few hospitals. The count is disclosed either way (D-037).
-    if not plan.get("all_institution_types"):
-        edu = [i for i in insts if _ror.is_education(i)]
-        if edu:
-            if warnings is not None and len(edu) < len(insts):
+    # Fail-OPEN, and say so. If a country's records carry none of the requested types, keeping
+    # nothing would report "this country has no universities", which is a far worse lie than
+    # scanning a few hospitals. The count is disclosed either way (D-037).
+    wanted_types = requested_types(plan)
+    if wanted_types is not None and insts:
+        counts = _census(insts)
+        kept = [i for i in insts if _ror.has_type(i, wanted_types)]
+        if kept:
+            if warnings is not None and len(kept) < len(insts):
+                left_out = {t for t in counts if t not in wanted_types}
                 warnings.append(
-                    f"kept {len(edu)} education-typed institution(s) of {len(insts)} ROR "
-                    f"returned for {country}; the rest are hospitals, companies or labs "
-                    f"(pass all_institution_types to keep them)")
-            insts = edu
-        elif warnings is not None and insts:
+                    f"kept {len(kept)} of {len(insts)} ROR institutions for {country} "
+                    f"- types: {_census_line(counts, wanted_types)}. Not scanned: "
+                    f"{_census_line(counts, left_out)} "
+                    f"(add them with --institution-types, or 'all')")
+            # A type the caller asked for that this country has none of is worth saying: the
+            # scan is narrower than the request and nothing else would reveal it.
+            if warnings is not None:
+                absent = sorted(t for t in wanted_types if not counts.get(t))
+                if absent:
+                    warnings.append(
+                        f"--institution-types asked for {', '.join(absent)}; ROR lists none "
+                        f"of those for {country}")
+            insts = kept
+        elif warnings is not None:
             warnings.append(
                 f"none of the {len(insts)} ROR institutions for {country} are typed "
-                f"'education' - scanning all types rather than reporting none")
+                f"{'/'.join(sorted(wanted_types))} - scanning all types rather than "
+                f"reporting none")
     mode = plan.get("university_mode", "all")
     if mode not in ("all", "prioritise", "only"):
         # Fail loud (D-002): falling through to "all" would silently INVERT the scope a plan

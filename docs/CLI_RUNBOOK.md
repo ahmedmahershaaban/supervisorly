@@ -117,9 +117,54 @@ supervisorly scan \
 | `--field` | free text; the subject map is generated from it, never looked up |
 | `--intent` | `training`, `pre_master`, `pre_phd`, `mentor`, `master`, `phd`, `postdoc` |
 | `--shortlist N` | how many discovered professors get deep-dived (default 40). Everyone else is still listed, marked unchecked — never dropped |
-| `--max-institutions N` | cap the ROR enumeration while you are experimenting |
+| `--max-institutions N` | how many institutions to enumerate (default 200). This drives how many pages are **fetched** from ROR, not a slice afterwards |
+| `--institution-types education,facility` | which pools to scan — see below |
+| `--compare-to output/last.json` | diff against a previous scan; the new export carries a `delta` block |
 | `--progress` | one line per phase to stderr; otherwise silent |
 | `--universities "Imperial College,UCL"` | with `--university-mode only` to restrict, `prioritise` to rank first |
+
+### Which institutions get scanned
+
+By default: only the organisations ROR types as **`education`** — universities and colleges.
+A hospital's or a company's author list cannot supply a PhD supervisor, and enumerating it
+spends the institution budget.
+
+But universities are not the only place supervision happens, and in some countries they are
+not even where most of it happens. A Max Planck institute is typed `facility`. A teaching
+hospital is `healthcare`. So the pool is a **selection**, not an on/off switch:
+
+```bash
+--institution-types education,facility,healthcare
+--institution-types all
+```
+
+Valid values are ROR's own vocabulary: `education`, `facility` (research institutes and
+national labs), `healthcare` (teaching hospitals), `government`, `nonprofit`, `company`,
+`archive`, `funder`, `other`. A misspelling stops the scan rather than quietly running an
+education-only one.
+
+Whatever you pick, the run **tells you what it left out**, with counts:
+
+```
+Warning: kept 96 of 200 ROR institutions for CA - types: education 96.
+Not scanned: healthcare 54, company 22, nonprofit 14, government 9, facility 5
+```
+
+An organisation can carry two types — a university hospital is both `education` and
+`healthcare` — and asking for either pool finds it.
+
+`--all-institution-types` still works; it is now a synonym for `--institution-types all`.
+
+### What a scan tells you beyond the professor list
+
+The JSON export carries three things the per-professor rows cannot:
+
+* `run.universities` — the same scores rolled up to institutions, best first. You apply to a
+  department, not to a row.
+* `run.delta` — present only with `--compare-to`: new and removed professors, changed fields,
+  recruiting signals worth re-reading, newly published deadlines.
+* `profile.contested_fields` — fields where two sources disagreed and neither provenance nor
+  recency could order them. Both claims are kept; the newer one leads.
 
 ### Where the output lands
 
@@ -291,13 +336,26 @@ supervisorly scan --country GB --field "machine learning" --resume
 Skips targets already deep-dived in the store next to `--out`. Use it after a cancelled run or
 to pick up only what changed.
 
+To be told *what* changed rather than re-reading the list, keep the previous export and point
+at it:
+
+```bash
+cp output/dashboard.json output/last.json
+supervisorly scan --country GB --field "machine learning" --compare-to output/last.json
+```
+
+The new export's `run.delta` names the new and removed professors, every field whose state,
+value or confidence moved, and any deadline that went from watched to published.
+
 ---
 
 ## 6. Fill the gaps a machine must not fill
 
 Professors whose page is behind a login or bot-wall are **not** scraped. The dashboard gives
-each one a search link and a copy-ready prompt. You open the page yourself, then hand the text
-back:
+each one a search link and a copy-ready prompt. You open the page yourself, then hand the
+answer back — there are two ways in, and which one you use depends on what you have.
+
+**You have the page's text.** Paste it to a file and let the normal extractors read it:
 
 ```bash
 supervisorly ingest-page \
@@ -306,11 +364,27 @@ supervisorly ingest-page \
   --db output/supervisorly.sqlite \
   --entity person:<id-from-the-dashboard> \
   --run <run-id>
+```
 
+**You have a model's reply to the dashboard's prompt.** That prompt asks for `## field:`
+Markdown blocks; save the reply verbatim and pass it here:
+
+```bash
+supervisorly ingest-md --file ./reply.md --db output/supervisorly.sqlite
+```
+
+Either way, run:
+
+```bash
 supervisorly reexport
 ```
 
 `reexport` rebuilds the dashboard from the store with no fetching at all.
+
+Human-returned data is not privileged: every block goes through the same quote gate as a
+fetched one and is stamped `human-assisted (Claude for Chrome)`, so a reader can always tell
+how a value arrived. A quote that does not appear in what you pasted is rejected and the gap
+stays open — as it should.
 
 ---
 

@@ -653,3 +653,45 @@ instead of silently deviating.*
    Shipping France-only is honest; shipping it as a headline feature would not be.
 
 Until then the atlas keeps `people search` labelled **not built**, which is accurate.
+
+---
+
+## B-009 — `score/programs.py` has no input
+
+**Status: blocked upstream, not on a decision.**
+
+`group_by_program` implements D-031's "one application per program, not per professor": two
+supervisors in the same department usually share one graduate program — one application, one
+fee, one deadline — and presenting them as two applications misleads the student into paying
+twice. The module is written, tested, and correct.
+
+Nothing sets a `program` on a professor. There is no `program` field descriptor, and no
+extractor produces one. Wiring it today emits N singleton groups, each announcing "One
+application", which is noise dressed as insight — so it was deliberately left unwired in
+round AK rather than connected for the sake of a green wiring audit.
+
+**What it needs:** an extractor for the graduate program a professor's department belongs to
+(the department page's "Graduate programs" link is the usual anchor), recorded as a normal
+quote-gated claim. The roll-up then has an input and can be wired in one line.
+
+---
+
+## B-010 — a Wayback deadline projection is not a claim
+
+**Status: needs a decision recorded before `discover/archive.py` is wired.**
+
+`archive.cycles_for` / `project_next` read an admissions page's history from the Wayback CDX
+API and project roughly when the next cycle opens. This is the highest-value unwired module in
+the repo, because `deadline` is the field that comes back `NOT_FOUND` most often.
+
+It cannot be wired without settling one thing: **a projection has no snapshot.** D-010 says
+every field is a claim with a quote verified against the page it came from — and no page
+exists yet for a future deadline. So a projection must not enter `fields` at all. The proposal
+is `profile.deadline_projection`, carrying the observed cycles it was derived from, on exactly
+the terms `match` sits beside `fields` rather than inside it.
+
+Two smaller prerequisites: `web.archive.org` needs a `test_no_seed_urls` allowlist entry with
+written reasoning, and robots/pacing apply to it like any host.
+
+The module already refuses to project from fewer than three cycles ("two points are not a
+pattern"), which is the part that would have been easy to get wrong.
