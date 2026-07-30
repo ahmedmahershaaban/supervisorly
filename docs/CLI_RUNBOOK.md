@@ -27,7 +27,7 @@ setx SUPERVISORLY_CONTACT_EMAIL "you@example.com"
 ## 1. Prove it works with no keys and no network
 
 ```powershell
-python -m supervisorly scan --demo --out C:\Temp\sv\demo.html
+python -m supervisorly scan --demo
 ```
 
 Five synthetic professors on RFC-2606 `.example` hosts. Touches no real institution, needs no
@@ -43,8 +43,7 @@ python -m supervisorly scan `
   --field "machine learning" `
   --intent phd `
   --shortlist 25 `
-  --progress `
-  --out C:\Temp\sv\gb-ml.html
+  --progress
 ```
 
 | Flag | What it does |
@@ -57,7 +56,29 @@ python -m supervisorly scan `
 | `--progress` | one line per phase to stderr; otherwise silent |
 | `--universities "Imperial College,UCL"` | with `--university-mode only` to restrict, `prioritise` to rank first |
 
-Output is `gb-ml.html` + `gb-ml.json`, and a SQLite store next to them.
+### Where the output lands
+
+With no `--out`, everything goes to the project's own `output/` folder:
+
+```
+output/
+  dashboard.html          the thing you open
+  dashboard.json          the same data, machine-readable
+  supervisorly.sqlite     the store — claims, snapshots, run state
+  .cache/snaps/           content-hashed page snapshots
+```
+
+`/output/` is gitignored, as are `*.sqlite`, `**/.cache/` and `**/snaps/`, so a scan cannot
+commit real academics' names and emails. **That guard is the only constraint** — within it,
+name things however you like:
+
+```powershell
+python -m supervisorly scan --country GB --field "machine learning" `
+  --out output/gb-ml.html          # -> output/gb-ml.json, output/.cache/snaps/
+```
+
+Keeping one file per scan is worth doing once you have more than one country in flight, since
+the SQLite store sits next to the `--out` path and `--resume` reads it from there.
 
 **Expect thin results on the first run.** That is the honest state of the data, not a bug:
 measured on a real GB/ML scan, **88% of shortlisted professors had no page on record at all**
@@ -69,7 +90,7 @@ and 0% had a page they control. Steps 3 and 4 are what fix that.
 
 ```powershell
 python -m supervisorly scan --country GB --field "machine learning" `
-  --render-all --concurrency 8 --progress --out C:\Temp\sv\gb-ml.html
+  --render-all --concurrency 8 --progress
 ```
 
 - `--render-all` — Chromium reads **every** page, not just the ones that came back as a login
@@ -124,7 +145,7 @@ snapshot is dropped in code, twice. It cannot invent a professor or a deadline.
 
 ```powershell
 python -m supervisorly scan --country GB --field "machine learning" `
-  --render-all --crawl --progress --out C:\Temp\sv\gb-ml.html
+  --render-all --crawl --progress
 ```
 
 A professor's page is usually a staff card; *Vacancies* / *Join the group* is one click away.
@@ -137,8 +158,7 @@ every field has an answer.
 python -m supervisorly scan `
   --country GB --field "machine learning" --intent phd `
   --render-all --concurrency 8 --crawl `
-  --shortlist 25 --progress `
-  --out C:\Temp\sv\gb-ml.html
+  --shortlist 25 --progress
 ```
 
 ---
@@ -146,8 +166,7 @@ python -m supervisorly scan `
 ## 5. Cheap re-scans
 
 ```powershell
-python -m supervisorly scan --country GB --field "machine learning" --resume `
-  --out C:\Temp\sv\gb-ml.html
+python -m supervisorly scan --country GB --field "machine learning" --resume
 ```
 
 Skips targets already deep-dived in the store next to `--out`. Use it after a cancelled run or
@@ -165,11 +184,11 @@ back:
 python -m supervisorly ingest-page `
   --url "https://the-final-url-after-redirects" `
   --file C:\Temp\page.txt `
-  --db C:\Temp\sv\supervisorly.sqlite `
+  --db output/supervisorly.sqlite `
   --entity person:<id-from-the-dashboard> `
   --run <run-id>
 
-python -m supervisorly reexport --db C:\Temp\sv\supervisorly.sqlite --out C:\Temp\sv\gb-ml.html
+python -m supervisorly reexport
 ```
 
 `reexport` rebuilds the dashboard from the store with no fetching at all.
@@ -179,15 +198,15 @@ python -m supervisorly reexport --db C:\Temp\sv\supervisorly.sqlite --out C:\Tem
 ## 7. The other subcommands
 
 ```powershell
-python -m supervisorly map-field --field "causal inference" --out C:\Temp\sv\map.json
-python -m supervisorly studio    --map C:\Temp\sv\map.json  --out C:\Temp\sv\studio.html
+python -m supervisorly map-field --field "causal inference"
+python -m supervisorly studio    --map output/subject_map.json
 ```
 
 `map-field` turns free text into a hierarchical OpenAlex subject map; `studio` renders it as a
 self-contained plan wizard that emits a plan JSON you can feed back with `--plan`.
 
 ```powershell
-python -m supervisorly init-db --db C:\Temp\sv\supervisorly.sqlite   # create/migrate a store
+python -m supervisorly init-db --db output/supervisorly.sqlite   # create/migrate a store
 python -m supervisorly pace --host x.com                             # exit 0 allow, 3 deny
 ```
 
@@ -225,8 +244,12 @@ with no page on record, and no robots setting creates a URL that is not there.
 
 ## Two things to keep in mind
 
-**Write output outside the repo.** Scan results are personal data and must never be committed.
-`C:\Temp\sv\` or anywhere outside the working tree.
+**Output goes to `output/`, and that is already the default** — so you can leave `--out` off
+entirely. `/output/` is gitignored, as are `**/.cache/`, `**/snaps/` and `*.sqlite`, so a scan
+cannot commit a dashboard full of real names.
+
+If you do pass `--out`, keep it inside `output/` (or `results/` or `out/`, both also ignored).
+A path anywhere else in the tree is **not** covered, and scan results are personal data.
 
 **Running the test suite needs `TMPDIR` outside the repo**, or the D-005 guard correctly fires
 on pytest's `tmp_path`:

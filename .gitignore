@@ -9,6 +9,10 @@
 
 # --- Scan output: generated per-run, contains personal data -----------------
 /output/
+# `out/` is not the CLI default, but it is the name a hand reaches for first. Ignoring it too
+# costs nothing and removes a way to commit a dashboard full of real names by typo (D-005).
+/out/
+/results/
 /runs/
 *.supervisorly-run/
 # SQLite is the source of truth but is per-run and holds personal data — never commit (D-005)
