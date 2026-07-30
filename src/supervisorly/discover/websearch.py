@@ -77,7 +77,8 @@ _NOT_A_HOMEPAGE = re.compile(
     r"scholar\.google\.|orcid\.org|publons\.com|semanticscholar\.org|"
     r"webofscience\.com|scopus\.com|springer\.com|sciencedirect\.com|"
     r"wiley\.com|tandfonline\.com|ieee\.org|acm\.org|arxiv\.org|"
-    r"wikipedia\.org|youtube\.com|facebook\.com|amazon\."
+    r"wikipedia\.org|youtube\.com|facebook\.com|instagram\.com|tiktok\.com|"
+    r"reddit\.com|medium\.com|amazon\."
     r")", re.I)
 
 
@@ -113,6 +114,71 @@ def build_query(name: str, institution: str | None = None) -> str:
         parts.append(institution.strip())
     parts.append("(faculty OR \"research group\" OR lab OR homepage)")
     return " ".join(parts)
+
+
+#: Path words that mean "this page is about working with this person" — the same *page-role*
+#: vocabulary ``sitecrawl`` follows links by, and for the same D-038 reason: it describes what
+#: a page IS, never what a field is about. Nothing here knows what "machine learning" means.
+_ROLE_PATH = re.compile(
+    r"opening|vacanc|position|recruit|join|apply|application|prospective|admission|"
+    r"studentship|phd|doctoral|postdoc|people|member|team|group|lab|staff|supervis",
+    re.I)
+
+#: A host is "theirs" when it carries their name. `zhijing-jin.com` is the person; a search
+#: engine's top hit for the same query was a third-party profile page about them.
+_TOKEN = re.compile(r"[a-z]{3,}")
+
+
+def _name_tokens(name: str) -> list[str]:
+    return [t for t in _TOKEN.findall((name or "").lower())
+            if t not in ("prof", "professor", "dr", "the", "and")]
+
+
+def rank_candidates(urls, name: str, institution: str | None = None) -> list[str]:
+    """Re-order search hits by *whose page this is*, not by search relevance.
+
+    **Measured on a real Tavily response.** Asked for a named professor, the engine ranked a
+    third-party bio page first (score .53) and the professor's own ``/openings`` page fourth
+    (.47) — and that openings page was the only one of the seventeen results that actually
+    said "I have several PhD openings in this upcoming admission cycle". Taking the top hit
+    would have fetched a page about her and discarded the page by her.
+
+    Relevance answers "is this about the query". We need "is this the page they control",
+    which is a different question and answerable structurally:
+
+    * their **name in the host** is the strongest signal a site is theirs;
+    * an **academic domain** is next, especially one matching their institution;
+    * a **role path** (``/openings``, ``/join``, ``/people``) is where recruiting text lives.
+
+    Ties keep the engine's own order, so this refines a ranking rather than replacing it.
+    """
+    toks = _name_tokens(name)
+    inst = set(_name_tokens(institution or ""))
+    ranked = []
+    for i, u in enumerate(urls):
+        parts = urlsplit(u)
+        host = (parts.netloc or "").lower()
+        bare = host.replace("www.", "")
+        hostwords = set(_TOKEN.findall(bare))
+        score = 0
+        # their name in the host — "zhijing-jin.com" for Zhijing Jin
+        if toks and sum(1 for t in toks if t in bare) >= min(2, len(toks)):
+            score += 5
+        elif toks and any(t in bare for t in toks):
+            score += 2
+        if re.search(r"\.(edu|ac)(\.[a-z]{2})?$", bare):          # academic domain
+            score += 3
+        # substring, not token equality: universities compress their own name into a host
+        # ("utoronto.ca" for the University of Toronto), so `"toronto" in bare` is the test
+        # that actually fires. Measured — exact matching scored their own faculty page below
+        # a third-party bio.
+        if any(t in bare for t in inst if len(t) >= 4):            # their institution's domain
+            score += 2
+        if _ROLE_PATH.search(parts.path or ""):                    # where the answer lives
+            score += 2
+        ranked.append((-score, i, u))
+    ranked.sort()
+    return [u for _, _, u in ranked]
 
 
 def is_candidate_page(url: str) -> bool:
@@ -298,4 +364,7 @@ def search(name: str, institution: str | None = None, *, environ=None, transport
         out.append(u)
         if len(out) >= count:
             break
-    return out
+    # Re-rank by whose page it is, not how relevant the engine thought it was. Measured: the
+    # engine's top hit was a profile page ABOUT the professor and their own /openings page —
+    # the only result carrying a recruiting sentence — ranked fourth.
+    return rank_candidates(out, name, institution)

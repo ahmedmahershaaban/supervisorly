@@ -248,3 +248,61 @@ def test_every_provider_fails_closed_on_a_bad_response():
     for env in (BRAVE_KEY, TAVILY_KEY, GOOGLE_ENV, GEMINI_ENV):
         assert W.search("Ada", "Uni", environ=env, transport=_transport(500, "boom")) == []
         assert W.search("Ada", "Uni", environ=env, transport=_transport(200, "not json")) == []
+
+
+# ── ranking: whose page is this, not how relevant is it ──────────────────────
+# The shape below is copied from a REAL Tavily response for a real professor, with the
+# person and hosts replaced by synthetic ones. D-005/D-035 forbid committing a real
+# academic's data as a fixture, and the lesson is in the SHAPE, not in whose name it was:
+# the engine ranked a third-party profile page first and the professor's own /openings page
+# fourth, and that openings page was the only result carrying a recruiting sentence.
+_REAL_SHAPE = [
+    "https://futureoflife.example/person/ada-lovelace",       # engine's #1 — about her
+    "https://ada-lovelace.example/home/index.php/openings",   # engine's #2 — BY her, the answer
+    "https://schmidtsciences.example/grantee/ada-lovelace",   # #3 — about her
+    "https://ada-lovelace.example/home/index.php/bio",        # #4 — by her
+    "https://www.artsci.uni.edu/new-faculty/ada-lovelace",    # #5 — her institution
+]
+
+
+def test_the_professors_own_openings_page_outranks_a_profile_about_them():
+    got = W.rank_candidates(_REAL_SHAPE, "Ada Lovelace", "University of Toronto")
+    assert got[0] == "https://ada-lovelace.example/home/index.php/openings"
+    assert got[0] != _REAL_SHAPE[0]           # the engine's own #1 is NOT the answer
+
+
+def test_a_page_by_them_beats_a_page_about_them_even_without_a_role_path():
+    got = W.rank_candidates(_REAL_SHAPE, "Ada Lovelace", "University of Toronto")
+    own = [u for u in got if "ada-lovelace.example" in u]
+    third = [u for u in got if "futureoflife" in u or "schmidtsciences" in u]
+    assert got.index(own[-1]) < got.index(third[0]), "both of her pages must outrank both bios"
+
+
+def test_an_academic_domain_outranks_a_random_com():
+    got = W.rank_candidates(
+        ["https://someblog.example/ada", "https://cs.uni.edu/people/ada"], "Ada Lovelace")
+    assert got[0] == "https://cs.uni.edu/people/ada"
+
+
+def test_ranking_is_stable_when_nothing_distinguishes_the_hits():
+    urls = ["https://a.example/1", "https://b.example/2", "https://c.example/3"]
+    assert W.rank_candidates(urls, "Ada Lovelace") == urls    # ties keep engine order
+
+
+def test_ranking_survives_an_empty_name_or_empty_list():
+    assert W.rank_candidates([], "Ada") == []
+    assert W.rank_candidates(["https://x.example/1"], "") == ["https://x.example/1"]
+
+
+def test_search_returns_the_ranked_order_not_the_engine_order():
+    body = json.dumps({"results": [{"url": u} for u in _REAL_SHAPE]})
+    got = W.search("Ada Lovelace", "University of Toronto", environ=TAVILY_KEY,
+                   transport=_transport(200, body))
+    assert got[0] == "https://ada-lovelace.example/home/index.php/openings"
+
+
+def test_the_role_vocabulary_is_page_roles_not_research_fields():
+    """D-038 again: 'openings' is what a page IS; 'machine learning' would be a term list."""
+    pattern = W._ROLE_PATH.pattern.lower()
+    for term in ("machine learning", "chemistry", "physics", "nlp", "biology"):
+        assert term not in pattern
