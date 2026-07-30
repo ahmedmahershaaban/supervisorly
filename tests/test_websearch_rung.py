@@ -170,3 +170,81 @@ def test_finding_nothing_leaves_the_target_exactly_as_it_was():
 def test_without_a_configured_rung_resolution_is_unchanged():
     t = {"id": "p", "name": "Ada", "url": None, "url_kind": None}
     assert pipeline._page_url_for(t, None, {}, None) is None
+
+
+# ── the two no-card providers ────────────────────────────────────────────────
+GOOGLE_ENV = {"SUPERVISORLY_SEARCH_KEY": "k", "SUPERVISORLY_SEARCH_PROVIDER": "google",
+              "SUPERVISORLY_SEARCH_CX": "cx123"}
+GEMINI_ENV = {"SUPERVISORLY_SEARCH_KEY": "k", "SUPERVISORLY_SEARCH_PROVIDER": "gemini"}
+
+
+def test_google_cse_is_unconfigured_without_an_engine_id():
+    """A key alone cannot succeed there — say so once, not 25 failing requests later."""
+    assert W.configured({"SUPERVISORLY_SEARCH_KEY": "k",
+                         "SUPERVISORLY_SEARCH_PROVIDER": "google"}) is False
+    assert W.configured(GOOGLE_ENV) is True
+    assert W.search("Ada", "Uni", environ={"SUPERVISORLY_SEARCH_KEY": "k",
+                                           "SUPERVISORLY_SEARCH_PROVIDER": "google"},
+                    transport=_transport(200, "{}")) == []
+
+
+def test_google_cse_parses_its_own_shape_and_hides_the_key_from_the_path():
+    seen = []
+    got = W.search("Ada Lovelace", "Uni", environ=GOOGLE_ENV, transport=_transport(
+        200, json.dumps({"items": [{"link": "https://cs.uni.edu/~ada"},
+                                   {"link": "https://orcid.org/0000-1"}]}), seen))
+    assert got == ["https://cs.uni.edu/~ada"]        # the registry hit is filtered out
+    assert seen[0]["payload"] is None                 # GET
+    assert "cx=cx123" in seen[0]["url"]
+
+
+def test_gemini_reads_grounding_sources_not_the_models_prose():
+    """We consume the URLs it consulted, never its sentences — it cannot mint a page."""
+    body = json.dumps({"candidates": [{
+        "content": {"parts": [{"text": "https://totally-made-up.example/ada"}]},
+        "groundingMetadata": {"groundingChunks": [
+            {"web": {"uri": "https://cs.uni.edu/~ada", "title": "cs.uni.edu"}}]}}]})
+    got = W.search("Ada", "Uni", environ=GEMINI_ENV, transport=_transport(200, body))
+    assert got == ["https://cs.uni.edu/~ada"]
+    assert not [u for u in got if "made-up" in u]     # the prose URL never enters
+
+
+def test_gemini_asks_for_a_page_and_names_the_institution():
+    seen = []
+    W.search("Ada Lovelace", "University of Toronto", environ=GEMINI_ENV,
+             transport=_transport(200, "{}", seen))
+    prompt = seen[0]["payload"]["contents"][0]["parts"][0]["text"]
+    assert "Ada Lovelace" in prompt and "University of Toronto" in prompt
+    assert seen[0]["payload"]["tools"] == [{"google_search": {}}]   # grounding actually on
+
+
+def test_a_grounding_redirect_is_resolved_before_it_can_be_fetched():
+    """Fetching the proxy would robots-check Google, not the university. Resolve first."""
+    body = json.dumps({"candidates": [{"groundingMetadata": {"groundingChunks": [
+        {"web": {"uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/xyz"}}]}}]})
+    got = W.search("Ada", "Uni", environ=GEMINI_ENV, transport=_transport(200, body),
+                   resolver=lambda u: "https://cs.uni.edu/~ada")
+    assert got == ["https://cs.uni.edu/~ada"]
+
+
+def test_a_redirect_that_will_not_resolve_is_dropped_not_passed_through():
+    body = json.dumps({"candidates": [{"groundingMetadata": {"groundingChunks": [
+        {"web": {"uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/xyz"}}]}}]})
+    got = W.search("Ada", "Uni", environ=GEMINI_ENV, transport=_transport(200, body),
+                   resolver=lambda u: None)
+    assert got == []                                  # an open gap beats fetching a proxy
+
+
+def test_a_resolved_redirect_still_passes_the_aggregator_filter():
+    """Resolution is not a bypass — a redirect that lands on ORCID is still not a homepage."""
+    body = json.dumps({"candidates": [{"groundingMetadata": {"groundingChunks": [
+        {"web": {"uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/x"}}]}}]})
+    got = W.search("Ada", "Uni", environ=GEMINI_ENV, transport=_transport(200, body),
+                   resolver=lambda u: "https://orcid.org/0000-1")
+    assert got == []
+
+
+def test_every_provider_fails_closed_on_a_bad_response():
+    for env in (BRAVE_KEY, TAVILY_KEY, GOOGLE_ENV, GEMINI_ENV):
+        assert W.search("Ada", "Uni", environ=env, transport=_transport(500, "boom")) == []
+        assert W.search("Ada", "Uni", environ=env, transport=_transport(200, "not json")) == []

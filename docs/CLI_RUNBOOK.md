@@ -202,10 +202,40 @@ export SUPERVISORLY_SEARCH_KEY="<brave-or-tavily-key>"
 export SUPERVISORLY_SEARCH_PROVIDER=brave        # or tavily
 ```
 
-| Provider | Free tier | Sign-up |
-|---|---|---|
-| Brave Search API | 2,000 queries/month | api-dashboard.search.brave.com |
-| Tavily | free tier | tavily.com |
+| Provider | `_PROVIDER` | Free tier | Card needed? | Where |
+|---|---|---|---|---|
+| **Gemini** (grounded search) | `gemini` | yes | **no** | aistudio.google.com |
+| **Google Programmable Search** | `google` | 100/day | **no** | developers.google.com/custom-search |
+| Tavily | `tavily` | yes | check | tavily.com |
+| Brave Search API | `brave` | 2,000/month | **yes** | api-dashboard.search.brave.com |
+
+**Start with `gemini`** — no card, and the same key works for `SUPERVISORLY_EXTRACT_KEY`:
+
+```powershell
+$env:SUPERVISORLY_SEARCH_KEY = "<gemini-key>"
+$env:SUPERVISORLY_SEARCH_PROVIDER = "gemini"
+```
+
+**Google Programmable Search needs a second value**, a search-engine id, and that engine must
+be set to search the *entire web* or it will only answer from the sites it was scoped to:
+
+```powershell
+$env:SUPERVISORLY_SEARCH_KEY = "<google-api-key>"
+$env:SUPERVISORLY_SEARCH_PROVIDER = "google"
+$env:SUPERVISORLY_SEARCH_CX = "<search-engine-id>"
+```
+
+> **Gemini is not equivalent to a search index, and that is worth knowing before you rely on
+> it.** Brave and Google return a *ranked list of results*. Gemini returns whichever sources
+> the model chose to cite while answering — so it may return fewer, may differ between
+> identical calls, and may cite a news article rather than a department page. It is the right
+> tool for finding out whether this rung fixes your dashboard; it is not the one to
+> standardise on if it does.
+>
+> Only the URLs it consulted are used — never its own sentences — so it cannot invent a page.
+> Its citations are Google redirect links, which are resolved to the real page before anything
+> is fetched, because fetching the proxy would consult Google's `robots.txt` instead of the
+> university's.
 
 ### 4b. Let a model read the prose
 
@@ -325,6 +355,8 @@ with no page on record, and no robots setting creates a URL that is not there.
 | `SUPERVISORLY_CONTACT_EMAIL` | **yes**, live scans | OpenAlex polite pool |
 | `SUPERVISORLY_OPENALEX_KEY` | no | paid OpenAlex, higher limits |
 | `SUPERVISORLY_SEARCH_KEY` + `_PROVIDER` | no | rung 7 page resolution |
+| `SUPERVISORLY_SEARCH_CX` | `google` only | its search-engine id |
+| `SUPERVISORLY_SEARCH_MODEL` | `gemini` only | override the grounded model |
 | `SUPERVISORLY_EXTRACT_KEY` + `_BASE_URL` + `_MODEL` | no | reading prose |
 | `SUPERVISORLY_EXPAND_KEY` + `_BASE_URL` + `_MODEL` | no | search-query expansion |
 | `PHASES` | no | turn gated phases on/off |

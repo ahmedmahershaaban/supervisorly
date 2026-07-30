@@ -50,6 +50,10 @@ ALLOWED_HOSTS = {
     # with a query generated from a name discovery already found. They narrow nothing — an
     # institution the registry never returned stays unfindable, exactly as before.
     "api.search.brave.com", "api.tavily.com",
+    "www.googleapis.com",                 # Google Programmable Search (customsearch)
+    "vertexaisearch.cloud.google.com",    # the redirect Gemini grounding cites, which
+                                          # we RESOLVE rather than fetch — naming it is
+                                          # how we refuse to fetch the proxy directly
 }
 
 #: Files whose JOB is to name hosts we must NOT touch. A refusal list is the exact inverse of
