@@ -418,7 +418,9 @@ class CloudRunWorker:
     def submit(self, store, job_id: str, *, plan: dict, email: str, transport=None,
                openalex_key=None, shortlist: int = 40, max_institutions=None,
                resume: bool = False, db_path=None, snap_root=None,
-               out_html=None, out_json=None):
+               out_html=None, out_json=None, render_all: bool = False,
+               crawl: bool = False, concurrency=None, obey_robots: bool = True,
+               previous_export=None):
         # the local-only path kwargs are accepted for interface parity and ignored —
         # the worker computes its own ephemeral paths from JOB_ID (§3.6)
         job = store.get(job_id)
@@ -427,9 +429,17 @@ class CloudRunWorker:
         if job.get("cancel_requested"):
             store.set_status(job_id, "cancelled")   # cancelled while queued (§3.4)
             return None
+        # The depth controls travel on the job DOC, because the Cloud Run Job receives only a
+        # JOB_ID and reads everything else back from Firestore. `previous_export` deliberately
+        # does not: it is a whole export, it is personal data, and the job doc is not where
+        # personal data lives (D-069). A hosted comparison would have to fetch it from the
+        # results bucket at run time — not built, and honest about it rather than half-done.
         store.set_status(job_id, "queued",
                          run_params={"shortlist": shortlist,
-                                     "max_institutions": max_institutions})
+                                     "max_institutions": max_institutions,
+                                     "render_all": bool(render_all), "crawl": bool(crawl),
+                                     "concurrency": concurrency,
+                                     "obey_robots": bool(obey_robots)})
         invoke_worker(job_id, environ=self._environ, client=self._client)
         return None
 

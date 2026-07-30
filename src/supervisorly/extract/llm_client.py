@@ -47,6 +47,13 @@ MAX_TOKENS = 1_500
 DEFAULT_TIMEOUT = 30.0
 
 
+def configured(environ=None) -> bool:
+    """Whether D-073 model extraction can run — a boolean, never the key itself (P7)."""
+    import os                                        # noqa: PLC0415 — local, like the rest
+    environ = os.environ if environ is None else environ
+    return bool((environ.get(ENV_KEY) or "").strip())
+
+
 def completer_from_env(environ=None, *, transport=None, timeout: float = DEFAULT_TIMEOUT):
     """Build ``complete(prompt) -> str``, or ``None`` when no key is configured.
 

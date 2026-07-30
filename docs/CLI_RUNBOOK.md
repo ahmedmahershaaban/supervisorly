@@ -89,6 +89,39 @@ supervisorly scan --email you@example.com --country GB --field "machine learning
 
 ---
 
+## 0b. Prefer a page to a command line?
+
+```powershell
+supervisorly serve
+```
+
+One command. It opens the 5-step wizard in your browser and runs scans from it — the **same
+engine** as `scan`, on **your** machine, from **your** IP, using **your** Chromium. Step 4 has a
+"Depth & engine" panel carrying every control this runbook describes as a flag:
+
+| On the page | Same as |
+|---|---|
+| Universities to scan | `--max-institutions` |
+| Professors to deep-dive | `--shortlist` |
+| Which organisations count | `--institution-types` |
+| Read every page with a real browser | `--render-all` |
+| Follow links on the professor's site | `--crawl` |
+| Pages open at once | `--concurrency` |
+| Compare with an earlier search | `--compare-to` |
+| Ignore robots.txt | `--ignore-robots` |
+
+The page asks the server what it can actually do before offering any of it: if Chromium is not
+installed, the browser checkbox is **disabled and says why**, rather than starting a scan that
+renders nothing and reports success. Your search and model keys stay in your environment — the
+page is told *whether* one is configured, never what it is.
+
+`--ignore-robots` appears **only** on this local server. The hosted app at `supervisorly.web.app`
+refuses it, because there the address being spent is not yours.
+
+Nothing else changes: `--out`, the database, snapshots and `reexport` all work exactly as below.
+
+---
+
 ## 1. Prove it works with no keys and no network
 
 ```bash

@@ -75,7 +75,9 @@ def run_scan_job(plan: dict, hooks, *, transport, db_path, snap_root, out_html, 
                  email: str, openalex_key=None, shortlist: int = 40,
                  max_institutions=None, resume: bool = False,
                  rate_limit: float = 1.0, backoff_sleep=None,
-                 phase_flags=None) -> dict | None:
+                 phase_flags=None, render_all: bool = False, crawl: bool = False,
+                 concurrency: int | None = None, obey_robots: bool = True,
+                 previous_export: dict | None = None) -> dict | None:
     """Run one scan job against any storage backend (§3.1, §6 item 5).
 
     ``hooks`` is the storage seam — an object with ``on_event(dict)``,
@@ -108,11 +110,19 @@ def run_scan_job(plan: dict, hooks, *, transport, db_path, snap_root, out_html, 
         db_parent = Path(db_path).parent
         if db_parent != Path("") and not db_parent.exists():
             db_parent.mkdir(parents=True, exist_ok=True)   # sqlite can't create parents
+        # The depth controls reach the engine here. They used to stop at this function —
+        # `run_live` grew --render-all/--crawl/--concurrency and the job path kept calling it
+        # without them, so a scan started from the web wizard could not read a page with a
+        # browser no matter what the page offered. `concurrency=None` means "the engine's own
+        # default", which is why it is not defaulted to a number here.
+        extra = {} if concurrency is None else {"concurrency": concurrency}
         result = pipeline.run_live(
             plan, transport, snap_root, email=email, openalex_key=openalex_key,
             db_path=db_path, shortlist_size=shortlist, max_institutions=max_institutions,
             resume=resume, rate_limit=rate_limit, backoff_sleep=backoff_sleep,
-            progress=_progress, should_stop=hooks.should_stop, phase_flags=phase_flags)
+            progress=_progress, should_stop=hooks.should_stop, phase_flags=phase_flags,
+            render_all=render_all, crawl=crawl, obey_robots=obey_robots,
+            previous_export=previous_export, **extra)
         out_html, out_json = Path(out_html), Path(out_json)
         out_html.parent.mkdir(parents=True, exist_ok=True)
         out_html.write_text(result["html"], encoding="utf-8")
@@ -291,10 +301,19 @@ class Worker:
     def submit(self, store: JsonJobStore, job_id: str, *, plan: dict, email: str,
                transport=None, db_path, snap_root, out_html, out_json,
                openalex_key=None, shortlist: int = 40, max_institutions=None,
-               resume: bool = False):
+               resume: bool = False, render_all: bool = False, crawl: bool = False,
+               concurrency: int | None = None, obey_robots: bool = True,
+               previous_export: dict | None = None):
         """Start the job in a daemon thread; returns the thread (None when the job was
         cancelled while still queued — §3.4: a queued-not-started job just flips to
-        ``cancelled`` with nothing to export)."""
+        ``cancelled`` with nothing to export).
+
+        ``render_all``/``crawl``/``concurrency``/``obey_robots`` are the depth controls the
+        CLI exposes as ``--render-all``/``--crawl``/``--concurrency``/``--ignore-robots``.
+        They are recorded in ``run_params`` for the same reason ``shortlist`` is: a resume
+        must repeat the scan that was asked for, not a shallower one that happens to share
+        its plan.
+        """
         job = store.get(job_id)
         if job is None:
             raise KeyError(f"unknown job {job_id}")
@@ -304,7 +323,10 @@ class Worker:
         # record the attempt's run params so a later resume reuses the SAME scope
         store.set_status(job_id, "running",
                          run_params={"shortlist": shortlist,
-                                     "max_institutions": max_institutions})
+                                     "max_institutions": max_institutions,
+                                     "render_all": render_all, "crawl": crawl,
+                                     "concurrency": concurrency,
+                                     "obey_robots": obey_robots})
         hooks = _StoreHooks(store, job_id, out_html=out_html, out_json=out_json)
 
         def _run() -> None:
@@ -314,7 +336,9 @@ class Worker:
                          out_html=out_html, out_json=out_json, email=email,
                          openalex_key=openalex_key, shortlist=shortlist,
                          max_institutions=max_institutions, resume=resume,
-                         rate_limit=self._rate_limit, backoff_sleep=self._backoff_sleep)
+                         rate_limit=self._rate_limit, backoff_sleep=self._backoff_sleep,
+                         render_all=render_all, crawl=crawl, concurrency=concurrency,
+                         obey_robots=obey_robots, previous_export=previous_export)
 
         t = threading.Thread(target=_run, name=f"scan-job-{job_id}", daemon=True)
         t.start()

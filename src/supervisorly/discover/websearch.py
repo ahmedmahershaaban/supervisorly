@@ -100,6 +100,19 @@ def configured(environ=None) -> bool:
     return True
 
 
+def provider_name(environ=None) -> str | None:
+    """Which provider this environment selects, or ``None`` if the rung is off.
+
+    The NAME only — never the key. A status panel that says "search: tavily" tells the
+    operator what they configured; one that could return the key would have leaked it to every
+    reader of the page (P7).
+    """
+    environ = os.environ if environ is None else environ
+    if not configured(environ):
+        return None
+    return (environ.get(ENV_PROVIDER) or DEFAULT_PROVIDER).strip().lower()
+
+
 def build_query(name: str, institution: str | None = None) -> str:
     """The generated query: a quoted human name, their institution, and what a page IS.
 

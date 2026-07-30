@@ -56,6 +56,12 @@ MAX_INSTITUTIONS_MIN, MAX_INSTITUTIONS_MAX = 1, 300
 #: Free-text field length.
 FIELD_MAX_CHARS = 200
 
+#: Concurrent browser pages. Capped low on purpose: this is concurrency ACROSS hosts — one
+#: host is always strictly serial (CC-3.3/CC-3.4) — and every page above it is a running
+#: Chromium tab on somebody's machine. 8 saturates a laptop long before it saturates the
+#: politeness budget, so a bigger number buys memory pressure, not speed.
+CONCURRENCY_MIN, CONCURRENCY_MAX = 1, 8
+
 
 def chunk_topics(topic_ids, size: int = TOPIC_FILTER_CHUNK) -> list[list[str]]:
     """Split topic ids into OR-filter-sized chunks. ``[]`` in, ``[]`` out (no filter)."""

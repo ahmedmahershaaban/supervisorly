@@ -158,8 +158,11 @@ def test_only_fetch_targets_are_the_endpoint_paths():
         "GEMINI_GEN_URL", "GEMINI_TEST_URL", "api", "url"]
     assert 'fetch("' not in js and "fetch('" not in js, "a literal URL is being fetched"
     paths = set(re.findall(r'api\("([^"]+)"', js))
+    # /api/capabilities is a READ of what this server can do — booleans and provider names,
+    # never a key (P7). It is what lets the page refuse to offer a browser reader that is not
+    # installed, instead of starting a scan that silently renders nothing.
     assert paths == {"/api/expand", "/api/map", "/api/scan", "/api/scan/", "/api/result/",
-                     "/api/clientlog"}
+                     "/api/clientlog", "/api/capabilities"}
     # dynamic ids are concatenated onto the scan/result prefixes only
     assert '"/api/scan/"+state.jobId' in js
     assert '"/api/scan/"+state.jobId+"/cancel"' in js

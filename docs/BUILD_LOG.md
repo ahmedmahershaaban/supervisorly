@@ -1813,3 +1813,53 @@ thread dies, `r.stdout` comes back `None`, and four tests fail for a reason with
 with what they test. Anyone cloning the repo and running `python -m pytest` in PowerShell saw
 red. Fixed by decoding explicitly as UTF-8 in both node harnesses (`test_multi_intent.py`,
 `test_studio.py`) — the same family as the ASCII-only console rule the CLI already follows.
+
+## Round AL — the wizard can do what `scan` can do
+
+**The gap.** The web tier ran the same engine through a narrower door. `handle_scan_start`
+accepted two scope numbers; `run_scan_job` forwarded those two and called `run_live` without
+`render_all`, `crawl` or `concurrency`. Every depth control added for the client-side crawl
+stopped at the CLI, so a page could have offered a browser reader and nothing downstream would
+have listened.
+
+**The classification, which is the actual design.** Not every flag is safe as a request value.
+`--ignore-robots` spends the reputation of the address the scan runs *from*, which on a hosted
+deploy is ours and every other student's. So flags are sorted four ways — request value,
+operator-only, server configuration (every key, D-068/P7), and not-applicable — and
+`tests/test_web_cli_parity.py` asserts every `scan` flag has an entry. A new flag with no
+decision turns the suite red, which is the only thing that reliably stops two surfaces drifting.
+`local=True` is set only by `supervisorly serve`, which binds 127.0.0.1: there the operator and
+the caller are the same person. The Cloud Run worker forces `obey_robots=True` regardless of
+the job doc — a second lock, on the machine that would carry the block.
+
+**`GET /api/capabilities`.** The page asks what the server can actually do before offering
+anything: browser available (with the exact fix command), search provider by NAME, model
+extraction on/off, the ROR type vocabulary, and the numeric caps. Booleans and provider names
+only — a status panel that could return a key would have defeated the rule it exists to display
+(P7). `test_capabilities_never_echoes_a_key` puts three secrets in the environment and asserts
+none appear in the JSON.
+
+**A browser asked for and absent now fails at the door.** `render_all` with no Chromium used to
+degrade silently: every page fell back to plain HTML, the render counters stayed at zero and the
+student was told the scan finished. It is now a 400 naming which piece is missing and the exact
+command. The two failures that look identical from outside — the *package* missing
+(`pip install -e ".[browser]"`) and the *binary* missing (`playwright install chromium`) — are
+reported separately, because getting them the wrong way round is a documented way to lose an
+afternoon.
+
+**`supervisorly serve`** — one command. It generates the wizard, serves it from the same origin
+as the API (so there is no CORS story and no `api_base` to configure), prints the browser /
+search / model status at startup, and opens a tab. The three-step version — start the API,
+generate the page with a Python snippet, open the file — is why this still felt like a CLI with
+a viewer bolted on.
+
+**Verified against a real browser, not a mock.** The smoke run rendered a page whose recruiting
+sentence is written by JavaScript after load and confirmed the extractor sees it — which is the
+entire argument for `--render-all`. `GET /` served all seven new controls; the three malformed
+payloads (concurrency 99, a misspelled institution type, `render_all: "maybe"`) each came back
+400 with a usable message.
+
+**36 new tests.** Existing tests caught four real regressions on the way: `CloudRunWorker.submit`
+had a different signature (the hosted path would have 500'd on every scan), and three pinned
+assertions — the recorded `run_params`, the page's exact fetch targets, and the exact request
+sequence — correctly noticed the new endpoint. 1266 passing.

@@ -200,6 +200,29 @@ details.fp summary:hover{background:rgba(255,255,255,.03)}
 .sliderblock label{font-size:14px;color:var(--ink2);margin-bottom:4px}
 input[type=range]{width:100%;accent-color:var(--accent)}
 .costline{font-family:var(--mono);font-size:13.5px;color:var(--accent);margin:14px 0 0}
+/* depth & engine — the controls `scan` takes as flags */
+.adv{margin-top:20px;border:1px solid var(--line);border-radius:12px;background:var(--chip)}
+.adv>summary{cursor:pointer;padding:12px 16px;font-family:var(--mono);font-size:12px;
+  letter-spacing:.1em;text-transform:uppercase;color:var(--ink2)}
+.adv>summary::marker{color:var(--faint)}
+.adv[open]>summary{border-bottom:1px solid var(--line)}
+.advbody{padding:14px 16px 18px}
+.advbody .mlabel{display:flex;align-items:flex-start;text-transform:none;letter-spacing:0;
+  margin:0 0 10px;line-height:1.5}
+.advbody label[for]{display:block;font-size:14px;color:var(--ink2);margin:16px 0 4px}
+.caps{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
+.cap{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-radius:999px;
+  padding:4px 10px;color:var(--faint)}
+.cap.on{border-color:var(--teal);color:var(--teal)}
+.cap.off{border-color:var(--line);color:var(--faint)}
+.cap.warn{border-color:var(--accent);color:var(--accent)}
+.tchip{font-family:var(--mono);font-size:11.5px;border:1px solid var(--line);border-radius:999px;
+  padding:5px 12px;color:var(--faint);background:transparent;cursor:pointer}
+.tchip[aria-pressed="true"]{border-color:var(--teal);color:var(--teal);
+  background:rgba(67,201,214,.08)}
+.danger{border-color:var(--coral)!important;color:var(--coral)!important}
+select{width:100%;background:var(--chip);color:var(--ink);border:1px solid var(--line);
+  border-radius:10px;padding:10px 12px;font-family:var(--mono);font-size:12.5px}
 .review{margin-top:18px;border:1px solid var(--line);border-radius:12px;background:var(--chip);
   padding:12px 16px}
 .rrow{display:flex;gap:14px;padding:4px 0;border-bottom:1px solid rgba(23,34,51,.6)}
@@ -337,6 +360,9 @@ var state = {
   /* `intents` is a LIST (MI-1) — several levels may be ticked. It mirrors the checked cards
      and its first element is what the derived `intent_kind` scalar becomes. */
   email: "", intents: ["pre_phd"], country: "", universities: [], uniMode: "all",
+  /* What this server can do (GET /api/capabilities) + the institution pools ticked. `caps`
+     carries booleans and provider NAMES only — never a key, by construction (P7). */
+  caps: null, instTypes: ["education"],
   field: "", fields: [], plan: [], variants: [], expansionOff: false, merged: null, topicTotal: 0,
   /* P7: whether the student's OWN key drove expansion, and whether it failed. Booleans
      only — the key itself is never in `state`, because `state` is what becomes a plan. */
@@ -1125,7 +1151,106 @@ function step3Next(){
     document.getElementById("tree").focus();
     return;
   }
+  /* Re-read the past-search list on the way in: one may have been started, opened or
+     forgotten since the page loaded, and the comparison picker is only useful if it lists
+     what is actually there now. */
+  renderCompareOptions();
   showStep(4);
+}
+
+/* ── depth & engine: the controls `supervisorly scan` takes as flags ──────────
+   The page asks the server what it can actually DO before offering any of them. A checkbox
+   for a browser that is not installed is worse than no checkbox: the scan starts, renders
+   nothing, and reports success. */
+function capChip(label, on, cls){
+  return '<span class="cap '+(cls || (on ? "on" : "off"))+'">'+esc(label)+'</span>';
+}
+function renderCaps(){
+  var c = state.caps, host = document.getElementById("capChips");
+  if(!host) return;
+  if(!c){ host.innerHTML = capChip("server capabilities unknown — controls left as they are",
+                                   false, "warn"); return; }
+  var b = c.browser || {};
+  var chips = [
+    capChip(b.available ? "browser ready" : "no browser", !!b.available,
+            b.available ? "on" : "warn"),
+    capChip(c.search && c.search.configured
+            ? "page search: " + (c.search.provider || "on") : "page search off",
+            !!(c.search && c.search.configured)),
+    capChip(c.model_extract && c.model_extract.configured
+            ? "model reading on" : "model reading off",
+            !!(c.model_extract && c.model_extract.configured))
+  ];
+  if(!b.available && b.fix)
+    chips.push(capChip("fix: " + b.fix, false, "warn"));
+  host.innerHTML = chips.join("");
+  /* An unavailable browser DISABLES render-all rather than hiding it — the control staying
+     visible is what explains why the scan will not be doing that. */
+  var ra = document.getElementById("optRenderAll");
+  if(ra && !b.available){ ra.checked = false; ra.disabled = true; }
+  var caps = c.caps || {};
+  if(caps.concurrency && caps.concurrency.length === 2){
+    var cr = document.getElementById("concRange");
+    cr.min = String(caps.concurrency[0]);
+    cr.max = String(caps.concurrency[1]);
+    if(Number(cr.value) > caps.concurrency[1]) cr.value = String(caps.concurrency[1]);
+    document.getElementById("concVal").textContent = cr.value;
+  }
+  /* The robots override appears only where the server says the operator IS the caller. A
+     hosted deployment sends an empty operator_controls and this row never exists. */
+  var ops = c.operator_controls || [];
+  document.getElementById("robotsWrap").classList.toggle(
+    "hidden", ops.indexOf("ignore_robots") < 0);
+  renderInstTypes();
+}
+function renderInstTypes(){
+  var c = state.caps || {};
+  var all = c.institution_types || ["education"];
+  var host = document.getElementById("instTypes");
+  if(!host) return;
+  if(!state.instTypes) state.instTypes = (c.default_institution_types || ["education"]).slice();
+  host.innerHTML = all.map(function(t){
+    var on = state.instTypes.indexOf(t) >= 0;
+    return '<button type="button" class="tchip" data-itype="'+esc(t)+'" aria-pressed="'+
+      (on ? "true" : "false")+'">'+esc(t)+'</button>';
+  }).join("");
+}
+function toggleInstType(t){
+  var i = state.instTypes.indexOf(t);
+  if(i >= 0){
+    /* Never let the last one be unticked into "nothing". An empty selection is not a scope,
+       it is a scan of no institutions dressed up as a choice. */
+    if(state.instTypes.length === 1) return;
+    state.instTypes.splice(i, 1);
+  } else {
+    state.instTypes.push(t);
+  }
+  renderInstTypes();
+  buildReview();
+}
+function instTypesPayload(){
+  var all = (state.caps && state.caps.institution_types) || [];
+  if(all.length && state.instTypes.length === all.length) return "all";
+  return state.instTypes.slice();
+}
+function renderCompareOptions(){
+  var sel = document.getElementById("compareSel");
+  if(!sel) return;
+  var chosen = sel.value;
+  var rows = pastLoad();
+  sel.innerHTML = '<option value="">— no comparison —</option>' + rows.map(function(e){
+    return '<option value="'+esc(e.id)+'">'+esc(pastLabel(e))+'</option>';
+  }).join("");
+  sel.value = chosen;                    /* keep the choice across re-renders */
+}
+function loadCaps(){
+  fetchJson(api("/api/capabilities"), {method:"GET"}, 8000).then(function(r){
+    /* A server too old to know this endpoint is not an error: the page keeps its defaults
+       and says so. The wizard predates these controls and must still work against it. */
+    state.caps = (r.status === 200 && r.body) ? r.body : null;
+    renderCaps();
+    buildReview();
+  });
 }
 
 /* ── step 4: Scope & scan — sliders, live cost preview, review, idempotent start ── */
@@ -1170,8 +1295,22 @@ function buildReview(){
     ["named professors",
       String(parseProfs(document.getElementById("profs").value).length)],
     ["institutions to scan", document.getElementById("instRange").value],
-    ["professors to deep-dive", document.getElementById("profRange").value]
+    ["professors to deep-dive", document.getElementById("profRange").value],
+    /* The depth controls belong in the review for the same reason the scope does: they are
+       the difference between a ten-minute scan and an hour-long one, and between reading a
+       page and reading what a server happened to send. */
+    ["institution types", (state.instTypes || []).join(", ") || "—"],
+    ["page reader", document.getElementById("optRenderAll").checked
+      ? "browser on every page" : "browser only where a page looks walled"],
+    ["follow site links", document.getElementById("optCrawl").checked ? "yes" : "no"],
+    ["pages at once", document.getElementById("concRange").value],
+    ["compare with", document.getElementById("compareSel").selectedIndex > 0
+      ? document.getElementById("compareSel").options[
+          document.getElementById("compareSel").selectedIndex].text
+      : "—"]
   ];
+  if(document.getElementById("optIgnoreRobots").checked)
+    rows.push(["robots.txt", "IGNORED — this scan will not obey it"]);
   document.getElementById("review").innerHTML = rows.map(function(r){
     return '<div class="rrow"><span class="rk">'+esc(r[0])+'</span>'+
            '<span class="rv">'+esc(r[1])+'</span></div>';
@@ -1201,11 +1340,25 @@ function startScan(){
     targets: parseProfs(document.getElementById("profs").value),
     email: state.email
   };
+  var body = {email: state.email, plan: plan,
+    shortlist: Number(document.getElementById("profRange").value),
+    max_institutions: Number(document.getElementById("instRange").value),
+    /* CLI parity: --institution-types / --render-all / --crawl / --concurrency /
+       --compare-to / --ignore-robots. Sent as real booleans, not "true"/"false" strings —
+       the server accepts both but only one of them can be got wrong. */
+    institution_types: instTypesPayload(),
+    render_all: document.getElementById("optRenderAll").checked,
+    crawl: document.getElementById("optCrawl").checked,
+    concurrency: Number(document.getElementById("concRange").value)};
+  var cmp = document.getElementById("compareSel").value;
+  if(cmp) body.compare_to_job = cmp;
+  /* Only sent when the server said it would accept it — a hosted deployment 403s it, and
+     sending it unasked would fail every scan from a page that merely rendered the row. */
+  if(document.getElementById("optIgnoreRobots").checked)
+    body.ignore_robots = true;
   fetchJson(api("/api/scan"), {method:"POST",
     headers:{"Content-Type":"application/json"},
-    body: JSON.stringify({email: state.email, plan: plan,
-      shortlist: Number(document.getElementById("profRange").value),
-      max_institutions: Number(document.getElementById("instRange").value)})})
+    body: JSON.stringify(body)})
   .then(function(r){
     if((r.status===202 || r.status===200) && r.body && r.body.job_id){
       /* 200 existing:true = a double-click/refresh — jump straight to progress */
@@ -1504,6 +1657,8 @@ document.addEventListener("DOMContentLoaded", function(){
   /* wire every control FIRST — a failing API call can then never take down the page */
   renderChips();
   renderPast();
+  renderInstTypes();
+  renderCompareOptions();
   /* FE-5: restore the key into the field only — never into `state`, so nothing that
      serialises a plan or an error report can pick it up. */
   var savedKey = keyLoad();
@@ -1557,6 +1712,19 @@ document.addEventListener("DOMContentLoaded", function(){
   document.getElementById("back3").addEventListener("click", function(){ showStep(2); });
   document.getElementById("instRange").addEventListener("input", updatePreview);
   document.getElementById("profRange").addEventListener("input", updatePreview);
+  /* depth & engine — every one of these re-renders the review, so what the button will
+     actually do is never one control out of date */
+  document.getElementById("concRange").addEventListener("input", function(e){
+    document.getElementById("concVal").textContent = e.target.value;
+    buildReview();
+  });
+  ["optRenderAll", "optCrawl", "optIgnoreRobots", "compareSel"].forEach(function(id){
+    document.getElementById(id).addEventListener("change", buildReview);
+  });
+  document.getElementById("instTypes").addEventListener("click", function(e){
+    var b = e.target.closest("[data-itype]");
+    if(b) toggleInstType(b.getAttribute("data-itype"));
+  });
   document.getElementById("startScan").addEventListener("click", startScan);
   document.getElementById("back4").addEventListener("click", function(){ showStep(3); });
   document.getElementById("cancelBtn").addEventListener("click", cancelScan);
@@ -1604,6 +1772,9 @@ document.addEventListener("DOMContentLoaded", function(){
       if(state.slowShown) hideSlow();
     }
   });
+  /* LAST, deliberately: every control above is already wired and usable, so a server that
+     never answers this leaves a working page with its defaults rather than a dead one. */
+  loadCaps();
 });
 """
 
@@ -1805,6 +1976,55 @@ def build_webapp(*, api_base: str = "") -> str:
       <div class="hint"><span id="profVal">40</span> professors</div>
     </div>
     <p class="costline" id="costPreview">≈ 25 institutions + 40 professors ≈ 8–11 minutes</p>
+
+    <details class="adv" id="advBlock">
+      <summary>Depth &amp; engine — what this scan is allowed to do</summary>
+      <div class="advbody">
+        <div class="caps" id="capChips" role="status" aria-live="polite">
+          <span class="cap">checking what this server can do…</span>
+        </div>
+
+        <label class="mlabel"><input type="checkbox" id="optRenderAll">
+          <span><b>Read every page with a real browser.</b> Slower, and the only way to see a
+          page that builds itself in JavaScript — which is most modern faculty directories.
+          Off, a browser is still used for pages that look walled.</span></label>
+
+        <label class="mlabel"><input type="checkbox" id="optCrawl">
+          <span><b>Follow links on the professor's own site.</b> The recruiting sentence is
+          usually one click in — "Vacancies", "Join the lab", "Prospective students". Same
+          site only, never off it.</span></label>
+
+        <div class="sliderblock">
+          <label for="concRange">Pages open at once — across <i>different</i> sites. One site
+            is always read one page at a time, whatever this says.</label>
+          <input type="range" id="concRange" min="1" max="8" value="4" step="1">
+          <div class="hint"><span id="concVal">4</span> concurrent pages · higher is faster
+            until your machine says otherwise</div>
+        </div>
+
+        <label for="instTypes">Which organisations count as an institution</label>
+        <div class="chips" id="instTypes"></div>
+        <div class="hint">Universities are the default. A research institute is
+          <span style="font-family:var(--mono)">facility</span>, a teaching hospital is
+          <span style="font-family:var(--mono)">healthcare</span> — in some countries that is
+          where the supervision is.</div>
+
+        <label for="compareSel">Compare with an earlier search</label>
+        <select id="compareSel">
+          <option value="">— no comparison —</option>
+        </select>
+        <div class="hint">The result then says what MOVED — new and removed professors,
+          changed fields, newly published deadlines — instead of asking you to re-read
+          everything.</div>
+
+        <label class="mlabel hidden danger" id="robotsWrap">
+          <input type="checkbox" id="optIgnoreRobots">
+          <span><b>Ignore robots.txt.</b> Sites use it to say "do not automate me". Ignoring
+          it gets the requesting address rate-limited and then blocked — on a campus network,
+          yours. Provenance still records what robots actually said.</span></label>
+      </div>
+    </details>
+
     <div class="review" id="review" aria-label="review"></div>
     <div class="err" id="err-scan" role="alert"></div>
     <div class="btnrow">

@@ -292,7 +292,11 @@ def test_worker_runs_a_job_to_done_with_events_and_result_paths(tmp_path):
     assert [e["phase"] for e in job["progress"]][:2] == ["enumerated", "deep_dive_start"]
     assert all(e["ts"] for e in job["progress"])
     assert job["heartbeat_at"] == job["progress"][-1]["ts"]
-    assert job["run_params"] == {"shortlist": 40, "max_institutions": None}
+    # The depth controls are recorded for the same reason the scope is: a resume must repeat
+    # the scan that was asked for, not a shallower one that happens to share its plan.
+    assert job["run_params"] == {"shortlist": 40, "max_institutions": None,
+                                 "render_all": False, "crawl": False,
+                                 "concurrency": None, "obey_robots": True}
 
 
 def test_worker_cancel_mid_run_marks_cancelled_and_keeps_the_partials(tmp_path):

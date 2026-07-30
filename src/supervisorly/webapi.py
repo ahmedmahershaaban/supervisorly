@@ -35,8 +35,11 @@ from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
 
 from . import cli, jobs, preflight
-from .discover import expand, subjects
+from .discover import expand, subjects, websearch
+from .discover import ror as ror_mod
 from .discover.countries import to_country_code
+from .extract import llm_client
+from .fetch import render as render_mod
 from .fetch.transport import httpx_transport
 
 _CONTENT_JSON = "application/json; charset=utf-8"
@@ -49,6 +52,57 @@ CORS_HEADERS = {
 
 def _error(status: int, message: str) -> tuple[int, dict]:
     return status, {"error": message}
+
+
+# ── what THIS server can do (§ engine controls over HTTP) ────────────────────
+#
+# Some CLI flags are safe as a request value: they change the size and depth of the caller's
+# own search. Others change **who carries the consequence** — `--ignore-robots` spends the
+# reputation of the IP the scan runs from, which on a hosted deployment is not the caller's.
+# So the split is not cosmetic:
+#
+#   request value       shortlist, max_institutions, institution_types, render_all,
+#                       crawl, concurrency, compare_to_job
+#   operator only       ignore_robots
+#   server config       every key (D-068/P7), the optout path, all file paths
+#
+# `local=True` is set by `supervisorly serve`, which binds to 127.0.0.1 — there the operator
+# and the caller are the same person at the same machine. A hosted deploy never sets it, so
+# no request can turn robots off on our address.
+
+#: Engine controls a request may set on any deployment.
+REQUEST_CONTROLS = ("shortlist", "max_institutions", "institution_types",
+                    "render_all", "crawl", "concurrency", "compare_to_job")
+#: Controls only a local operator may set — refused with a 403 elsewhere.
+OPERATOR_CONTROLS = ("ignore_robots",)
+
+
+def handle_capabilities(*, environ=None, local: bool = False) -> tuple[int, dict]:
+    """What this server can actually do right now, so the page never offers a lie.
+
+    Reports whether a browser, a search provider and a model-extraction key are configured —
+    as **booleans and provider names only**. A key never appears here, in a log or in an
+    error: it lives in the operator's own environment and is read by the worker (P7/D-068).
+    A page that showed "search: on" by echoing a key back would have defeated the rule it was
+    written to display.
+    """
+    environ = os.environ if environ is None else environ
+    browser = render_mod.browser_status()
+    return 200, {
+        "local": bool(local),
+        "browser": browser,
+        "search": {"configured": websearch.configured(environ),
+                   "provider": websearch.provider_name(environ)},
+        "model_extract": {"configured": llm_client.configured(environ)},
+        "expand": {"configured": bool((environ.get(expand.ENV_KEY) or "").strip())},
+        "institution_types": list(ror_mod.KNOWN_TYPES),
+        "default_institution_types": list(ror_mod.DEFAULT_TYPES),
+        "request_controls": list(REQUEST_CONTROLS),
+        "operator_controls": list(OPERATOR_CONTROLS) if local else [],
+        "caps": {"shortlist": [SHORTLIST_MIN, SHORTLIST_MAX],
+                 "max_institutions": [MAX_INSTITUTIONS_MIN, MAX_INSTITUTIONS_MAX],
+                 "concurrency": [CONCURRENCY_MIN, CONCURRENCY_MAX]},
+    }
 
 
 def handle_subject_map(params: dict, *, transport=None, environ=None) -> tuple[int, dict]:
@@ -202,7 +256,7 @@ def handle_expand(params: dict, *, environ=None, transport=None) -> tuple[int, d
 from .caps import (                                          # noqa: E402  (grouped with §3.5)
     PLAN_MAX_BYTES, MAX_TOPICS, MAX_UNIVERSITIES, MAX_TARGETS,
     SHORTLIST_MIN, SHORTLIST_MAX, MAX_INSTITUTIONS_MIN, MAX_INSTITUTIONS_MAX,
-    FIELD_MAX_CHARS,
+    FIELD_MAX_CHARS, CONCURRENCY_MIN, CONCURRENCY_MAX,
 )
 
 #: Local dev default for job working dirs + the JSON store (output/ is git-ignored, D-005).
@@ -231,6 +285,51 @@ def _plan_cap_errors(plan: dict) -> list[str]:
     return errors
 
 
+def _bool_param(params: dict, key: str):
+    """An optional boolean engine control; returns ``(value, error)``.
+
+    Strict on purpose. A checkbox that arrives as the string ``"false"`` and is read as truthy
+    would turn "read every page with a browser" on for someone who left it off — a scan that
+    costs an hour and an IP's reputation. ``"true"``/``"false"`` are accepted because query
+    strings have no booleans; anything else is a 400.
+    """
+    raw = params.get(key)
+    if raw is None:
+        return False, None
+    if isinstance(raw, bool):
+        return raw, None
+    if isinstance(raw, str) and raw.strip().lower() in ("true", "false"):
+        return raw.strip().lower() == "true", None
+    return None, f"'{key}' must be true or false"
+
+
+def _institution_types_param(params: dict):
+    """``institution_types``: a list of ROR types, or ``"all"``; returns ``(value, error)``.
+
+    Mirrors ``cli._parse_institution_types`` — same vocabulary, same loud failure. A silently
+    ignored value here would run an education-only scan while the page shows three pools
+    ticked, and nothing in the result would contradict the page.
+    """
+    raw = params.get("institution_types")
+    if raw is None:
+        return None, None
+    if isinstance(raw, str):
+        raw = [raw]
+    if not isinstance(raw, list):
+        return None, "'institution_types' must be a list of ROR types, or 'all'"
+    wanted = [str(t).strip().lower() for t in raw if str(t).strip()]
+    if not wanted:
+        return None, ("'institution_types' was empty; pass one or more of: "
+                      + ", ".join(ror_mod.KNOWN_TYPES) + " (or 'all')")
+    if "all" in wanted:
+        return "all", None
+    unknown = [t for t in wanted if t not in ror_mod.KNOWN_TYPES]
+    if unknown:
+        return None, (f"unknown institution_types value(s): {', '.join(unknown)}. Valid: "
+                      + ", ".join(ror_mod.KNOWN_TYPES) + " (or 'all')")
+    return wanted, None
+
+
 def _int_param(params: dict, key: str, *, default, lo: int, hi: int):
     """An optional integer scope param within [lo, hi]; returns ``(value, error)``."""
     raw = params.get(key)
@@ -247,6 +346,27 @@ def _int_param(params: dict, key: str, *, default, lo: int, hi: int):
     return value, None
 
 
+def _export_of_job(store, job_id: str, work_root=None) -> dict | None:
+    """A finished job's stored export, for ``compare_to_job``; ``None`` when there isn't one.
+
+    Deliberately silent about *why*. A job id is an unguessable access token (D-069), so
+    "unknown job" and "job not finished" must not be distinguishable from outside — one of
+    them confirms an id exists. Both simply yield no comparison.
+    """
+    job = store.get(job_id) if store is not None else None
+    if job is None or job.get("status") != "done":
+        return None
+    path = (job.get("result") or {}).get("json")
+    if not path:
+        return None
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        # A hosted deploy stores an object path, not a local file — no comparison, no crash.
+        return None
+    return data if isinstance(data, dict) and "professors" in data else None
+
+
 def _job_paths(work_root, job_id: str) -> dict:
     """Per-job working paths: the SQLite DB + snapshots (kept for resume, §3.1) and the
     result files ``run_scan_job`` writes before the status flips."""
@@ -259,7 +379,7 @@ def _job_paths(work_root, job_id: str) -> dict:
 
 
 def handle_scan_start(params: dict, *, store, worker=None, transport=None,
-                      work_root=None, environ=None) -> tuple[int, dict]:
+                      work_root=None, environ=None, local: bool = False) -> tuple[int, dict]:
     """Start a scan job (§3.3 idempotent, §3.5 caps): ``{"email", "plan",
     "shortlist"?, "max_institutions"?}`` → 202 ``{"job_id"}``.
 
@@ -291,8 +411,58 @@ def handle_scan_start(params: dict, *, store, worker=None, transport=None,
                                lo=MAX_INSTITUTIONS_MIN, hi=MAX_INSTITUTIONS_MAX)
     if err:
         errors.append(err)
+    # ── the depth controls (CLI parity: --render-all / --crawl / --concurrency) ──
+    render_all, err = _bool_param(params, "render_all")
+    if err:
+        errors.append(err)
+    crawl, err = _bool_param(params, "crawl")
+    if err:
+        errors.append(err)
+    concurrency, err = _int_param(params, "concurrency", default=None,
+                                  lo=CONCURRENCY_MIN, hi=CONCURRENCY_MAX)
+    if err:
+        errors.append(err)
+    inst_types, err = _institution_types_param(params)
+    if err:
+        errors.append(err)
     if errors:
         return _error(400, "; ".join(errors))
+
+    # `--ignore-robots` is not a request value. It spends the reputation of the address the
+    # scan runs FROM, which on a hosted deployment belongs to us and to every other student
+    # using it — so it is settable only where the operator and the caller are the same person.
+    ignore_robots, err = _bool_param(params, "ignore_robots")
+    if err:
+        return _error(400, err)
+    if ignore_robots and not local:
+        return _error(403, "'ignore_robots' can only be set on a locally served scan "
+                           "(supervisorly serve), where the address being spent is your own")
+
+    # A browser that is asked for and absent must fail HERE. Left to the engine it degrades
+    # silently — every page falls back to plain HTML, the render counters stay at zero, and
+    # the student is told the scan finished. Naming the missing piece and the exact command
+    # is the difference between a five-second fix and an afternoon (D-002).
+    if render_all:
+        browser = render_mod.browser_status()
+        if not browser["available"]:
+            return _error(400, f"'render_all' needs a browser: {browser['reason']}. "
+                               f"Fix: {browser['fix']}")
+
+    # A comparison target names a PREVIOUS job of this caller's; the delta is computed from
+    # its stored export. A job id is an access token (D-069), so an unreadable one is simply
+    # not compared — never an error that confirms the id exists.
+    compare_to = params.get("compare_to_job")
+    previous_export = None
+    if compare_to:
+        previous_export = _export_of_job(store, str(compare_to), work_root)
+        if previous_export is None:
+            return _error(400, f"no finished result found for compare_to_job "
+                               f"{str(compare_to)[:16]!r}")
+
+    if inst_types is not None:
+        # Rides in the plan, exactly as the CLI puts it there — so the stored plan is a
+        # complete record of the scan's scope and the idempotency key covers it too.
+        plan = {**plan, "institution_types": inst_types}
 
     # The wizard sends a country NAME ("Egypt") because that is what a person types. ROR's
     # filter needs ISO 3166-1 alpha-2. `cli.cmd_scan` resolves this where it builds the plan
@@ -341,6 +511,8 @@ def handle_scan_start(params: dict, *, store, worker=None, transport=None,
     worker.submit(store, job_id, plan=plan, email=email, transport=transport,
                   openalex_key=preflight.openalex_key(environ),
                   shortlist=shortlist, max_institutions=max_inst,
+                  render_all=render_all, crawl=crawl, concurrency=concurrency,
+                  obey_robots=not ignore_robots, previous_export=previous_export,
                   **_job_paths(work_root, job_id))
     return 202, {"job_id": job_id}
 
@@ -425,6 +597,13 @@ def handle_scan_resume(job_id: str, *, store, worker=None, transport=None,
                   openalex_key=preflight.openalex_key(environ),
                   shortlist=run_params.get("shortlist", 40),
                   max_institutions=run_params.get("max_institutions"),
+                  # Depth controls come from the ORIGINAL attempt, never re-defaulted. A
+                  # resume that quietly dropped --render-all would finish faster and read as
+                  # the same scan, which is the worst of the three possible outcomes.
+                  render_all=bool(run_params.get("render_all")),
+                  crawl=bool(run_params.get("crawl")),
+                  concurrency=run_params.get("concurrency"),
+                  obey_robots=run_params.get("obey_robots", True),
                   resume=True, **_job_paths(work_root, job_id))
     return 202, {"job_id": job_id, "status": "queued"}
 
@@ -444,11 +623,18 @@ def handle_scan_result(job_id: str, *, store) -> tuple[int, dict]:
 
 
 def route_request(method: str, path: str, params: dict, *, store=None, worker=None,
-                  transport=None, work_root=None, environ=None) -> tuple[int, dict]:
+                  transport=None, work_root=None, environ=None,
+                  local: bool = False) -> tuple[int, dict]:
     """Method + path → handler, shared by the dev server and the tests so the routing
     itself is covered without a socket. ``/subject_map`` stays as an alias of
-    ``/api/map`` so nothing already deployed breaks."""
+    ``/api/map`` so nothing already deployed breaks.
+
+    ``local`` is set only by ``supervisorly serve`` (bound to 127.0.0.1). It unlocks the
+    operator controls — never a request value, never inferrable from a header a caller
+    controls."""
     path = path.rstrip("/") or "/"
+    if path == "/api/capabilities" and method == "GET":
+        return handle_capabilities(environ=environ, local=local)
     if path in ("/api/map", "/subject_map") and method in ("GET", "POST"):
         return handle_subject_map(params, transport=transport, environ=environ)
     if path == "/api/expand" and method in ("GET", "POST"):
@@ -462,7 +648,7 @@ def route_request(method: str, path: str, params: dict, *, store=None, worker=No
         if path == "/api/scan" and method == "POST":
             return handle_scan_start(params, store=store, worker=worker,
                                      transport=transport, work_root=work_root,
-                                     environ=environ)
+                                     environ=environ, local=local)
         m = re.fullmatch(r"/api/scan/([A-Za-z0-9_-]+)(?:/(cancel|resume))?", path)
         if m:
             job_id, action = m.group(1), m.group(2)
@@ -494,6 +680,17 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(payload)
 
+    def _send_html(self, html: str) -> None:
+        payload = html.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(payload)))
+        # No caching: `serve` regenerates the page each start, and a stale wizard that has
+        # lost a control the server now offers is worse than a re-download.
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(payload)
+
     def do_OPTIONS(self):                                # CORS preflight
         self._send(204, {})
 
@@ -503,10 +700,20 @@ class _Handler(BaseHTTPRequestHandler):
             method, urlparse(self.path).path, params,
             store=getattr(server, "job_store", None),
             worker=getattr(server, "worker", None),
-            work_root=getattr(server, "work_root", None))
+            work_root=getattr(server, "work_root", None),
+            local=getattr(server, "local", False))
         self._send(status, body)
 
     def do_GET(self):
+        path = urlparse(self.path).path.rstrip("/") or "/"
+        page = getattr(self.server, "page_html", None)
+        if page is not None and path in ("/", "/index.html"):
+            # The wizard is served from the SAME origin as the API it calls, so there is no
+            # CORS story, no `file://` restrictions and no api_base to configure. That is the
+            # whole reason `serve` exists as one command rather than "run this, then generate
+            # that, then open the file".
+            self._send_html(page)
+            return
         qs = {k: v[0] for k, v in parse_qs(urlparse(self.path).query).items()}
         self._route("GET", qs)
 
@@ -522,6 +729,23 @@ class _Handler(BaseHTTPRequestHandler):
         pass
 
 
+def build_server(*, port: int, work_root, local: bool = False, page_html: str | None = None):
+    """An HTTPServer wired to a job store, bound to loopback only.
+
+    ``127.0.0.1`` is not a default to be overridden: ``local=True`` unlocks the operator
+    controls, and it is only defensible because nothing off this machine can reach the socket.
+    A bind address parameter would let those two facts drift apart.
+    """
+    work_root = Path(work_root)
+    server = HTTPServer(("127.0.0.1", port), _Handler)
+    server.job_store = jobs.JsonJobStore(work_root / "_store")
+    server.worker = jobs.Worker()
+    server.work_root = work_root
+    server.local = bool(local)
+    server.page_html = page_html
+    return server
+
+
 def main(argv: list[str] | None = None) -> int:
     import argparse
     p = argparse.ArgumentParser(prog="python -m supervisorly.webapi",
@@ -531,11 +755,9 @@ def main(argv: list[str] | None = None) -> int:
                    help="root for job working dirs + the JSON job store "
                         f"(default: {DEFAULT_WORK_ROOT})")
     args = p.parse_args(argv)
-    work_root = Path(args.work_root)
-    server = HTTPServer(("127.0.0.1", args.port), _Handler)
-    server.job_store = jobs.JsonJobStore(work_root / "_store")
-    server.worker = jobs.Worker()
-    server.work_root = work_root
+    # API only, and NOT local-privileged: `supervisorly serve` is the command that serves the
+    # page and unlocks the operator controls. This one stays what it has always been.
+    server = build_server(port=args.port, work_root=args.work_root)
     print(f"server on http://127.0.0.1:{args.port} — /api/map?field=... | POST /api/scan")
     server.serve_forever()
     return 0

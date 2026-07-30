@@ -423,7 +423,10 @@ def test_understand_expands_then_maps_every_phrasing_in_ONE_request(run):
     on one click — the feature would 429 the first time a student used it, which is exactly
     the trigger B-001 wrote down. The server now reports `failed_queries`, so the honesty
     that justified the client-side merge survives the move."""
-    assert run["requests"][0] == {"method": "POST", "path": "/api/expand"}
+    # The page asks what the server can do on load, before the student touches anything —
+    # so the first PRODUCT request is the one after that, not the first request overall.
+    product = [r for r in run["requests"] if r["path"] != "/api/capabilities"]
+    assert product[0] == {"method": "POST", "path": "/api/expand"}
     maps = [r for r in run["requests"] if r["path"] == "/api/map"]
     assert len(maps) == 1 and maps[0]["method"] == "POST", maps
     assert run["topicValues"] == ["T1", "T2"]     # merged, deduped by topic_id
@@ -436,6 +439,9 @@ def test_the_full_request_sequence_is_exactly_what_the_flow_implies(run):
     # shown, so it is asserted separately (see the beacon test) and excluded here
     flow = [r for r in run["requests"] if r["path"] != "/api/clientlog"]
     assert [f"{r['method']} {r['path']}" for r in flow] == [
+        # ONE capabilities read, on load. It carries no plan, no email and no key — it asks
+        # what this server can do so the page never offers a control the engine will ignore.
+        "GET /api/capabilities",
         "POST /api/expand",
         "POST /api/map",
         "POST /api/scan",

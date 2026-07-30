@@ -455,6 +455,20 @@ def _plan_value_errors(data: dict) -> list[str]:
     check_str_list("resolved_topic_ids")
     check_str_list("universities")
     check_str_list("fields")
+    # A plan file may carry the institution pool too (`--plan` and the web wizard both put it
+    # there). Validated on the same terms as `university_mode`: a typo here silently narrows
+    # the scan to nothing and then fails OPEN to every type — the opposite of what was asked,
+    # arrived at quietly.
+    itypes = data.get("institution_types")
+    if itypes is not None and itypes != "all":
+        if not isinstance(itypes, list) or not all(isinstance(x, str) for x in itypes):
+            errors.append("'institution_types' must be a list of ROR types, or 'all'")
+        else:
+            unknown = [t for t in itypes if t.strip().lower() not in ror_mod.KNOWN_TYPES]
+            if unknown:
+                errors.append(f"'institution_types' has unknown value(s): "
+                              f"{', '.join(unknown)} — valid: "
+                              f"{', '.join(ror_mod.KNOWN_TYPES)} (or 'all')")
     # A student rarely has exactly one way to say what they work on: "ML", "AI safety" and
     # "NLP" are three doors into overlapping literatures, and making them pick one door first
     # is the tool deciding their scope for them. `fields` carries all of them; `field` remains
@@ -649,6 +663,59 @@ def _progress_printer(event: tuple) -> None:
     else:                                          # scoring / exported — phase-only events
         line = f"progress: {phase}"
     print(line, file=sys.stderr)
+
+
+def cmd_serve(args: argparse.Namespace) -> int:
+    """Serve the wizard and the API from one local origin — the dashboard AS the CLI.
+
+    Everything `scan` can be told, this page can ask for: scope, institution pools, the
+    browser reader, link-following, concurrency, and the comparison against an earlier run.
+    It is one command because the three-step version (start the API, generate the page with a
+    Python snippet, open the file) is why the product still felt like a CLI with a viewer
+    bolted on.
+
+    Loopback only, and that is load-bearing rather than a default: this server reports itself
+    as ``local``, which is what unlocks the operator controls the hosted deployment must never
+    expose (``--ignore-robots`` spends the reputation of whatever address the scan runs from).
+    Binding anywhere else would hand those to a stranger.
+    """
+    import webbrowser
+
+    from . import webapi
+    from .export.webapp import build_webapp
+    from .fetch import render as render_mod
+
+    # Same origin as the API it calls, so `api_base` is empty and there is no CORS story.
+    page = build_webapp(api_base="")
+    server = webapi.build_server(port=args.port, work_root=args.work_root,
+                                 local=True, page_html=page)
+    url = f"http://127.0.0.1:{args.port}/"
+    browser = render_mod.browser_status()
+    print(f"Supervisorly is at {url}")
+    print(f"  jobs + store   {args.work_root}")
+    # State the browser situation at STARTUP, not when a scan silently renders nothing. The
+    # page reports it too (GET /api/capabilities), but somebody watching this console should
+    # not have to open a tab to find out.
+    if browser["available"]:
+        print(f"  browser        chromium ready (playwright {browser['version'] or '?'})")
+    else:
+        print(f"  browser        NOT available - {browser['reason']}")
+        print(f"                 fix: {browser['fix']}")
+    from .discover import websearch as _ws
+    from .extract import llm_client as _llm
+    print(f"  page search    {_ws.provider_name() or 'off (no search key configured)'}")
+    print(f"  model reading  {'on' if _llm.configured() else 'off (no extraction key)'}")
+    print("  operator       robots override available on this local server")
+    print("Ctrl+C to stop.")
+    if not args.no_open:
+        webbrowser.open(url)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nstopped.")
+    finally:
+        server.server_close()
+    return 0
 
 
 #: sentinel: ``--institution-types`` was given but is not usable (message already printed)
@@ -1024,6 +1091,16 @@ def build_parser() -> argparse.ArgumentParser:
                      help="database path (default: output/supervisorly.sqlite - the store a "
                           "default `scan --out output/...` writes)")
     pmd.set_defaults(func=cmd_ingest_md)
+
+    pv = sub.add_parser("serve",
+                        help="open the scan wizard in your browser and run scans from it - "
+                             "the same engine as `scan`, with every depth control on the page")
+    pv.add_argument("--port", type=int, default=8765)
+    pv.add_argument("--work-root", dest="work_root", default="output/jobs",
+                    help="root for job working dirs + the job store (default: output/jobs)")
+    pv.add_argument("--no-open", dest="no_open", action="store_true",
+                    help="do not open a browser window; just print the URL")
+    pv.set_defaults(func=cmd_serve)
 
     pr = sub.add_parser("reexport", help="rebuild the dashboard from the persisted store "
                                          "(D-029) - e.g. after an ingest-page fill; "

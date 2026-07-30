@@ -51,6 +51,73 @@ SETTLE_MS = 1_500
 
 _PAGE_EXTRACT_JS = Path(__file__).resolve().parent.parent / "extract" / "page_extract.js"
 
+#: The two commands that fix the two ways a browser can be missing. Kept together so a UI, the
+#: CLI and an error message quote the same strings.
+FIX_PACKAGE = 'pip install -e ".[browser]"'
+FIX_BROWSER = "python -m playwright install chromium"
+
+_STATUS_CACHE: dict | None = None
+
+
+def browser_status(*, force: bool = False) -> dict:
+    """Whether a Chromium is actually usable — ``{available, reason, fix, version}``.
+
+    Distinct from :meth:`ChromiumRenderer.available`, which *launches* a browser and caches
+    "no" for the life of the object. This answers the question a person asks before starting a
+    scan, and it separates the two failures that look identical from the outside: the
+    **package** is missing (``pip install``) or the **browser binary** is missing
+    (``playwright install``). Getting those the wrong way round is a documented way to lose an
+    afternoon — the first attempt at this ran `python -m playwright install chromium` against
+    an interpreter with no playwright in it.
+
+    Never raises, never launches a page. ``reason``/``fix`` are None when available.
+    """
+    global _STATUS_CACHE
+    if _STATUS_CACHE is not None and not force:
+        return dict(_STATUS_CACHE)
+    status = _probe_browser()
+    _STATUS_CACHE = status
+    return dict(status)
+
+
+def _probe_browser() -> dict:
+    try:
+        from playwright.sync_api import sync_playwright   # noqa: PLC0415 — optional dep
+    except ImportError:
+        return {"available": False, "version": None,
+                "reason": "the playwright package is not installed in this environment",
+                "fix": FIX_PACKAGE}
+    try:
+        # The package exposes no ``__version__``; the distribution metadata is where the
+        # number actually lives, and a status line reading "playwright ?" is a status line
+        # nobody trusts.
+        from importlib.metadata import version as _dist_version   # noqa: PLC0415
+        version = _dist_version("playwright")
+    except Exception:                                     # pragma: no cover - defensive
+        version = None
+    try:
+        with sync_playwright() as p:
+            exe = p.chromium.executable_path
+    except Exception as exc:
+        # The driver itself would not start — a broken install, not a missing download.
+        return {"available": False, "version": version,
+                "reason": f"the playwright driver would not start ({type(exc).__name__})",
+                "fix": FIX_PACKAGE}
+    if not exe or not Path(exe).exists():
+        return {"available": False, "version": version,
+                "reason": "playwright is installed but the Chromium binary has not been "
+                          "downloaded",
+                "fix": FIX_BROWSER}
+    if not _PAGE_EXTRACT_JS.is_file():
+        # Reported separately and honestly: chromium is fine, our own asset is missing. The
+        # combined message used to blame the browser for this and send readers to the wrong
+        # component.
+        return {"available": False, "version": version,
+                "reason": f"the in-page extractor is missing from this install "
+                          f"({_PAGE_EXTRACT_JS.name})",
+                "fix": "reinstall the package: " + FIX_PACKAGE}
+    return {"available": True, "version": version, "reason": None, "fix": None}
+
 
 @dataclass(frozen=True)
 class RenderedPage:

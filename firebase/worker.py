@@ -139,6 +139,11 @@ def main(environ=None, *, store=None, transport=None, storage_client=None,
                       "universities": len(_plan.get("universities") or []),
                       "shortlist": run_params.get("shortlist", 40),
                       "max_institutions": run_params.get("max_institutions"),
+                      # A run that rendered every page and one that rendered none look
+                      # identical in a container log otherwise — and they cost very
+                      # differently.
+                      "render_all": bool(run_params.get("render_all")),
+                      "crawl": bool(run_params.get("crawl")),
                       # FLAG-1: read ONCE, here, from the worker's own environment — never
                       # from the job doc, so a request can neither enable a phase nor read
                       # which are on. Logged because a deploy whose PHASES did not take
@@ -162,6 +167,16 @@ def main(environ=None, *, store=None, transport=None, storage_client=None,
         openalex_key=preflight.openalex_key(environ),
         shortlist=run_params.get("shortlist", 40),
         max_institutions=run_params.get("max_institutions"),
+        # The depth controls the wizard offered. Request-derived, unlike the phase flags
+        # above — they scope the caller's own search rather than switching a phase on. The
+        # ONE exception is robots: this container runs on OUR address, so `obey_robots` is
+        # forced True here regardless of what the doc says. The endpoint already refuses the
+        # parameter off a local server; this is the second lock, on the machine that would
+        # actually carry the block.
+        render_all=bool(run_params.get("render_all")),
+        crawl=bool(run_params.get("crawl")),
+        concurrency=run_params.get("concurrency"),
+        obey_robots=True,
         resume=bool(job.get("progress")),   # a re-invoked job resumes its checkpoints
         phase_flags=_phase_flags,           # the same object the start line logged
         **paths)
