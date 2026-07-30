@@ -206,7 +206,7 @@ def test_select_institutions_fails_loud_on_an_unknown_mode():
     from supervisorly.discover import ladder
 
     class _RorStub:
-        def institutions_in_country(self, country):
+        def institutions_in_country(self, country, **kw):
             return []
 
     with pytest.raises(ValueError, match="unrecognized university_mode 'onyl'"):

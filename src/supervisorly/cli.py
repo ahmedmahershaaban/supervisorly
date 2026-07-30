@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 
 from . import PRODUCT_NAME, __version__
+from .discover import ror as ror_mod
 from .discover import sitecrawl
 from .fetch import pool as pool_mod
 from .model.db import open_db
@@ -692,7 +693,8 @@ def cmd_scan(args: argparse.Namespace) -> int:
     plan = normalize_plan_intents(
         {"intent_kind": intent, "intent_kinds": intent_kinds, "country": country_code,
          "field": field, "university_mode": university_mode, "universities": universities,
-         "resolved_topic_ids": topic_ids})
+         "resolved_topic_ids": topic_ids,
+         "all_institution_types": args.all_institution_types})
     transport = httpx_transport(user_agent=f"SupervisorlyBot/0.1 (mailto:{email})")
 
     targets_override = None
@@ -797,9 +799,16 @@ def build_parser() -> argparse.ArgumentParser:
                          "--targets always deep-dive.")
     ps.add_argument("--max-institutions", dest="max_institutions", type=int, default=None,
                     metavar="N",
-                    help="scan only the first N institutions of the ROR enumeration "
-                         "(relevance-ordered). A cap that cuts is disclosed as a warning "
-                         "(D-037); unset scans all.")
+                    help=f"how many institutions to scan (default "
+                         f"{ror_mod.DEFAULT_WANT}). This drives how many pages are FETCHED "
+                         f"from ROR, not just a slice afterwards, so raising it really does "
+                         f"widen the scan. A cap that cuts is disclosed (D-037).")
+    ps.add_argument("--all-institution-types", dest="all_institution_types",
+                    action="store_true",
+                    help="scan every organisation ROR lists for the country, not just the "
+                         "ones it types as 'education'. Off by default: hospitals, companies "
+                         "and government labs cannot supply a PhD supervisor and would spend "
+                         "the institution budget.")
     ps.add_argument("--render-all", dest="render_all", action="store_true",
                     help="read EVERY deep-dive page with Chromium instead of only the pages "
                          "that fetched as a login wall or JavaScript shell. Slower and needs "

@@ -25,6 +25,27 @@ from ..fetch.transport import Transport, TransportError
 ROR_API = "https://api.ror.org/v2/organizations"
 
 
+#: ROR v2 returns 20 organisations per page. Page count is derived from how many the caller
+#: wants, so raising the ask raises the fetch instead of silently truncating.
+PAGE_SIZE = 20
+
+#: Institutions enumerated when the caller does not say. Was effectively 100 (5 hardcoded
+#: pages), which a real Canadian scan hit and reported as truncated — ROR lists thousands of
+#: organisations per large country, so the first 100 rows are an arbitrary slice, not a
+#: shortlist. 200 is a starting point the caller can raise.
+DEFAULT_WANT = 200
+
+#: ROR's own organisation types. Only ``education`` is a university or college; the rest are
+#: hospitals, companies, government labs, archives. This is ROR's vocabulary, not ours — an
+#: enum published by the registry, never a list of institutions (D-038).
+EDUCATION_TYPES = ("education",)
+
+
+def is_education(inst: dict) -> bool:
+    """Whether ROR types this organisation as education (a university, college, school)."""
+    return any(str(t).strip().lower() in EDUCATION_TYPES for t in (inst.get("types") or []))
+
+
 def country_url(country_code: str, page: int = 1) -> str:
     """The ROR query URL for all organisations in a 2-letter country code."""
     return f"{ROR_API}?" + urlencode(
@@ -89,10 +110,23 @@ class RorClient:
         except ValueError:
             return None
 
-    def institutions_in_country(self, country_code: str, *, max_pages: int = 5) -> list[dict]:
-        """The institutions ROR lists for ``country_code``, **paginated** to ``max_pages`` (empty on
-        error). Records a truncation marker if the cap is hit while more results remained (D-037).
-        The caller filters to education types; nothing is silently dropped here."""
+    def institutions_in_country(self, country_code: str, *, max_pages: int | None = None,
+                                want: int | None = None) -> list[dict]:
+        """The institutions ROR lists for ``country_code``, **paginated** (empty on error).
+
+        ``want`` is how many institutions the caller intends to scan; the page count is derived
+        from it, because a caller asking for 300 and silently receiving 100 is the failure this
+        replaced. ``max_pages`` still overrides directly for tests.
+
+        Records a truncation marker if we stop while more results remained (D-037) — so
+        "we saw everything" and "we stopped early" stay different statements.
+
+        Nothing is filtered here: the caller decides whether it wants only education-typed
+        organisations, and ``types`` travels on every record so it can.
+        """
+        if max_pages is None:
+            target = DEFAULT_WANT if want is None else max(1, int(want))
+            max_pages = max(1, -(-target // PAGE_SIZE))       # ceil, so 300 -> 15 pages
         out: list[dict] = []
         page = 1
         while page <= max_pages:

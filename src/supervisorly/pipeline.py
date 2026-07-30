@@ -50,6 +50,7 @@ from .fetch.snapshot import SnapshotStore
 from .fetch.transport import Transport
 from .model import claims, extraction_cache as xcache, runs
 from .model.db import open_db, utcnow
+from .score import scorer
 
 # ExtractionCache key parts for the deterministic signal tier (cost §3b-i). The "prompt"
 # and "model" are notional here — the point is a stable key so a warm re-scan skips work.
@@ -1634,6 +1635,43 @@ _RUNG_COUNTERS = (
 )
 
 
+def _match_rating(t: dict, plan_topic_ids, claims_for_target) -> dict:
+    """A 0–100 match rating for one professor, with its components shown.
+
+    **``score/scorer.py`` was built, tested and called by nothing** — so every professor was
+    exported unranked, and "why is this person in my list" had no answer beyond the order they
+    happened to arrive in. This wires it.
+
+    Two rules keep it honest:
+
+    * **Every enumerated professor is rated, not only the deep-dived ones.** Rating uses
+      registry facts (topics, output) that discovery already fetched for everyone, so a
+      professor outside the shortlist still gets a place in the order. That is what makes the
+      shortlist a budget rather than a verdict.
+    * **The rating is not a claim about the person.** It is our arithmetic on our own inputs,
+      so it is labelled ``match`` and kept out of the quote-gated ``fields`` block entirely.
+      D-024 bars *evaluative judgements about people* — "this professor is a good supervisor"
+      — and this is not one: it says how well their published topics overlap the ones the
+      student ticked, and shows the components so the number can be argued with.
+    """
+    recruiting = 1.0 if any(c.get("field") == "recruiting_signal" and c.get("state") == "value"
+                            for c in claims_for_target) else 0.0
+    funding = 1.0 if any(c.get("field") == "industry_signal" and c.get("state") == "value"
+                         for c in claims_for_target) else 0.0
+    fit = scorer.score_professor(
+        {"topic_ids": list(t.get("topic_ids") or []),
+         "works_count": int(t.get("works_count") or 0),
+         "recruiting": recruiting, "funding": funding,
+         "evidence_count": sum(1 for c in claims_for_target if c.get("state") == "value")},
+        {"resolved_topic_ids": list(plan_topic_ids or [])})
+    return {
+        "percent": round(fit.score_total * 100),
+        "tier": fit.tier,
+        "components": {k: round(v * 100) for k, v in fit.components.items()},
+        "evidence_count": fit.evidence_count,
+    }
+
+
 def _build_result(conn, run_id, status, targets, *, stats, gaps,
                   plan_topic_ids=(), plan_intents=()) -> dict:
     """Assemble the export + dashboard from the persisted claims (no fetching here)."""
@@ -1646,6 +1684,14 @@ def _build_result(conn, run_id, status, targets, *, stats, gaps,
             p["resolution"] = t["resolution"]
         professors.append(p)
     claims_by_entity = {t["id"]: claims.claims_for(conn, "person", t["id"]) for t in targets}
+    # Rate EVERY professor and order by it. Previously the export preserved discovery order,
+    # so a student scrolling 493 rows had no signal about which to read first — and the scorer
+    # that could have told them shipped uncalled.
+    by_target = {t["id"]: t for t in targets}
+    for p in professors:
+        p["match"] = _match_rating(by_target[p["id"]], plan_topic_ids,
+                                   claims_by_entity.get(p["id"], []))
+    professors.sort(key=lambda p: (-p["match"]["percent"], p.get("name") or ""))
     # A `blocked` cell told the student "awaiting your browser" and then gave them nothing to
     # do about it — a dead end, which D-070 says a terminal state must never be. Attach the
     # generated D-043 prompt to exactly the professors who have open gaps, so the dashboard

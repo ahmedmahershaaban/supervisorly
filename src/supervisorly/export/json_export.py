@@ -165,6 +165,19 @@ def build_export(
             # an optional per-professor field, so an unconfirmed OpenAlex match is never
             # presented as confirmed identity in the durable artifacts (D-010).
             out_prof["identity_resolution"] = prof["resolution"]
+        if prof.get("match"):
+            # How well this person fits the plan, 0-100, with the components shown. A THIRD
+            # block, separate from both `fields` and `profile`, because it is a third kind of
+            # thing: `fields` is quote-gated evidence, `profile` is what a registry said, and
+            # this is OUR ARITHMETIC on our own inputs.
+            #
+            # It is not the judgement D-024 excludes. That bars evaluative claims about a
+            # person — "a good supervisor", "a risky lab" — published without right of reply.
+            # This says how far their published topics overlap the ones the student ticked,
+            # and ships the components so the number can be disagreed with rather than
+            # trusted. A reader who thinks topic overlap is the wrong measure can see that is
+            # what it measured.
+            out_prof["match"] = prof["match"]
         out_professors.append(out_prof)
 
     return {

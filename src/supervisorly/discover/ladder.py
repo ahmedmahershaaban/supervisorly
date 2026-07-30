@@ -15,6 +15,8 @@ from __future__ import annotations
 import re
 import unicodedata
 
+from . import ror as _ror
+
 
 def _norm(s: str | None) -> str:
     """Case/diacritic-insensitive fold: NFKD-decompose, drop combining marks, casefold — so an
@@ -107,7 +109,7 @@ def _matches(inst: dict, w: str) -> bool:
     return bool(rid_seg) and rid_seg == w
 
 
-def select_institutions(plan: dict, ror, *, warnings: list[str] | None = None) -> list[dict]:
+def select_institutions(plan: dict, ror, *, warnings=None, want: int | None = None) -> list[dict]:
     """Institutions for the plan's country, honouring ``university_mode`` (all/prioritise/only, D-045).
 
     ``all`` (default) = everything ROR finds; ``only`` = just the named universities; ``prioritise``
@@ -118,7 +120,32 @@ def select_institutions(plan: dict, ror, *, warnings: list[str] | None = None) -
     name must surface, not silently narrow the scan (the run still continues).
     """
     country = _country_of(plan)
-    insts = ror.institutions_in_country(country) if country else []
+    # The ask drives the FETCH, not just a post-hoc slice: a caller asking for 300 and
+    # silently receiving ROR's first 100 rows is the bug this replaced.
+    want = want if want is not None else plan.get("max_institutions")
+    insts = ror.institutions_in_country(country, want=want) if country else []
+    # ROR lists every kind of research organisation for a country — hospitals, companies,
+    # government labs, museums. Only `education` is a university or college, and a scan looking
+    # for a PhD supervisor has no business enumerating a hospital's authors. This filter did
+    # not exist: `ror.py` documented the caller as doing it and no caller did, so every scan so
+    # far spent its institution budget on organisations that could never supply a supervisor.
+    #
+    # Fail-OPEN, and say so. If a country's records carry no usable types, keeping nothing
+    # would report "this country has no universities", which is a far worse lie than scanning
+    # a few hospitals. The count is disclosed either way (D-037).
+    if not plan.get("all_institution_types"):
+        edu = [i for i in insts if _ror.is_education(i)]
+        if edu:
+            if warnings is not None and len(edu) < len(insts):
+                warnings.append(
+                    f"kept {len(edu)} education-typed institution(s) of {len(insts)} ROR "
+                    f"returned for {country}; the rest are hospitals, companies or labs "
+                    f"(pass all_institution_types to keep them)")
+            insts = edu
+        elif warnings is not None and insts:
+            warnings.append(
+                f"none of the {len(insts)} ROR institutions for {country} are typed "
+                f"'education' - scanning all types rather than reporting none")
     mode = plan.get("university_mode", "all")
     if mode not in ("all", "prioritise", "only"):
         # Fail loud (D-002): falling through to "all" would silently INVERT the scope a plan
@@ -260,7 +287,7 @@ def build_targets(plan: dict, ror, oa, *, max_institutions: int | None = None) -
     plan = dict(plan)
     plan["resolved_topic_ids"] = resolve_topic_ids(plan, oa)
     warnings: list[str] = []
-    institutions = select_institutions(plan, ror, warnings=warnings)
+    institutions = select_institutions(plan, ror, warnings=warnings, want=max_institutions)
     if max_institutions is not None and len(institutions) > max_institutions:
         warnings.append(f"institution scan capped at {max_institutions} of "
                         f"{len(institutions)} (raise max_institutions to widen)")
