@@ -120,7 +120,9 @@ def test_invalid_status_is_rejected():
         runs.add_task(conn, run_id, "person", "p1", stage="nonsense")
 
 
-def test_resume_via_incomplete_tasks():
+def test_a_task_carries_its_phase_and_its_failure():
+    """What survives the checkpoint API's removal (round AM): task state IS the resume
+    record. `runs.target_stage_done` reads it, and it is the only mechanism resume uses."""
     conn = open_db()
     run_id = runs.create_run(conn)
     t_done = runs.add_task(conn, run_id, "person", "p1", stage="deep_dive")
@@ -130,26 +132,16 @@ def test_resume_via_incomplete_tasks():
     runs.set_task_status(conn, t_done, "done")
     runs.set_task_status(conn, t_await, "awaiting_human", phase="human")
 
-    # a resumed run picks up exactly the not-finished work
-    incomplete = {t["task_id"] for t in runs.incomplete_tasks(conn, run_id)}
-    assert incomplete == {t_pending, t_await}
-    assert t_done not in incomplete
+    by_id = {t["task_id"]: t for t in runs.tasks_for_run(conn, run_id)}
+    assert by_id[t_done]["status"] == "done"
+    assert by_id[t_await]["status"] == "awaiting_human" and by_id[t_await]["phase"] == "human"
 
-    # the awaiting task carries its human phase and a bumped attempt count
+    # the pending task carries its failure and a bumped attempt count
     runs.set_task_status(conn, t_pending, "blocked", last_error="404", bump_attempt=True)
     blocked = next(t for t in runs.tasks_for_run(conn, run_id) if t["task_id"] == t_pending)
     assert blocked["status"] == "blocked"
     assert blocked["attempts"] == 1
     assert blocked["last_error"] == "404"
-
-
-def test_checkpoint_roundtrip():
-    conn = open_db()
-    run_id = runs.create_run(conn)
-    runs.save_checkpoint(conn, run_id, stage="enumerate", cursor="inst_idx=3")
-    runs.save_checkpoint(conn, run_id, stage="signal", cursor="page=2")
-    latest = runs.latest_checkpoint(conn, run_id)
-    assert latest["stage"] == "signal" and latest["cursor"] == "page=2"
 
 
 def test_counts_merge():

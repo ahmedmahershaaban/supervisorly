@@ -353,7 +353,7 @@ def cmd_map_field(args: argparse.Namespace) -> int:
 
     from . import preflight
 
-    email = args.email or os.environ.get(preflight.CONTACT_EMAIL_ENV)
+    email = args.email or preflight.contact_email(os.environ)
     try:
         preflight.require_credentials({preflight.CONTACT_EMAIL_ENV: email or ""})
     except preflight.MissingCredentials as exc:
@@ -823,7 +823,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
             print(err)
             return 2
 
-    email = (args.email or os.environ.get(preflight.CONTACT_EMAIL_ENV)
+    email = (args.email or preflight.contact_email(os.environ)
              or plan_file.get("email"))
     try:
         preflight.require_credentials({preflight.CONTACT_EMAIL_ENV: email or ""})
@@ -936,6 +936,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
         obey_robots=not args.ignore_robots,
         crawl=args.crawl,
         previous_export=previous_export,
+        use_archive=args.use_archive,
     )
     # sparse-coverage preflight + discovery warnings (D-060) — ASCII-safe by construction
     # (preflight/ladder messages are ASCII-only, like the rest of this console output).
@@ -1000,6 +1001,12 @@ def build_parser() -> argparse.ArgumentParser:
                          f"{ror_mod.DEFAULT_WANT}). This drives how many pages are FETCHED "
                          f"from ROR, not just a slice afterwards, so raising it really does "
                          f"widen the scan. A cap that cuts is disclosed (D-037).")
+    ps.add_argument("--archive", dest="use_archive", action="store_true",
+                    help="when a page publishes no deadline, read its ARCHIVED copies "
+                         "(Wayback) from past years and project roughly when the next cycle "
+                         "opens. Never presented as a deadline - it lands in the profile as "
+                         "a 'watch' projection with the years it came from, and it refuses "
+                         "outright below three archived cycles.")
     ps.add_argument("--compare-to", dest="compare_to", default=None, metavar="PATH",
                     help="a previous scan's .json export (the sibling of its dashboard). The "
                          "new export carries a 'delta' block - new and removed professors, "

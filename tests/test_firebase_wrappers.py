@@ -775,7 +775,8 @@ def test_scan_start_202_invokes_the_worker_with_the_job_id_env(google):
     # JOB_ID and reads everything else back from Firestore.
     assert job["run_params"] == {"shortlist": 7, "max_institutions": None,
                                  "render_all": False, "crawl": False,
-                                 "concurrency": None, "obey_robots": True}
+                                 "concurrency": None, "use_archive": False,
+                                 "obey_robots": True}
 
 
 def test_scan_start_builds_the_default_worker_job_name(google):

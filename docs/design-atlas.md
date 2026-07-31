@@ -762,7 +762,7 @@ Every map above is a picture of something that exists. This is the index from th
 |  | `src/supervisorly/fetch/fetcher.py` `FetchResult` | allowed / status / snapshot hash |
 | **deep-dive** | `src/supervisorly/pipeline.py` `_deep_dive_one` | one target: fetch, extract, claim |
 |  | `src/supervisorly/pipeline.py` `_process_targets` | the loop over targets |
-| **gap-queue** | `src/supervisorly/model/runs.py` `incomplete_tasks` | open gap tasks per run |
+| **gap-queue** | `src/supervisorly/model/runs.py` `tasks_for_run` | open gap tasks per run. The two call sites that need only the unfinished ones filter on INCOMPLETE_TASK_STATUSES themselves (pipeline, browser_fill); the convenience wrapper that did it for them was removed in round AM, having been called by neither. |
 |  | `src/supervisorly/pipeline.py` `_target_open_gap` | derives gaps from claims |
 | **signal tier** | `src/supervisorly/pipeline.py` `run_signal_extractors` | one cheap page each |
 |  | `src/supervisorly/pipeline.py` `extract_recruiting_signal` | regex, no LLM |

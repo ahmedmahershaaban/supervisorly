@@ -1303,6 +1303,8 @@ function buildReview(){
     ["page reader", document.getElementById("optRenderAll").checked
       ? "browser on every page" : "browser only where a page looks walled"],
     ["follow site links", document.getElementById("optCrawl").checked ? "yes" : "no"],
+    ["archived cycles", document.getElementById("optArchive").checked
+      ? "project a next cycle where no deadline is published" : "not consulted"],
     ["pages at once", document.getElementById("concRange").value],
     ["compare with", document.getElementById("compareSel").selectedIndex > 0
       ? document.getElementById("compareSel").options[
@@ -1349,6 +1351,7 @@ function startScan(){
     institution_types: instTypesPayload(),
     render_all: document.getElementById("optRenderAll").checked,
     crawl: document.getElementById("optCrawl").checked,
+    use_archive: document.getElementById("optArchive").checked,
     concurrency: Number(document.getElementById("concRange").value)};
   var cmp = document.getElementById("compareSel").value;
   if(cmp) body.compare_to_job = cmp;
@@ -1718,7 +1721,8 @@ document.addEventListener("DOMContentLoaded", function(){
     document.getElementById("concVal").textContent = e.target.value;
     buildReview();
   });
-  ["optRenderAll", "optCrawl", "optIgnoreRobots", "compareSel"].forEach(function(id){
+  ["optRenderAll", "optCrawl", "optArchive", "optIgnoreRobots", "compareSel"]
+      .forEach(function(id){
     document.getElementById(id).addEventListener("change", buildReview);
   });
   document.getElementById("instTypes").addEventListener("click", function(e){
@@ -1993,6 +1997,12 @@ def build_webapp(*, api_base: str = "") -> str:
           <span><b>Follow links on the professor's own site.</b> The recruiting sentence is
           usually one click in — "Vacancies", "Join the lab", "Prospective students". Same
           site only, never off it.</span></label>
+
+        <label class="mlabel"><input type="checkbox" id="optArchive">
+          <span><b>When a page publishes no deadline, look at its past years.</b> Reads the
+          archived copies of that same page and projects roughly when the next cycle opens.
+          Never shown as a deadline — it arrives labelled <i>watch</i>, with the years it came
+          from, and refuses outright below three archived cycles.</span></label>
 
         <div class="sliderblock">
           <label for="concRange">Pages open at once — across <i>different</i> sites. One site

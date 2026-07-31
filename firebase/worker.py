@@ -176,6 +176,7 @@ def main(environ=None, *, store=None, transport=None, storage_client=None,
         render_all=bool(run_params.get("render_all")),
         crawl=bool(run_params.get("crawl")),
         concurrency=run_params.get("concurrency"),
+        use_archive=bool(run_params.get("use_archive")),
         obey_robots=True,
         resume=bool(job.get("progress")),   # a re-invoked job resumes its checkpoints
         phase_flags=_phase_flags,           # the same object the start line logged

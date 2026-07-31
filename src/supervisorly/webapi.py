@@ -62,7 +62,7 @@ def _error(status: int, message: str) -> tuple[int, dict]:
 # So the split is not cosmetic:
 #
 #   request value       shortlist, max_institutions, institution_types, render_all,
-#                       crawl, concurrency, compare_to_job
+#                       crawl, concurrency, use_archive, compare_to_job
 #   operator only       ignore_robots
 #   server config       every key (D-068/P7), the optout path, all file paths
 #
@@ -72,7 +72,7 @@ def _error(status: int, message: str) -> tuple[int, dict]:
 
 #: Engine controls a request may set on any deployment.
 REQUEST_CONTROLS = ("shortlist", "max_institutions", "institution_types",
-                    "render_all", "crawl", "concurrency", "compare_to_job")
+                    "render_all", "crawl", "concurrency", "compare_to_job", "use_archive")
 #: Controls only a local operator may set — refused with a 403 elsewhere.
 OPERATOR_CONTROLS = ("ignore_robots",)
 
@@ -130,7 +130,7 @@ def handle_subject_map(params: dict, *, transport=None, environ=None) -> tuple[i
                            "(a free-text research field, e.g. ?field=NLP) or 'queries' "
                            "(a list of phrasings to map and merge)")
     environ = os.environ if environ is None else environ
-    email = str(params.get("email") or environ.get(preflight.CONTACT_EMAIL_ENV) or "").strip()
+    email = str(params.get("email") or preflight.contact_email(environ) or "").strip()
     if not preflight._EMAIL_RE.match(email):
         return _error(400, "a valid contact email is required (param 'email' or the "
                            f"{preflight.CONTACT_EMAIL_ENV} env var) — it joins the OpenAlex "
@@ -418,6 +418,9 @@ def handle_scan_start(params: dict, *, store, worker=None, transport=None,
     crawl, err = _bool_param(params, "crawl")
     if err:
         errors.append(err)
+    use_archive, err = _bool_param(params, "use_archive")
+    if err:
+        errors.append(err)
     concurrency, err = _int_param(params, "concurrency", default=None,
                                   lo=CONCURRENCY_MIN, hi=CONCURRENCY_MAX)
     if err:
@@ -512,6 +515,7 @@ def handle_scan_start(params: dict, *, store, worker=None, transport=None,
                   openalex_key=preflight.openalex_key(environ),
                   shortlist=shortlist, max_institutions=max_inst,
                   render_all=render_all, crawl=crawl, concurrency=concurrency,
+                  use_archive=use_archive,
                   obey_robots=not ignore_robots, previous_export=previous_export,
                   **_job_paths(work_root, job_id))
     return 202, {"job_id": job_id}
@@ -603,6 +607,7 @@ def handle_scan_resume(job_id: str, *, store, worker=None, transport=None,
                   render_all=bool(run_params.get("render_all")),
                   crawl=bool(run_params.get("crawl")),
                   concurrency=run_params.get("concurrency"),
+                  use_archive=bool(run_params.get("use_archive")),
                   obey_robots=run_params.get("obey_robots", True),
                   resume=True, **_job_paths(work_root, job_id))
     return 202, {"job_id": job_id, "status": "queued"}

@@ -77,7 +77,8 @@ def run_scan_job(plan: dict, hooks, *, transport, db_path, snap_root, out_html, 
                  rate_limit: float = 1.0, backoff_sleep=None,
                  phase_flags=None, render_all: bool = False, crawl: bool = False,
                  concurrency: int | None = None, obey_robots: bool = True,
-                 previous_export: dict | None = None) -> dict | None:
+                 previous_export: dict | None = None,
+                 use_archive: bool = False) -> dict | None:
     """Run one scan job against any storage backend (§3.1, §6 item 5).
 
     ``hooks`` is the storage seam — an object with ``on_event(dict)``,
@@ -122,7 +123,7 @@ def run_scan_job(plan: dict, hooks, *, transport, db_path, snap_root, out_html, 
             resume=resume, rate_limit=rate_limit, backoff_sleep=backoff_sleep,
             progress=_progress, should_stop=hooks.should_stop, phase_flags=phase_flags,
             render_all=render_all, crawl=crawl, obey_robots=obey_robots,
-            previous_export=previous_export, **extra)
+            use_archive=use_archive, previous_export=previous_export, **extra)
         out_html, out_json = Path(out_html), Path(out_json)
         out_html.parent.mkdir(parents=True, exist_ok=True)
         out_html.write_text(result["html"], encoding="utf-8")
@@ -303,7 +304,7 @@ class Worker:
                openalex_key=None, shortlist: int = 40, max_institutions=None,
                resume: bool = False, render_all: bool = False, crawl: bool = False,
                concurrency: int | None = None, obey_robots: bool = True,
-               previous_export: dict | None = None):
+               previous_export: dict | None = None, use_archive: bool = False):
         """Start the job in a daemon thread; returns the thread (None when the job was
         cancelled while still queued — §3.4: a queued-not-started job just flips to
         ``cancelled`` with nothing to export).
@@ -326,6 +327,7 @@ class Worker:
                                      "max_institutions": max_institutions,
                                      "render_all": render_all, "crawl": crawl,
                                      "concurrency": concurrency,
+                                     "use_archive": use_archive,
                                      "obey_robots": obey_robots})
         hooks = _StoreHooks(store, job_id, out_html=out_html, out_json=out_json)
 
@@ -338,7 +340,8 @@ class Worker:
                          max_institutions=max_institutions, resume=resume,
                          rate_limit=self._rate_limit, backoff_sleep=self._backoff_sleep,
                          render_all=render_all, crawl=crawl, concurrency=concurrency,
-                         obey_robots=obey_robots, previous_export=previous_export)
+                         use_archive=use_archive, obey_robots=obey_robots,
+                         previous_export=previous_export)
 
         t = threading.Thread(target=_run, name=f"scan-job-{job_id}", daemon=True)
         t.start()

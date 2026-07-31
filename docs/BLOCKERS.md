@@ -658,7 +658,28 @@ Until then the atlas keeps `people search` labelled **not built**, which is accu
 
 ## B-009 — `score/programs.py` has no input
 
-**Status: blocked upstream, not on a decision.**
+**Status: still blocked, and round AM sharpened WHY.**
+
+The first reading was "add a program extractor". That is not enough, and building it
+would have produced a worse artifact than the current absence. `group_by_program` groups
+on a program **id**, and a name scraped from a professor's own page is not one: "PhD in
+Computer Science", "Computer Science PhD" and "Doctoral Programme in CS" are three
+strings for one program, so grouping on them either fragments a real shared application
+into singletons or merges two genuinely separate ones. Either way the module's whole
+claim — *you apply and pay once* — becomes a guess about somebody's money.
+
+**The identity that would actually work is the application URL.** Two professors whose
+department pages link the same graduate-application page genuinely do share one
+application, a URL is stable enough to be an id, and it is citable — so the claim stays
+quote-gated instead of becoming an inference. `sitecrawl` already follows same-site
+links and its `links_worth_following` filter is where an "apply"/"admissions" link
+would be recognised.
+
+That is the prerequisite: an `application_url` claim, not a `program_name` one.
+
+---
+
+**Original status: blocked upstream, not on a decision.**
 
 `group_by_program` implements D-031's "one application per program, not per professor": two
 supervisors in the same department usually share one graduate program — one application, one
@@ -678,7 +699,20 @@ quote-gated claim. The roll-up then has an input and can be wired in one line.
 
 ## B-010 — a Wayback deadline projection is not a claim
 
-**Status: needs a decision recorded before `discover/archive.py` is wired.**
+**Status: RESOLVED and shipped (round AM, 2026-07-31).** The decision is the one this
+entry asked for, and it went the strict way: a projection **never enters `fields`**. Not
+"carefully", not "with a lower confidence" — at all. There is no snapshot of a future
+date for a quote to be verified against, so the D-010 gate has nothing to gate. It ships
+in `profile.deadline_projection` beside `match`, carrying `confidence: "watch"`, the
+years it was derived from, the dates observed, and — when it refuses — the reason it
+refused. Opt-in via `--archive` (and a checkbox on the wizard); off by default, because
+it costs the archive up to five extra page reads per professor.
+
+The original text is kept below for the reasoning.
+
+---
+
+**Original status: needs a decision recorded before `discover/archive.py` is wired.**
 
 `archive.cycles_for` / `project_next` read an admissions page's history from the Wayback CDX
 API and project roughly when the next cycle opens. This is the highest-value unwired module in
@@ -695,3 +729,26 @@ written reasoning, and robots/pacing apply to it like any host.
 
 The module already refuses to project from fewer than three cycles ("two points are not a
 pattern"), which is the part that would have been easy to get wrong.
+
+
+---
+
+## B-011 — a run that dies mid-enumeration re-enumerates from scratch
+
+**Status: OPEN, small, and now honestly reported rather than falsely covered.**
+
+`--resume` skips targets whose deep-dive task is `done` (`runs.target_stage_done`). It does
+**not** resume discovery: nothing persists the enumerated institution/target list, so a run
+killed while enumerating 300 institutions pays for all 300 again on resume.
+
+This was previously obscured rather than solved. `runs.save_checkpoint`, `latest_checkpoint`
+and `incomplete_tasks` sat in the model layer, tested, called by nothing — a stage-cursor API
+that read as coverage the product did not have. Round AM removed them: two mechanisms for one
+job is how they drift, and dead scaffolding that *looks* like stage-level resume is worse than
+an honest gap. The `checkpoint` table stays in the schema (dropping it is a migration, and an
+empty table is cheaper than one whose rows nobody reads).
+
+**What it needs:** persist the enumeration result — the institution list and the derived
+targets — keyed by run, and have `run_live` load it when `resume=True` instead of re-running
+the ladder. The cost of not doing it is bounded (discovery is minutes, the deep dive is the
+expensive half), which is why it is recorded rather than rushed.

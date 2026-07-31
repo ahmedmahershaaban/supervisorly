@@ -31,11 +31,11 @@ single-module helpers would be turned off within a week. Re-run it before a rele
 | `export/delta.compute_delta` | what changed since the previous scan | imported by nothing | **wired** → `scan --compare-to` |
 | `model/conflicts.open_conflicts` | the contested set | write half wired, read half not | **wired** → `profile.contested_fields` |
 | `ingest.ingest_md` | parses the human rung's Markdown reply | imported by nothing | **wired** → `supervisorly ingest-md` |
-| `discover/archive.cycles_for` | past admissions cycles → next-cycle projection | imported by nothing | **deferred**, see below |
-| `score/programs.group_by_program` | one application per program, not per professor | imported by nothing | **blocked**, see below |
-| `model/runs.save_checkpoint` (+`latest_checkpoint`, `incomplete_tasks`) | durable checkpoints | imported by nothing | **redundant**, see below |
-| `model/units.set_unit_coverage`, `get_unit` | per-department coverage note | imported by nothing | open, low value |
-| `preflight.contact_email`, `openalex_key` | env accessors | callers read the env directly | cosmetic duplication |
+| `discover/archive.cycles_for` | past admissions cycles → next-cycle projection | imported by nothing | **wired** (round AM) → `profile.deadline_projection`, `--archive` |
+| `score/programs.group_by_program` | one application per program, not per professor | imported by nothing | **blocked**, and the reason is sharper than it looked — B-009 |
+| `model/runs.save_checkpoint` (+`latest_checkpoint`, `incomplete_tasks`) | durable checkpoints | imported by nothing | **removed** (round AM); the real gap is B-011 |
+| `model/units.set_unit_coverage`, `get_unit` | store accessors on the unit table | imported by nothing | kept — a store API may have a getter; that is not the same defect |
+| `preflight.contact_email` | env accessor | callers read the env directly | **wired** (round AM): three call sites now go through it |
 | `phases.PhaseFlags.is_on/of/all_off/summary` | phase gating helpers | gating goes through `off()`/`off_reason()` | not a defect |
 
 ### The one that mattered most: the human rung had no return path
@@ -113,3 +113,40 @@ lives in the same module and reuses its imports; delete it when that module is n
 28 new tests in `tests/test_wiring_round.py`. Each pins a *connection*, so it fails if the
 call is removed even though the module underneath stays correct and tested — which is the
 failure mode this whole audit existed to catch.
+
+
+---
+
+## Round AM — closing it out
+
+Four of the six findings are now resolved; the two that are not are blocked on things this
+audit could not decide alone, and both entries say so precisely.
+
+**`discover/archive.py` is wired.** The question that held it up was answered the strict way:
+a projection **never enters `fields`**, not carefully and not at a lower confidence. There is
+no snapshot of a future date, so the D-010 quote gate has nothing to gate — the honest place is
+`profile`, beside `match`, which is exactly the precedent that block set. `--archive` (and a
+wizard checkbox) opt in; it runs only for professors whose page published no deadline, reads at
+most five archived captures, refuses below three cycles, and returns its refusal *reason*
+rather than silence, because "we looked and could not" and "we never looked" are different
+answers and only one of them is a reason to go and check the page yourself.
+
+**The checkpoint API is gone rather than adopted.** `save_checkpoint`/`latest_checkpoint`/
+`incomplete_tasks` were a stage-cursor design that resume never used — resume runs entirely on
+`target_stage_done`. Keeping both was the condition that produces drift, and the unused one
+read as coverage the product did not have: a reader could reasonably conclude a crashed run
+resumed its *discovery*, which it does not. Removed, with the real gap written down as B-011.
+
+**`score/programs.py` stays unwired, and the entry now says why properly.** The first reading
+was "add a program extractor". Building that would have made things worse: `group_by_program`
+groups on a program **id**, and a name scraped off a professor's own page is not one — three
+spellings of one programme either fragment a shared application into singletons or merge two
+separate ones, and the module's claim is *you apply and pay once*, which is a statement about
+somebody's money. The identity that would work is the **application URL**: shared, stable,
+citable, and reachable by the crawler that already follows same-site links.
+
+**Still on the list, not yet done:** when rung 7's top-ranked candidate yields nothing,
+candidates 2 and 3 are never tried. It is a real quality gap — the Tavily paste that proved
+ranking mattered also showed the 2nd and 3rd hits were often the useful ones — but it
+multiplies fetch cost per professor, so it wants its own round with the cost measured rather
+than a bolt-on here.

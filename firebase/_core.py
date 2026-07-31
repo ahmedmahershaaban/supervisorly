@@ -420,7 +420,7 @@ class CloudRunWorker:
                resume: bool = False, db_path=None, snap_root=None,
                out_html=None, out_json=None, render_all: bool = False,
                crawl: bool = False, concurrency=None, obey_robots: bool = True,
-               previous_export=None):
+               previous_export=None, use_archive: bool = False):
         # the local-only path kwargs are accepted for interface parity and ignored —
         # the worker computes its own ephemeral paths from JOB_ID (§3.6)
         job = store.get(job_id)
@@ -439,6 +439,7 @@ class CloudRunWorker:
                                      "max_institutions": max_institutions,
                                      "render_all": bool(render_all), "crawl": bool(crawl),
                                      "concurrency": concurrency,
+                                     "use_archive": bool(use_archive),
                                      "obey_robots": bool(obey_robots)})
         invoke_worker(job_id, environ=self._environ, client=self._client)
         return None

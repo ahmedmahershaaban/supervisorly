@@ -196,17 +196,6 @@ def set_task_status(
     conn.commit()
 
 
-def incomplete_tasks(conn: sqlite3.Connection, run_id: str) -> list[dict[str, Any]]:
-    """Tasks a resumed run must still do — the heart of resumability (D-029)."""
-    placeholders = ",".join("?" * len(INCOMPLETE_TASK_STATUSES))
-    rows = conn.execute(
-        f"SELECT * FROM task WHERE run_id=? AND status IN ({placeholders}) "
-        "ORDER BY updated_at",
-        (run_id, *sorted(INCOMPLETE_TASK_STATUSES)),
-    ).fetchall()
-    return [dict(r) for r in rows]
-
-
 def tasks_for_run(conn: sqlite3.Connection, run_id: str) -> list[dict[str, Any]]:
     rows = conn.execute(
         "SELECT * FROM task WHERE run_id=? ORDER BY updated_at", (run_id,)
@@ -230,24 +219,13 @@ def target_stage_done(
     return row is not None
 
 
-# ── Checkpoint ────────────────────────────────────────────────────────────────
-def save_checkpoint(
-    conn: sqlite3.Connection, run_id: str, stage: str, cursor: str | None = None
-) -> str:
-    cid = new_id("ckpt")
-    conn.execute(
-        "INSERT INTO checkpoint(checkpoint_id, run_id, stage, cursor, created_at) "
-        "VALUES(?,?,?,?,?)",
-        (cid, run_id, stage, cursor, utcnow()),
-    )
-    conn.commit()
-    return cid
-
-
-def latest_checkpoint(conn: sqlite3.Connection, run_id: str) -> dict[str, Any] | None:
-    row = conn.execute(
-        "SELECT * FROM checkpoint WHERE run_id=? ORDER BY created_at DESC, rowid DESC "
-        "LIMIT 1",
-        (run_id,),
-    ).fetchone()
-    return dict(row) if row else None
+# ── Resume is task state, and only task state ────────────────────────────────
+#
+# `save_checkpoint`/`latest_checkpoint`/`incomplete_tasks` lived here, tested, and were called
+# by nothing: resume runs entirely through `target_stage_done` above. Two mechanisms for one
+# job is how they drift, and the unused one read as coverage the product did not have — a
+# reader could reasonably conclude a crashed run resumed its DISCOVERY, which it does not.
+# Removed rather than adopted, and the real gap written down instead (B-011): a run that dies
+# mid-enumeration re-enumerates from scratch, because nothing persists the enumeration. The
+# `checkpoint` table is left in the schema; dropping it is a migration, and an empty table is
+# cheaper than one whose rows nobody reads.

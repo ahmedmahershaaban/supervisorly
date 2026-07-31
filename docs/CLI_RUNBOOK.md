@@ -153,6 +153,7 @@ supervisorly scan \
 | `--max-institutions N` | how many institutions to enumerate (default 200). This drives how many pages are **fetched** from ROR, not a slice afterwards |
 | `--institution-types education,facility` | which pools to scan — see below |
 | `--compare-to output/last.json` | diff against a previous scan; the new export carries a `delta` block |
+| `--archive` | where a page publishes no deadline, read its past years and project the next cycle |
 | `--progress` | one line per phase to stderr; otherwise silent |
 | `--universities "Imperial College,UCL"` | with `--university-mode only` to restrict, `prioritise` to rank first |
 
@@ -198,6 +199,18 @@ The JSON export carries three things the per-professor rows cannot:
   recruiting signals worth re-reading, newly published deadlines.
 * `profile.contested_fields` — fields where two sources disagreed and neither provenance nor
   recency could order them. Both claims are kept; the newer one leads.
+* `profile.deadline_projection` — present only with `--archive`, and only for professors whose
+  page published no deadline. **This is not a deadline.** It is a pattern read off the page's
+  own archived copies, labelled `watch`, carrying the years it came from — and when it will not
+  project (fewer than three archived cycles, or too few carrying a readable date) it says so
+  instead of going quiet. Always confirm on the official page.
+
+### About `--archive`
+
+It costs the Internet Archive up to five extra page reads per professor, so it is off by
+default and skipped entirely for anyone whose page already states a date. If the archive
+rate-limits or is unreachable, the run continues and records the reason — a charity's throttle
+never becomes our claim about an institution's admissions.
 
 ### Where the output lands
 

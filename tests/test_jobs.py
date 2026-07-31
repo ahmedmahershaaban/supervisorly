@@ -296,7 +296,8 @@ def test_worker_runs_a_job_to_done_with_events_and_result_paths(tmp_path):
     # the scan that was asked for, not a shallower one that happens to share its plan.
     assert job["run_params"] == {"shortlist": 40, "max_institutions": None,
                                  "render_all": False, "crawl": False,
-                                 "concurrency": None, "obey_robots": True}
+                                 "concurrency": None, "use_archive": False,
+                                 "obey_robots": True}
 
 
 def test_worker_cancel_mid_run_marks_cancelled_and_keeps_the_partials(tmp_path):

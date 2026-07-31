@@ -74,6 +74,7 @@ FLAG_HOME = {
     "--shortlist": "request", "--max-institutions": "request",
     "--institution-types": "request", "--all-institution-types": "request",
     "--render-all": "request", "--crawl": "request", "--concurrency": "request",
+    "--archive": "request",
     "--compare-to": "request", "--email": "request", "--resume": "request",
     "--ignore-robots": "operator",
     "--openalex-key": "server", "--optout": "server",
@@ -106,7 +107,7 @@ def test_every_request_flag_is_reachable_over_http():
         # the resume ENDPOINT, not a parameter
         "resume",
         # two spellings of one control
-        "all_institution_types", "compare_to",
+        "all_institution_types", "compare_to", "archive",
     }
     for flag, home in FLAG_HOME.items():
         if home != "request":

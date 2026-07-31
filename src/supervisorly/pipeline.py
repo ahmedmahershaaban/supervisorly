@@ -26,6 +26,7 @@ import time
 
 from . import phases as phases_mod
 from . import preflight
+from .discover import archive
 from .discover import ladder as _ladder
 from .discover import openalex as _openalex
 from .discover import orcid as orcid_mod
@@ -575,6 +576,50 @@ _EXTRACTORS = {
 }
 
 
+#: How many archived captures to read per professor. Enough to clear `MIN_CYCLES` with two to
+#: spare; the archive is a charity and this runs once per professor whose deadline is missing.
+ARCHIVE_MAX_CAPTURES = 5
+
+
+def _archive_projection(t, url, fetcher, snaps, transport, *, stats) -> dict | None:
+    """When this page has published a deadline in past years, roughly when the next one lands.
+
+    **Not a claim, and the export keeps that line sharp.** D-010 says every field carries a
+    quote verified against the page it came from — and no page exists yet for a future
+    deadline, so there is nothing a quote could be checked against. A projection therefore
+    never enters ``fields``; it rides in ``profile`` beside ``match``, on exactly the terms
+    that block already sets: our arithmetic, labelled as ours, with its inputs shown.
+
+    It refuses far more often than it projects (fewer than three archived cycles, or fewer
+    than three that carried a readable date, and the answer is "no"), and the refusal is
+    RETURNED rather than swallowed — "we looked and could not" and "we never looked" are
+    different states, and only one of them is a reason to go and check the page yourself.
+
+    Never load-bearing: the archive being down, slow or rate-limiting yields a reason and no
+    projection. A charity's throttle must never become our claim about an institution.
+    """
+    history = archive.cycles_for(transport, url)
+    stats["archive_lookups"] = stats.get("archive_lookups", 0) + 1
+    observed: list[str] = []
+    if history.enough:
+        # Newest first: a page's recent cycles describe the current process; a 2009 capture of
+        # a since-restructured programme describes something that no longer exists.
+        for year in reversed(history.years[-ARCHIVE_MAX_CAPTURES:]):
+            res = fetcher.fetch(archive.replay_url(url, year))
+            if not res.ok or not res.snapshot_hash:
+                continue
+            stats["archive_pages"] = stats.get("archive_pages", 0) + 1
+            found = extract_deadline(snaps.load(res.snapshot_hash))
+            if found:
+                observed.append(found[0])
+    proj = archive.project_next(history, observed)
+    if proj.projected:
+        stats["archive_projected"] = stats.get("archive_projected", 0) + 1
+    return {"projected": proj.projected, "confidence": proj.confidence,
+            "reason": proj.reason, "from_years": list(proj.from_years),
+            "observed_dates": observed, "source_url": url}
+
+
 def _crawl_more(conn, pid, entry_url, fetcher, snaps, *, filled, stats, complete=None,
                 max_pages=sitecrawl.MAX_PAGES):
     """Walk a few pages out from the professor's own page, looking for the fields still empty.
@@ -845,7 +890,7 @@ def _apply_shortlist(targets: list[dict], exempt_keys: set, topic_ids: list[str]
 def _process_targets(conn, run_id, targets, fetcher, snaps, *, stats, resume,
                      progress=None, should_stop=None, orcid_client=None,
                      renderer=None, render_all=False, complete=None, search=None,
-                     crawl=False) -> int:
+                     crawl=False, archive_transport=None) -> int:
     """Deep-dive each target (fetch → extract → claim) — the shared core of run_offline/run_live.
 
     Returns the gap count (targets with any still-``blocked`` field or an unchecked walled social
@@ -868,7 +913,8 @@ def _process_targets(conn, run_id, targets, fetcher, snaps, *, stats, resume,
         _deep_dive_one(conn, run_id, t, fetcher, snaps, stats=stats, resume=resume,
                        orcid_client=orcid_client, renderer=renderer, render_all=render_all,
                        url_override=urls.get(t["id"]), prerendered=prerendered,
-                       complete=complete, search=search, crawl=crawl)
+                       complete=complete, search=search, crawl=crawl,
+                       archive_transport=archive_transport)
         _emit_progress(progress, ("deep_dive_progress", i, total))
         if _stop_requested(should_stop):
             stats["cancelled"] = True
@@ -1000,7 +1046,7 @@ def _render_page(conn, snaps, url, res, renderer, stats, prerendered=None, robot
 def _deep_dive_one(conn, run_id, t, fetcher, snaps, *, stats, resume,
                    orcid_client=None, renderer=None, render_all=False,
                    url_override=None, prerendered=None, complete=None, search=None,
-                   crawl=False) -> None:
+                   crawl=False, archive_transport=None) -> None:
     """One target of ``_process_targets``: fetch → extract → claim (semantics per its docstring).
 
     ``render_all`` promotes Chromium from fallback to main reader — see the comment at the
@@ -1098,6 +1144,13 @@ def _deep_dive_one(conn, run_id, t, fetcher, snaps, *, stats, resume,
                         filled={f for f in _EXTRACTORS if claims.live_value(
                             conn, "person", pid, f)},
                         stats=stats, complete=complete)
+        if archive_transport is not None and not claims.live_value(
+                conn, "person", pid, "deadline"):
+            # ONLY where the deadline is still missing. A page that published its date needs
+            # no projection, and asking the archive about it anyway would spend a charity's
+            # bandwidth to re-derive something already known from the page itself.
+            t["deadline_projection"] = _archive_projection(
+                t, res.final_url or url, fetcher, snaps, archive_transport, stats=stats)
         if walled_social:
             # An advertised walled social page (X/Twitter/LinkedIn) is a known recruiting
             # source the tool must NOT scrape (D-039/044): mint an awaiting_human task for it
@@ -1187,7 +1240,7 @@ def run_live(plan: dict, transport: Transport, snap_root, *, email: str,
              render_all: bool = False,
              concurrency: int = pool_mod.DEFAULT_MAX_CONCURRENT,
              obey_robots: bool = True, crawl: bool = False,
-             previous_export: dict | None = None) -> dict:
+             previous_export: dict | None = None, use_archive: bool = False) -> dict:
     """A **live** scan: preflight → discovery ladder (ROR + OpenAlex) → the *same* fetch → extract
     → claim → score → export → dashboard pipeline as ``run_offline`` (D-028), now from **discovered**
     targets rather than hand-fed ones.
@@ -1424,7 +1477,8 @@ def run_live(plan: dict, transport: Transport, snap_root, *, email: str,
                                 resume=resume, progress=progress, should_stop=should_stop,
                                 orcid_client=orcid_mod.OrcidClient(transport),
                                 renderer=renderer, render_all=render_all, complete=complete,
-                                search=search, crawl=crawl)
+                                search=search, crawl=crawl,
+                                archive_transport=transport if use_archive else None)
     finally:
         # One browser for the whole run; leaking it would outlive the scan inside a container
         # that then gets reused for the next job.
@@ -1572,6 +1626,13 @@ def _profile_for(t: dict, plan_topic_ids) -> dict:
     """
     own_topics = list(t.get("topic_ids") or [])
     prof = {
+        # A projected next cycle from the page's own archived history — present ONLY when the
+        # archive rung ran and the page published no deadline of its own, and carrying its
+        # refusal reason when it could not project. Here rather than in `fields` because no
+        # snapshot of a future date exists for a quote to be verified against (D-010): this is
+        # arithmetic on observed history, labelled as such, never a published deadline.
+        **({"deadline_projection": t["deadline_projection"]}
+           if t.get("deadline_projection") else {}),
         "institutions": [n for n in (t.get("institution_names") or []) if n],
         "works_count": int(t.get("works_count") or 0),
         "cited_by_count": int(t.get("cited_by_count") or 0),
@@ -1636,6 +1697,7 @@ _RUNG_COUNTERS = (
     "rendered", "render_batched", "render_fallback", "render_still_walled", "render_batch_size",
     "crawl_pages", "crawl_claims", "crawl_truncated",
     "search_resolved", "orcid_resolved",
+    "archive_lookups", "archive_pages", "archive_projected",
     "model_proposals", "model_claims", "model_rejected", "model_unavailable",
     "extractions", "cache_hits", "resumed_skipped",
 )

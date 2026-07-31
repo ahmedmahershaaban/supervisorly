@@ -75,6 +75,21 @@ def cdx_url(url: str, limit: int = 200) -> str:
     return _CDX.format(u=quote(url, safe=""), limit=limit)
 
 
+#: How the archive addresses a capture of a URL in a given year. This is NOT an authored
+#: candidate URL: it is the archive's own addressing scheme applied to a URL discovery already
+#: produced, and the ``id_`` suffix asks for the page as captured rather than the replay
+#: chrome the archive normally wraps around it. Guessing a *different* page would be guessing
+#: whose deadline it is; asking for last year's copy of THIS page is not.
+_REPLAY = "https://web.archive.org/web/{ts}id_/{u}"
+
+
+def replay_url(url: str, year: str) -> str:
+    """The archived copy of ``url`` nearest mid-``year``. Mid-year, not January, because a
+    timestamp the archive has no capture near resolves to the closest one in either
+    direction — and from June that is a capture within the same admissions cycle."""
+    return _REPLAY.format(ts=f"{int(year):04d}0601000000", u=url)
+
+
 def cycles_for(transport: Transport, url: str, *, limit: int = 200) -> CycleHistory:
     """Which years this URL has an archived, readable capture in.
 

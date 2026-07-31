@@ -1863,3 +1863,53 @@ payloads (concurrency 99, a misspelled institution type, `render_all: "maybe"`) 
 had a different signature (the hosted path would have 500'd on every scan), and three pinned
 assertions — the recorded `run_params`, the page's exact fetch targets, and the exact request
 sequence — correctly noticed the new endpoint. 1266 passing.
+
+## Round AM — closing the audit's open items
+
+**`discover/archive.py` is wired, and the question that held it up got the strict answer.**
+A projection **never enters `fields`** — not carefully, not at a lower confidence, at all.
+D-010 gates a quote against the page it came from, and no page exists yet for a future
+deadline, so there is nothing to gate. It ships in `profile.deadline_projection` beside
+`match`, on the precedent that block already set: our arithmetic, labelled as ours, inputs
+shown. `--archive` (and a wizard checkbox) opt in.
+
+Bounded on purpose, because the Internet Archive is a charity: it runs **only** for professors
+whose page published no deadline of its own, reads at most five captures, takes the newest
+years first (a 2011 capture of a since-restructured programme describes something that no
+longer exists), and fetches nothing at all when there are fewer than three cycles — the answer
+is already "no", and confirming it would be rude. A 429 or an outage yields a *reason*, never
+a claim: their throttle must not become our statement about an institution's admissions. And
+the refusal is returned rather than swallowed, because "we looked and could not" and "we never
+looked" are different answers and only one is a reason to go and check the page yourself.
+
+**The checkpoint API is gone rather than adopted.** `save_checkpoint`, `latest_checkpoint` and
+`incomplete_tasks` were a stage-cursor design resume never used — resume runs entirely on
+`target_stage_done`. Two mechanisms for one job is the condition that produces drift, and the
+unused one read as coverage the product does not have: a reader could reasonably conclude a
+crashed run resumed its *discovery*. It does not, and that gap is now written down as B-011
+instead of being papered over by dead scaffolding. The `checkpoint` table stays in the schema
+— dropping it is a migration, and an empty table is cheaper than one whose rows nobody reads.
+
+**B-009 got a sharper answer, not a fix.** The first reading was "add a program extractor";
+building that would have made things worse. `group_by_program` groups on a program **id**, and
+a name scraped off a professor's own page is not one — "PhD in Computer Science", "Computer
+Science PhD" and "Doctoral Programme in CS" are three strings for one program, so grouping on
+them either fragments a shared application into singletons or merges two separate ones. The
+module's claim is *you apply and pay once*: a statement about somebody's money, which is not a
+place to guess. The identity that would work is the **application URL** — shared, stable,
+citable, and reachable by the crawler that already follows same-site links. That is now the
+recorded prerequisite.
+
+**Smaller ones.** `preflight.contact_email` was an accessor nobody called while three sites
+read the env var directly; those three now go through it. `units.get_unit` /
+`set_unit_coverage` are kept — a store API is allowed a getter, and that is not the same
+defect as an unwired feature.
+
+**Still open, deliberately:** when rung 7's top-ranked candidate yields nothing, candidates 2
+and 3 are never tried. Real gap — the Tavily paste that proved ranking mattered also showed
+the 2nd and 3rd hits were often the useful ones — but it multiplies fetch cost per professor,
+so it wants a round with the cost measured rather than a bolt-on here.
+
+**19 new tests** in `tests/test_archive_wired.py`, pinning the line rather than the arithmetic.
+Three existing tests correctly caught the new `run_params` key and the atlas's now-dangling
+pointer at a deleted symbol — the atlas guard doing exactly its job.
